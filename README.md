@@ -1,4 +1,4 @@
 # svmx
-svm &amp; vmx for windows
+svm & vmx
 
 Kernel-based Virtual Machine for Windows
