@@ -6,7 +6,7 @@ PMDL kvm_vcpu_cache_mdl;
 
 PVOID kvm_vcpu_cache;
 
-
+static bool largepages_enabled = TRUE;
 
 
 NTSTATUS kvm_init(void* opaque, unsigned int vcpu_size) {
@@ -57,4 +57,8 @@ NTSTATUS kvm_init(void* opaque, unsigned int vcpu_size) {
 	}
 
 	return status;
+}
+
+void kvm_disable_largepages() {
+	largepages_enabled = FALSE;
 }

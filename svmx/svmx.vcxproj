@@ -189,6 +189,7 @@
     <ClInclude Include="bitops.h" />
     <ClInclude Include="int-ll64.h" />
     <ClInclude Include="kvm.h" />
+    <ClInclude Include="kvm_emulate.h" />
     <ClInclude Include="kvm_host.h" />
     <ClInclude Include="kvm_para.h" />
     <ClInclude Include="kvm_types.h" />
@@ -196,7 +197,9 @@
     <ClInclude Include="mmu.h" />
     <ClInclude Include="msr-index.h" />
     <ClInclude Include="msr.h" />
+    <ClInclude Include="mtrr.h" />
     <ClInclude Include="pch.h" />
+    <ClInclude Include="processor-flags.h" />
     <ClInclude Include="processor.h" />
     <ClInclude Include="types.h" />
     <ClInclude Include="virtext.h" />

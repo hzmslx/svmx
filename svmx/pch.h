@@ -11,6 +11,7 @@
 #include "kvm_host.h"
 #include "virtext.h"
 #include "msr.h"
+#include "processor-flags.h"
 
 
 #define DRIVER_TAG	'xmvs'

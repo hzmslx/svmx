@@ -104,3 +104,7 @@ void kvm_arch_check_processor_compat(void* rtn) {
 void kvm_enable_efer_bits(u64 mask) {
 	efer_reserved_bits &= ~mask;
 }
+
+void kvm_arch_hardware_enable(void* garbage) {
+	kvm_x86_ops->hardware_enable(garbage);
+}
