@@ -2,6 +2,16 @@
 #include "mmu.h"
 #include "kvm_host.h"
 
+
+/*
+ * When setting this variable to true it enables Two-Dimensional-Paging
+ * where the hardware walks 2 page tables:
+ * 1. the guest-virtual to guest-physical
+ * 2. while doing 1. it walks guest-physical to host-physical
+ * If the hardware supports that we don't need to do shadow paging.
+ */
+bool tdp_enabled = FALSE;
+
 #define RMAP_EXT 4
 
 struct kvm_rmap_desc {
@@ -125,4 +135,12 @@ void kvm_mmu_set_mask_ptes(u64 user_mask, u64 accessed_mask,
 	shadow_dirty_mask = dirty_mask;
 	shadow_nx_mask = nx_mask;
 	shadow_x_mask = x_mask;
+}
+
+void kvm_enable_tdp() {
+	tdp_enabled = TRUE;
+}
+
+void kvm_disable_tdp() {
+	tdp_enabled = FALSE;
 }

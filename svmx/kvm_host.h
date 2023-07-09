@@ -276,6 +276,7 @@ struct kvm_x86_ops {
 extern struct kvm_x86_ops* kvm_x86_ops;
 
 NTSTATUS kvm_init(void* opaque, unsigned int vcpu_size);
+void kvm_exit();
 
 NTSTATUS kvm_arch_init(void* opaque);
 void kvm_arch_hardware_enable(void* garbage);
@@ -294,3 +295,6 @@ void kvm_mmu_set_mask_ptes(u64 user_mask, u64 accessed_mask,
 	u64 dirty_mask, u64 nx_mask, u64 x_mask);
 
 void kvm_disable_largepages();
+
+void kvm_enable_tdp();
+void kvm_disable_tdp();

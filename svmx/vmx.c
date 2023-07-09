@@ -3,6 +3,7 @@
 #include "kvm_emulate.h"
 #include "mtrr.h"
 
+static int bypass_guest_pf = 1;
 static int enable_vpid = 1;
 static int enable_ept = 1;
 static int enable_unrestricted_guest = 1;
@@ -118,6 +119,11 @@ static const struct trace_print_flags vmx_exit_reasons_str[] = {
 	{ EXIT_REASON_EPT_VIOLATION,           "ept_violation" },
 	{ (unsigned long)-1, NULL }
 };
+
+void ept_sync_global();
+
+void vmx_disable_intercept_for_msr(u32 msr, bool longmode_only);
+void __vmx_disable_intercept_for_msr(PRTL_BITMAP msr_bitmap, u32 msr);
 
 unsigned long vmcs_readl(unsigned long field);
 u16 vmcs_read16(unsigned long field);
@@ -314,8 +320,35 @@ NTSTATUS vmx_init() {
 
 		RtlSetBit(&vmx_vpid_bitmap, 0); /* 0 is reserved for host */
 
-		// status = kvm_init(&kvm_x86_ops,)
+		status = kvm_init(&kvm_x86_ops, sizeof(struct vcpu_vmx));
+		if (!NT_SUCCESS(status))
+			break;
 
+		vmx_disable_intercept_for_msr(MSR_FS_BASE, FALSE);
+		vmx_disable_intercept_for_msr(MSR_GS_BASE, FALSE);
+		vmx_disable_intercept_for_msr(MSR_KERNEL_GS_BASE, FALSE);
+		vmx_disable_intercept_for_msr(MSR_IA32_SYSENTER_CS, FALSE);
+		vmx_disable_intercept_for_msr(MSR_IA32_SYSENTER_ESP, FALSE);
+		vmx_disable_intercept_for_msr(MSR_IA32_SYSENTER_EIP, FALSE);
+
+		if (enable_ept) {
+			bypass_guest_pf = 0;
+			kvm_mmu_set_base_ptes(VMX_EPT_READABLE_MASK |
+				VMX_EPT_WRITABLE_MASK);
+			kvm_mmu_set_mask_ptes(0ull, 0ull, 0ull, 0ull,
+				VMX_EPT_EXECUTABLE_MASK);
+			kvm_enable_tdp();
+		}
+		else {
+			kvm_disable_tdp();
+		}
+
+		if (bypass_guest_pf)
+			kvm_mmu_set_nonpresent_ptes(~0xffeull, 0ull);
+
+		ept_sync_global();
+
+		return STATUS_SUCCESS;
 	} while (FALSE);
 
 
@@ -1015,4 +1048,51 @@ void vmx_get_segment(struct kvm_vcpu* vcpu,
 	UNREFERENCED_PARAMETER(vcpu);
 	UNREFERENCED_PARAMETER(var);
 	UNREFERENCED_PARAMETER(seg);
+}
+
+void vmx_disable_intercept_for_msr(u32 msr, bool longmode_only) {
+	if (!longmode_only)
+		__vmx_disable_intercept_for_msr(&vmx_msr_bitmap_legacy, msr);
+	__vmx_disable_intercept_for_msr(&vmx_msr_bitmap_longmode, msr);
+}
+
+void __vmx_disable_intercept_for_msr(PRTL_BITMAP msr_bitmap, u32 msr) {
+	UNREFERENCED_PARAMETER(msr_bitmap);
+	// int f = sizeof(unsigned long);
+
+	if (!cpu_has_vmx_msr_bitmap())
+		return;
+
+	/*
+	 * See Intel PRM Vol. 3, 20.6.9 (MSR-Bitmap Address). Early manuals
+	 * have the write-low and read-high bitmap offsets the wrong way round.
+	 * We can control MSRs 0x00000000-0x00001fff and 0xc0000000-0xc0001fff.
+	 */
+	if (msr <= 0x1fff) {
+		
+	}
+	else if ((msr >= 0xc0000000) && (msr <= 0xc0001fff)) {
+		msr &= 0x1fff;
+	}
+}
+
+int cpu_has_vmx_msr_bitmap() {
+	return vmcs_config.cpu_based_exec_ctrl & CPU_BASED_USE_MSR_BITMAPS;
+}
+
+int cpu_has_vmx_invept_global() {
+	return !!(vmx_capability.ept & VMX_EPT_EXTENT_GLOBAL_BIT);
+}
+
+void ept_sync_global() {
+	if (cpu_has_vmx_invept_global()) {
+
+	}
+
+
+}
+
+void vmx_exit() {
+
+	
 }

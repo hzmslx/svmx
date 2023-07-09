@@ -62,3 +62,7 @@ NTSTATUS kvm_init(void* opaque, unsigned int vcpu_size) {
 void kvm_disable_largepages() {
 	largepages_enabled = FALSE;
 }
+
+void kvm_exit() {
+
+}

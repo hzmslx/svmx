@@ -291,9 +291,12 @@ enum vmcs_field {
 #define EXIT_REASON_WBINVD				54
 
 NTSTATUS vmx_init();
+void vmx_exit();
 
 int cpu_has_kvm_support();
 int cpu_has_virtual_nmis();
+int cpu_has_vmx_msr_bitmap();
+int cpu_has_vmx_invept_global();
 
 int vmx_disabled_by_bios();
 
