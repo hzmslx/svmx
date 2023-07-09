@@ -1,0 +1,106 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hpp;hxx;hm;inl;inc;xsd</Extensions>
+    </Filter>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+    <Filter Include="Driver Files">
+      <UniqueIdentifier>{8E41214B-6785-4CFE-B992-037D68949A14}</UniqueIdentifier>
+      <Extensions>inf;inv;inx;mof;mc;</Extensions>
+    </Filter>
+    <Filter Include="vmx">
+      <UniqueIdentifier>{e84dc4ca-ee51-4a6c-85b2-c7146cd58405}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="kvm">
+      <UniqueIdentifier>{95a5523f-154a-4ba6-b957-46c5d1c2d18f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="asm">
+      <UniqueIdentifier>{5b730aec-344c-478e-b9ce-bdfbc88aabb7}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="svmx.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="vmx.c">
+      <Filter>vmx</Filter>
+    </ClCompile>
+    <ClCompile Include="kvm.c">
+      <Filter>kvm</Filter>
+    </ClCompile>
+    <ClCompile Include="x86.c">
+      <Filter>kvm</Filter>
+    </ClCompile>
+    <ClCompile Include="Logging.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="mmu.c">
+      <Filter>kvm</Filter>
+    </ClCompile>
+    <ClCompile Include="virtext.c">
+      <Filter>asm</Filter>
+    </ClCompile>
+    <ClCompile Include="processor.c">
+      <Filter>asm</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="pch.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vmx.h">
+      <Filter>vmx</Filter>
+    </ClInclude>
+    <ClInclude Include="kvm.h">
+      <Filter>kvm</Filter>
+    </ClInclude>
+    <ClInclude Include="x86.h">
+      <Filter>kvm</Filter>
+    </ClInclude>
+    <ClInclude Include="kvm_host.h">
+      <Filter>kvm</Filter>
+    </ClInclude>
+    <ClInclude Include="int-ll64.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="types.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kvm_types.h">
+      <Filter>kvm</Filter>
+    </ClInclude>
+    <ClInclude Include="Logging.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="mmu.h">
+      <Filter>kvm</Filter>
+    </ClInclude>
+    <ClInclude Include="msr-index.h">
+      <Filter>asm</Filter>
+    </ClInclude>
+    <ClInclude Include="kvm_para.h">
+      <Filter>asm</Filter>
+    </ClInclude>
+    <ClInclude Include="virtext.h">
+      <Filter>asm</Filter>
+    </ClInclude>
+    <ClInclude Include="processor.h">
+      <Filter>asm</Filter>
+    </ClInclude>
+    <ClInclude Include="bitops.h">
+      <Filter>asm</Filter>
+    </ClInclude>
+    <ClInclude Include="msr.h">
+      <Filter>asm</Filter>
+    </ClInclude>
+  </ItemGroup>
+</Project>
