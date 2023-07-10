@@ -2,6 +2,14 @@
 #include "kvm.h"
 #include "kvm_host.h"
 
+/*
+* Kernel-based Virtual Machine driver for Windows
+* 
+* This module enables machines with Intel VT-x extensions to run virtual
+* machines without emulation or binary translation.
+* 
+* 
+*/
 PMDL kvm_vcpu_cache_mdl;
 
 PVOID kvm_vcpu_cache;

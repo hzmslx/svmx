@@ -26,6 +26,9 @@
     <Filter Include="asm">
       <UniqueIdentifier>{5b730aec-344c-478e-b9ce-bdfbc88aabb7}</UniqueIdentifier>
     </Filter>
+    <Filter Include="svm">
+      <UniqueIdentifier>{e6a833c5-c6cf-48b6-8dcb-a8c9ff3eaed6}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="svmx.c">
@@ -51,6 +54,9 @@
     </ClCompile>
     <ClCompile Include="processor.c">
       <Filter>asm</Filter>
+    </ClCompile>
+    <ClCompile Include="svm.c">
+      <Filter>svm</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -110,6 +116,12 @@
     </ClInclude>
     <ClInclude Include="mtrr.h">
       <Filter>asm</Filter>
+    </ClInclude>
+    <ClInclude Include="svm.h">
+      <Filter>svm</Filter>
+    </ClInclude>
+    <ClInclude Include="ntexapi.h">
+      <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>
