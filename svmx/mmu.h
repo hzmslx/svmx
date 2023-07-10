@@ -15,3 +15,7 @@
 #define PT_GLOBAL_MASK (1ULL << 8)
 #define PT64_NX_SHIFT 63
 #define PT64_NX_MASK (1ULL << PT64_NX_SHIFT)
+
+#define PT64_ROOT_LEVEL 4
+#define PT32_ROOT_LEVEL 2
+#define PT32E_ROOT_LEVEL 3

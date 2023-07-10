@@ -108,3 +108,18 @@ void kvm_enable_efer_bits(u64 mask) {
 void kvm_arch_hardware_enable(void* garbage) {
 	kvm_x86_ops->hardware_enable(garbage);
 }
+
+void kvm_get_segment(struct kvm_vcpu* vcpu,
+	struct kvm_segment* var, int seg)
+{
+	kvm_x86_ops->get_segment(vcpu, var, seg);
+}
+
+void kvm_get_cs_db_l_bits(struct kvm_vcpu* vcpu, int* db, int* l)
+{
+	struct kvm_segment cs;
+
+	kvm_get_segment(vcpu, &cs, VCPU_SREG_CS);
+	*db = cs.db;
+	*l = cs.l;
+}

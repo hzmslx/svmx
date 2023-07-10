@@ -16,6 +16,29 @@
 #define KVM_PMODE_VM_CR4_ALWAYS_ON (X86_CR4_PAE | X86_CR4_VMXE)
 #define KVM_RMODE_VM_CR4_ALWAYS_ON (X86_CR4_VME | X86_CR4_PAE | X86_CR4_VMXE)
 
+/* KVM Hugepage definitions for x86 */
+#define KVM_NR_PAGE_SIZES	3
+#define KVM_HPAGE_SHIFT(x)	(PAGE_SHIFT + (((x) - 1) * 9))
+#define KVM_HPAGE_SIZE(x)	(1UL << KVM_HPAGE_SHIFT(x))
+#define KVM_HPAGE_MASK(x)	(~(KVM_HPAGE_SIZE(x) - 1))
+#define KVM_PAGES_PER_HPAGE(x)	(KVM_HPAGE_SIZE(x) / PAGE_SIZE)
+
+#define DE_VECTOR 0
+#define DB_VECTOR 1
+#define BP_VECTOR 3
+#define OF_VECTOR 4
+#define BR_VECTOR 5
+#define UD_VECTOR 6
+#define NM_VECTOR 7
+#define DF_VECTOR 8
+#define TS_VECTOR 10
+#define NP_VECTOR 11
+#define SS_VECTOR 12
+#define GP_VECTOR 13
+#define PF_VECTOR 14
+#define MF_VECTOR 16
+#define MC_VECTOR 18
+
 /*Deliver mode, defined for ioapic.c*/
 #define dest_Fixed IOSAPIC_FIXED
 #define dest_LowestPrio IOSAPIC_LOWEST_PRIORITY
@@ -59,6 +82,42 @@ enum kvm_reg {
 	VCPU_REGS_RIP,
 	NR_VCPU_REGS
 };
+
+enum kvm_reg_ex {
+	VCPU_EXREG_PDPTR = NR_VCPU_REGS,
+};
+
+enum {
+	VCPU_SREG_ES,
+	VCPU_SREG_CS,
+	VCPU_SREG_SS,
+	VCPU_SREG_DS,
+	VCPU_SREG_FS,
+	VCPU_SREG_GS,
+	VCPU_SREG_TR,
+	VCPU_SREG_LDTR,
+};
+
+#define KVM_NR_MEM_OBJS 40
+
+#define KVM_NR_DB_REGS	4
+
+#define DR6_BD		(1 << 13)
+#define DR6_BS		(1 << 14)
+#define DR6_FIXED_1	0xffff0ff0
+#define DR6_VOLATILE	0x0000e00f
+
+#define DR7_BP_EN_MASK	0x000000ff
+#define DR7_GE		(1 << 9)
+#define DR7_GD		(1 << 13)
+#define DR7_FIXED_1	0x00000400
+#define DR7_VOLATILE	0xffff23ff
+
+#define HF_GIF_MASK		(1 << 0)
+#define HF_HIF_MASK		(1 << 1)
+#define HF_VINTR_MASK		(1 << 2)
+#define HF_NMI_MASK		(1 << 3)
+#define HF_IRET_MASK		(1 << 4)
 
 struct kvm_vcpu_arch {
 	u64 host_tsc;
@@ -207,7 +266,7 @@ struct kvm_x86_ops {
 	void (*hardware_enable)(void* dummy);	/* __init */
 	void (*hardware_disable)(void* dummy);	
 	void (*check_processor_compatibility)(void* rtn);
-	NTSTATUS(*hardware_setup)();				/* __init */
+	NTSTATUS (*hardware_setup)();				/* __init */
 	void (*hardware_unsetup)();				/* __exit */
 	bool (*cpu_has_accelerated_tpr)();
 
@@ -280,6 +339,9 @@ void kvm_exit();
 
 NTSTATUS kvm_arch_init(void* opaque);
 void kvm_arch_hardware_enable(void* garbage);
+
+void kvm_get_cs_db_l_bits(struct kvm_vcpu* vcpu, int* db, int* l);
+
 
 
 NTSTATUS kvm_mmu_module_init();

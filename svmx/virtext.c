@@ -3,6 +3,7 @@
 #include "processor.h"
 #include "bitops.h"
 #include "ntexapi.h"
+#include "svm.h"
 
 
 int cpu_has_vmx() {
@@ -16,9 +17,24 @@ int cpu_has_svm(const char** msg) {
 		&info, sizeof(info), NULL);
 	if (!NT_SUCCESS(status)) {
 		if (msg)
-			*msg = "cannot get the processor information";
+			*msg = "can't get the processor information";
 		return 0;
 	}
 
-	return 0;
+
+	int eax = cpuid_eax(0x80000000);
+	if (eax < SVM_CPUID_FUNC) {
+		if (msg)
+			*msg = "can't execute cpuid_8000000a";
+		return 0;
+	}
+
+	int ecx = cpuid_ecx(0x80000001);
+	if (!(ecx & (1 << SVM_CPUID_FEATURE_SHIFT))) {
+		if (msg)
+			*msg = "svm not available";
+		return 0;
+	}
+
+	return 1;
 }

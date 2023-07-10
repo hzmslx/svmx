@@ -1,5 +1,10 @@
 #pragma once
 
+struct trace_print_flags {
+	unsigned long		mask;
+	const char* name;
+};
+
 struct kvm_segment {
 	__u64 base;
 	__u32 limit;
@@ -15,6 +20,11 @@ struct kvm_run {
 	__u8 request_interrupt_window;
 
 };
+
+#define KVM_GUESTDBG_USE_SW_BP		0x00010000
+#define KVM_GUESTDBG_USE_HW_BP		0x00020000
+#define KVM_GUESTDBG_INJECT_DB		0x00040000
+#define KVM_GUESTDBG_INJECT_BP		0x00080000
 
 /* for KVM_SET_GUEST_DEBUG */
 struct kvm_guest_debug_arch {

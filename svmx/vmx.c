@@ -92,10 +92,7 @@ static struct vmx_capability {
 	u32 vpid;
 } vmx_capability;
 
-struct trace_print_flags {
-	unsigned long		mask;
-	const char* name;
-};
+
 
 static const struct trace_print_flags vmx_exit_reasons_str[] = {
 	{ EXIT_REASON_EXCEPTION_NMI,           "exception" },
