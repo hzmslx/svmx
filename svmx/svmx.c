@@ -17,26 +17,21 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) 
 
 	DriverObject->DriverUnload = DriverUnload;
 
-	SYSTEM_PROCESSOR_INFORMATION info;
-	status = ZwQuerySystemInformation(SystemProcessorInformation,
-		&info, sizeof(info), NULL);
-	if (!NT_SUCCESS(status)) {
-		return status;
-	}
-
-	switch (info.ProcessorArchitecture)
-	{
-	case PROCESSOR_ARCHITECTURE_INTEL:
+	
+	int cpuInfo[4];
+	CpuIdEx(cpuInfo, 0, 0);
+	char brand[13] = { 0 };
+	memcpy_s(brand, 4, &cpuInfo[1], 4);
+	memcpy_s(brand + 4, 4,&cpuInfo[3], 4);
+	memcpy_s(brand + 8, 4, &cpuInfo[2], 4);
+	if (strcmp(brand,"GenuineIntel") == 0) {
 		status = vmx_init();
-		break;
-
-	case PROCESSOR_ARCHITECTURE_AMD64:
+	}
+	else if (strcmp(brand, "AuthenticAMD") == 0) {
 		status = svm_init();
-		break;
-
-	default:
+	}
+	else {
 		status = STATUS_NOT_SUPPORTED;
-		break;
 	}
 
 	return status;

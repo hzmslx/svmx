@@ -273,6 +273,8 @@ NTSTATUS setup_vmcs_config(struct vmcs_config* vmcs_conf);
 NTSTATUS vmx_init() {
 	NTSTATUS status = STATUS_SUCCESS;
 
+	
+
 	vmx_io_bitmap_a_page = (unsigned long*)ExAllocatePoolWithTag(PagedPool, PAGE_SIZE, DRIVER_TAG);
 	if (!vmx_io_bitmap_a_page)
 		return STATUS_NO_MEMORY;
@@ -1092,4 +1094,15 @@ void ept_sync_global() {
 void vmx_exit() {
 
 	
+}
+
+bool kvm_is_vmx_supported() {
+	if (!cpu_has_vmx()) {
+		Log(KERN_ERR, "VMX not supported by CPU %d\n", KeGetCurrentProcessorNumber());
+		return FALSE;
+	}
+
+	
+	
+	return TRUE;
 }
