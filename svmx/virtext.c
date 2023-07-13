@@ -11,6 +11,11 @@ int cpu_has_vmx() {
 	return test_bit(5, &ecx);/* CPUID.1:ECX.VMX[bit 5] -> VT */
 }
 
+bool cpu_is_enabled_vmx() {
+	u64 msr_ia32_feature_control = __readmsr(MSR_IA32_FEATURE_CONTROL);
+	return  _bittest((const LONG*)&msr_ia32_feature_control, 0);
+}
+
 int cpu_has_svm(const char** msg) {
 	SYSTEM_PROCESSOR_INFORMATION info;
 	NTSTATUS status = ZwQuerySystemInformation(SystemProcessorInformation,

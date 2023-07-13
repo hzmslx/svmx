@@ -15,3 +15,5 @@
 
 
 #define DRIVER_TAG	'xmvs'
+
+#pragma warning(disable:4201)

@@ -23,3 +23,5 @@ int cpu_has_vmx();
  * on the messages.
  */
 int cpu_has_svm(const char** msg);
+
+bool cpu_is_enabled_vmx();

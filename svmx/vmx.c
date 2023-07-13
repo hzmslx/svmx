@@ -2,6 +2,9 @@
 #include "vmx.h"
 #include "kvm_emulate.h"
 #include "mtrr.h"
+#include "pmu.h"
+
+
 
 static int bypass_guest_pf = 1;
 static int enable_vpid = 1;
@@ -27,54 +30,6 @@ struct vmcs {
 	char data[ANYSIZE_ARRAY];
 };
 
-struct vcpu_vmx {
-	struct kvm_vcpu       vcpu;
-	//struct list_head      local_vcpus_link;
-	unsigned long         host_rsp;
-	int                   launched;
-	u8                    fail;
-	u32                   idt_vectoring_info;
-	struct kvm_msr_entry* guest_msrs;
-	struct kvm_msr_entry* host_msrs;
-	int                   nmsrs;
-	int                   save_nmsrs;
-	int                   msr_offset_efer;
-#ifdef _WIN64
-	int                   msr_offset_kernel_gs_base;
-#endif
-	struct vmcs* vmcs;
-	struct {
-		int           loaded;
-		u16           fs_sel, gs_sel, ldt_sel;
-		int           gs_ldt_reload_needed;
-		int           fs_reload_needed;
-		int           guest_efer_loaded;
-	} host_state;
-	struct {
-		int vm86_active;
-		u8 save_iopl;
-		struct kvm_save_segment {
-			u16 selector;
-			unsigned long base;
-			u32 limit;
-			u32 ar;
-		} tr, es, ds, fs, gs;
-		struct {
-			bool pending;
-			u8 vector;
-			unsigned rip;
-		} irq;
-	} rmode;
-	int vpid;
-	bool emulation_required;
-	// enum emulation_result invalid_state_emulation_result;
-
-	/* Support for vnmi-less CPUs */
-	int soft_vnmi_blocked;
-	// ktime_t entry_time;
-	s64 vnmi_blocked_time;
-	u32 exit_reason;
-};
 
 static struct vmcs_config {
 	int size;
@@ -117,7 +72,12 @@ static const struct trace_print_flags vmx_exit_reasons_str[] = {
 	{ (unsigned long)-1, NULL }
 };
 
+/* Storage for pre module init parameter parsing */
+static enum vmx_l1d_flush_state vmentry_l1d_flush_param = VMENTER_L1D_FLUSH_AUTO;
+
 void ept_sync_global();
+
+extern bool allow_smaller_maxphyaddr;
 
 void vmx_disable_intercept_for_msr(u32 msr, bool longmode_only);
 void __vmx_disable_intercept_for_msr(PRTL_BITMAP msr_bitmap, u32 msr);
@@ -130,6 +90,8 @@ u32 vmcs_read32(unsigned long field);
 void vmcs_writel(unsigned long field, unsigned long val);
 void vmcs_write16(unsigned long field, u16 value);
 void vmcs_write32(unsigned long field, u32 value);
+
+
 
 struct kvm_vcpu* vmx_create_vcpu(struct kvm* kvm, unsigned int id);
 void vmx_free_vcpu(struct kvm_vcpu* vcpu);
@@ -204,168 +166,33 @@ NTSTATUS vmx_set_msr(struct kvm_vcpu* vcpu, u32 msr_index, u64 data);
 */
 void vmx_vcpu_load(struct kvm_vcpu* vcpu, int cpu);
 
+static NTSTATUS vmx_check_processor_compat(void) {
+	if (!kvm_is_vmx_supported())
+		return STATUS_UNSUCCESSFUL;
+
+	
+	return STATUS_SUCCESS;
+}
+
 static struct kvm_x86_ops vmx_x86_ops = {
-	.cpu_has_kvm_support = cpu_has_kvm_support,
-	.disabled_by_bios = vmx_disabled_by_bios,
-	.hardware_setup = hardware_setup,
-	.hardware_unsetup = hardware_unsetup,
 	.check_processor_compatibility = vmx_check_processor_compat,
-	.hardware_enable = hardware_enable,
-	.hardware_disable = hardware_disable,
-	.cpu_has_accelerated_tpr = report_flexpriority,
+};
 
-	.vcpu_create = vmx_create_vcpu,
-	.vcpu_free = vmx_free_vcpu,
-	.vcpu_reset = vmx_vcpu_reset,
+static struct kvm_x86_init_ops vmx_init_ops = {
+	.hardware_setup = hardware_setup,
+	.handle_intel_pt_intr = NULL,
 
-	.prepare_guest_switch = vmx_save_host_state,
-	.vcpu_load = vmx_vcpu_load,
-	.vcpu_put = vmx_vcpu_put,
-
-	.set_guest_debug = set_guest_debug,
-	.get_msr = vmx_get_msr,
-	.set_msr = vmx_set_msr,
-	.get_segment_base = vmx_get_segment_base,
-	.get_segment = vmx_get_segment,
-	.set_segment = vmx_set_segment,
-	.get_cpl = vmx_get_cpl,
-	.get_cs_db_l_bits = vmx_get_cs_db_l_bits,
-	.decache_cr4_guest_bits = vmx_decache_cr4_guest_bits,
-	.set_cr0 = vmx_set_cr0,
-	.set_cr3 = vmx_set_cr3,
-	.set_cr4 = vmx_set_cr4,
-	.set_efer = vmx_set_efer,
-	.get_idt = vmx_get_idt,
-	.set_idt = vmx_set_idt,
-	.get_gdt = vmx_get_gdt,
-	.set_gdt = vmx_set_gdt,
-	.cache_reg = vmx_cache_reg,
-	.get_rflags = vmx_get_rflags,
-	.set_rflags = vmx_set_rflags,
-
-	.tlb_flush = vmx_flush_tlb,
-
-	.run = vmx_vcpu_run,
-	.handle_exit = vmx_handle_exit,
-	.skip_emulated_instruction = skip_emulated_instruction,
-	.set_interrupt_shadow = vmx_set_interrupt_shadow,
-	.get_interrupt_shadow = vmx_get_interrupt_shadow,
-	.patch_hypercall = vmx_patch_hypercall,
-	.set_irq = vmx_inject_irq,
-	.set_nmi = vmx_inject_nmi,
-	.queue_exception = vmx_queue_exception,
-	.interrupt_allowed = vmx_interrupt_allowed,
-	.nmi_allowed = vmx_nmi_allowed,
-	.enable_nmi_window = enable_nmi_window,
-	.enable_irq_window = enable_irq_window,
-	.update_cr8_intercept = update_cr8_intercept,
-
-	.set_tss_addr = vmx_set_tss_addr,
-	.get_tdp_level = get_ept_level,
-	.get_mt_mask = vmx_get_mt_mask,
-
-	.exit_reasons_str = vmx_exit_reasons_str,
-	.gb_page_enable = vmx_gb_page_enable,
+	.runtime_ops = &vmx_x86_ops,
+	.pmu_ops = &intel_pmu_ops,
 };
 
 NTSTATUS setup_vmcs_config(struct vmcs_config* vmcs_conf);
 
-NTSTATUS vmx_init() {
-	NTSTATUS status = STATUS_SUCCESS;
+void vmx_setup_fb_clear_ctrl() {
 
-	
-
-	vmx_io_bitmap_a_page = (unsigned long*)ExAllocatePoolWithTag(PagedPool, PAGE_SIZE, DRIVER_TAG);
-	if (!vmx_io_bitmap_a_page)
-		return STATUS_NO_MEMORY;
-	RtlInitializeBitMap(&vmx_io_bitmap_a, vmx_io_bitmap_a_page, PAGE_SIZE * CHAR_BIT);
-
-	do
-	{
-		vmx_io_bitmap_b_page = (unsigned long*)ExAllocatePoolWithTag(PagedPool, PAGE_SIZE, DRIVER_TAG);
-		if (!vmx_io_bitmap_b_page) {
-			status = STATUS_NO_MEMORY;
-			break;
-		}
-		RtlInitializeBitMap(&vmx_io_bitmap_b, vmx_io_bitmap_b_page, PAGE_SIZE * CHAR_BIT);
-
-		vmx_msr_bitmap_legacy_page = (unsigned long*)ExAllocatePoolWithTag(PagedPool, PAGE_SIZE, DRIVER_TAG);
-		if (!vmx_msr_bitmap_legacy_page) {
-			status = STATUS_NO_MEMORY;
-			break;
-		}
-		RtlInitializeBitMap(&vmx_msr_bitmap_legacy, vmx_msr_bitmap_legacy_page, PAGE_SIZE * CHAR_BIT);
-
-		vmx_msr_bitmap_longmode_page = (unsigned long*)ExAllocatePoolWithTag(PagedPool, PAGE_SIZE, DRIVER_TAG);
-		if (!vmx_msr_bitmap_longmode_page) {
-			status = STATUS_NO_MEMORY;
-			break;
-		}
-		RtlInitializeBitMap(&vmx_msr_bitmap_longmode, vmx_msr_bitmap_longmode_page, PAGE_SIZE * CHAR_BIT);
-
-		/*
-		 * Allow direct access to the PC debug port (it is often used for I/O
-		 * delays, but the vmexits simply slow things down
-		 */
-		memset(vmx_io_bitmap_a_page, 0xff, PAGE_SIZE);
-		RtlClearBit(&vmx_io_bitmap_a, 0x80);
-
-		memset(vmx_io_bitmap_b_page, 0xff, PAGE_SIZE);
-
-		memset(vmx_msr_bitmap_legacy_page, 0xff, PAGE_SIZE);
-		memset(vmx_msr_bitmap_longmode_page, 0xff, PAGE_SIZE);
-
-		RtlInitializeBitMap(&vmx_vpid_bitmap, vmx_vpid_bitmap_buf, VMX_NR_VPIDS * CHAR_BIT);
-
-		RtlSetBit(&vmx_vpid_bitmap, 0); /* 0 is reserved for host */
-
-		status = kvm_init(&kvm_x86_ops, sizeof(struct vcpu_vmx));
-		if (!NT_SUCCESS(status))
-			break;
-
-		vmx_disable_intercept_for_msr(MSR_FS_BASE, FALSE);
-		vmx_disable_intercept_for_msr(MSR_GS_BASE, FALSE);
-		vmx_disable_intercept_for_msr(MSR_KERNEL_GS_BASE, FALSE);
-		vmx_disable_intercept_for_msr(MSR_IA32_SYSENTER_CS, FALSE);
-		vmx_disable_intercept_for_msr(MSR_IA32_SYSENTER_ESP, FALSE);
-		vmx_disable_intercept_for_msr(MSR_IA32_SYSENTER_EIP, FALSE);
-
-		if (enable_ept) {
-			bypass_guest_pf = 0;
-			kvm_mmu_set_base_ptes(VMX_EPT_READABLE_MASK |
-				VMX_EPT_WRITABLE_MASK);
-			kvm_mmu_set_mask_ptes(0ull, 0ull, 0ull, 0ull,
-				VMX_EPT_EXECUTABLE_MASK);
-			kvm_enable_tdp();
-		}
-		else {
-			kvm_disable_tdp();
-		}
-
-		if (bypass_guest_pf)
-			kvm_mmu_set_nonpresent_ptes(~0xffeull, 0ull);
-
-		ept_sync_global();
-
-		return STATUS_SUCCESS;
-	} while (FALSE);
-
-
-	if (!NT_SUCCESS(status)) {
-		if (vmx_io_bitmap_a_page) {
-			ExFreePool(vmx_io_bitmap_a_page);
-		}
-		if (vmx_msr_bitmap_legacy_page) {
-			ExFreePool(vmx_msr_bitmap_legacy_page);
-		}
-		if (vmx_msr_bitmap_longmode_page) {
-			ExFreePool(vmx_msr_bitmap_longmode_page);
-		}
-		return status;
-	}
-
-	return status;
 }
+
+
 
 int cpu_has_kvm_support() {
 	return cpu_has_vmx();
@@ -592,7 +419,7 @@ NTSTATUS hardware_setup() {
 		flexpriority_enabled = 0;
 
 	if (!cpu_has_vmx_tpr_shadow())
-		kvm_x86_ops->update_cr8_intercept = NULL;
+		kvm_x86_ops.update_cr8_intercept = NULL;
 
 	if (enable_ept && !cpu_has_vmx_ept_2m_page())
 		kvm_disable_largepages();
@@ -612,20 +439,6 @@ void free_kvm_area() {
 
 void hardware_unsetup() {
 	free_kvm_area();
-}
-
-void vmx_check_processor_compat(void* rtn) {
-	struct vmcs_config vmcs_conf;
-
-	*(int*)rtn = 0;
-	NTSTATUS status = setup_vmcs_config(&vmcs_conf);
-	if (!NT_SUCCESS(status)) {
-		*(int*)rtn = STATUS_UNSUCCESSFUL;
-	}
-	if (memcmp(&vmcs_conf, &vmcs_conf, sizeof(struct vmcs_config)) != 0) {
-		Log(KERN_ERR, "kvm CPU %d feature inconsistency!\n",KeGetCurrentProcessorNumber());
-		*(int*)rtn = STATUS_UNSUCCESSFUL;
-	}
 }
 
 void hardware_enable(void* junk) {
@@ -689,10 +502,9 @@ NTSTATUS vmx_vcpu_reset(struct kvm_vcpu* vcpu) {
 }
 
 void vmx_save_host_state(struct kvm_vcpu* vcpu) {
-	struct vcpu_vmx* vmx = to_vmx(vcpu);
+	UNREFERENCED_PARAMETER(vcpu);
 
-	if (vmx->host_state.loaded)
-		return;
+	
 
 }
 
@@ -702,9 +514,8 @@ void vmx_vcpu_load(struct kvm_vcpu* vcpu, int cpu) {
 }
 
 void __vmx_load_host_state(struct vcpu_vmx* vmx) {
+	UNREFERENCED_PARAMETER(vmx);
 
-	if (!vmx->host_state.loaded)
-		return;
 }
 
 void vmx_vcpu_put(struct kvm_vcpu* vcpu) {
@@ -959,8 +770,7 @@ int vmx_interrupt_allowed(struct kvm_vcpu* vcpu) {
 }
 
 int vmx_nmi_allowed(struct kvm_vcpu* vcpu) {
-	if (!cpu_has_virtual_nmis() && to_vmx(vcpu)->soft_vnmi_blocked)
-		return 0;
+	UNREFERENCED_PARAMETER(vcpu);
 
 	return !(vmcs_read32(GUEST_INTERRUPTIBILITY_INFO) &
 		(GUEST_INTR_STATE_STI | GUEST_INTR_STATE_MOV_SS |
@@ -1102,7 +912,99 @@ bool kvm_is_vmx_supported() {
 		return FALSE;
 	}
 
-	
+	if (!cpu_is_enabled_vmx()) {
+		Log(KERN_ERR, "VMX not enabled (by BIOS) in MSR_IA32_FEAT_CTL on CPU %d\n",
+			KeGetCurrentProcessorNumber());
+		return FALSE;
+	}
 	
 	return TRUE;
+}
+
+void hv_init_evmcs() {
+
+}
+
+NTSTATUS vmx_setup_l1d_flush(enum vmx_l1d_flush_state l1tf) {
+	UNREFERENCED_PARAMETER(l1tf);
+
+	return STATUS_SUCCESS;
+}
+
+static void vmx_cleanup_l1d_flush(void) {
+
+}
+
+static void __vmx_exit(void) {
+	allow_smaller_maxphyaddr = FALSE;
+
+	
+	vmx_cleanup_l1d_flush();
+}
+
+NTSTATUS vmx_init() {
+	NTSTATUS status = STATUS_SUCCESS;
+
+	if (!kvm_is_vmx_supported())
+		return STATUS_NOT_SUPPORTED;
+
+	/*
+	* Note, hv_init_evmcs() touches only VMX knobs, i.e. there's nothing
+	* to unwind if a later step fails.
+	*/
+	hv_init_evmcs();
+
+	status = kvm_x86_vendor_init(&vmx_init_ops);
+	if (!NT_SUCCESS(status))
+		return status;
+
+	bool err_l1d_flush = FALSE;
+	bool err_kvm_init = FALSE;
+	do
+	{
+		/*
+		* Must be called after common x86 init so enable_ept is properly set
+		* up. Hand the parameter mitigation value in which was stored in
+		* the pre module init parser. If no parameter was given, it will
+		* contain 'auto' which will be turned into the default 'cond'
+		* mitigation mode.
+		*/
+		status = vmx_setup_l1d_flush(vmentry_l1d_flush_param);
+		if (!NT_SUCCESS(status)) {
+			err_l1d_flush = TRUE;
+			break;
+		}
+		vmx_setup_fb_clear_ctrl();
+
+
+		/*
+		* Shadow paging doesn't have a (further) performance penalty
+		* from GUEST_MAXPHYADDR < HOST_MAXPHYADDR so enable it
+		* by default
+		*/
+		if (!enable_ept)
+			allow_smaller_maxphyaddr = TRUE;
+
+		/*
+		* 
+		* Common KVM initialization _must_ come last, after this,/dev/kvm is
+		* exposed to userspace!
+		*/
+		status = kvm_init(sizeof(struct vcpu_vmx), __alignof(struct vcpu_vmx));
+
+		if (!NT_SUCCESS(status)) {
+			err_kvm_init = TRUE;
+			break;
+		}
+
+	} while (FALSE);
+
+	if (err_kvm_init) {
+		__vmx_exit();
+	}
+	if (err_l1d_flush) {
+		kvm_x86_vendor_exit();
+	}
+
+	return status;
 }

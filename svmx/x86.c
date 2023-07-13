@@ -14,7 +14,8 @@ static u64 efer_reserved_bits = 0xfffffffffffffafeULL;
 static u64 efer_reserved_bits = 0xfffffffffffffffeULL;
 #endif
 
-struct kvm_x86_ops* kvm_x86_ops;
+struct kvm_x86_ops kvm_x86_ops;
+bool allow_smaller_maxphyaddr = 0;
 
 
 /*
@@ -34,51 +35,6 @@ static u32 msrs_to_save[] = {
 	MSR_IA32_PERF_STATUS, MSR_IA32_CR_PAT, MSR_VM_HSAVE_PA
 };
 
-NTSTATUS kvm_arch_init(void* opaque) {
-	NTSTATUS status = STATUS_SUCCESS;
-	UNREFERENCED_PARAMETER(opaque);
-	
-	struct kvm_x86_ops* ops = (struct kvm_x86_ops*)opaque;
-
-	do
-	{
-		if (kvm_x86_ops) {
-			Log(KERN_ERR, "kvm: aready loaded the other module\n");
-			status = STATUS_UNSUCCESSFUL;
-			break;
-		}
-
-		if (!ops->cpu_has_kvm_support()) {
-			Log(KERN_ERR, "kvm: no hardware support\n");
-			status = STATUS_NOT_SUPPORTED;
-			break;
-		}
-
-		if (ops->disabled_by_bios()) {
-			Log(KERN_ERR, "kvm: disabled by bios\n");
-			status = STATUS_NOT_SUPPORTED;
-			break;
-		}
-
-		status = kvm_mmu_module_init();
-		if (!NT_SUCCESS(status))
-			break;
-
-		kvm_init_msr_list();
-
-		kvm_x86_ops = ops;
-		kvm_mmu_set_nonpresent_ptes(0ull, 0ull);
-		kvm_mmu_set_base_ptes(PT_PRESENT_MASK);
-		kvm_mmu_set_mask_ptes(PT_USER_MASK, PT_ACCESSED_MASK,
-			PT_DIRTY_MASK, PT64_NX_MASK, 0);
-
-		return STATUS_SUCCESS;
-	} while (FALSE);
-	
-	
-
-	return status;
-}
 
 void kvm_init_msr_list() {
 	u64 dummy;
@@ -94,11 +50,11 @@ void kvm_init_msr_list() {
 }
 
 NTSTATUS kvm_arch_hardware_setup() {
-	return kvm_x86_ops->hardware_setup();
+	return STATUS_SUCCESS;
 }
 
-void kvm_arch_check_processor_compat(void* rtn) {
-	kvm_x86_ops->check_processor_compatibility(rtn);
+void kvm_arch_check_processor_compat() {
+	kvm_x86_ops.check_processor_compatibility();
 }
 
 void kvm_enable_efer_bits(u64 mask) {
@@ -106,13 +62,14 @@ void kvm_enable_efer_bits(u64 mask) {
 }
 
 void kvm_arch_hardware_enable(void* garbage) {
-	kvm_x86_ops->hardware_enable(garbage);
+	UNREFERENCED_PARAMETER(garbage);
+	kvm_x86_ops.hardware_enable();
 }
 
 void kvm_get_segment(struct kvm_vcpu* vcpu,
 	struct kvm_segment* var, int seg)
 {
-	kvm_x86_ops->get_segment(vcpu, var, seg);
+	kvm_x86_ops.get_segment(vcpu, var, seg);
 }
 
 void kvm_get_cs_db_l_bits(struct kvm_vcpu* vcpu, int* db, int* l)
@@ -122,4 +79,26 @@ void kvm_get_cs_db_l_bits(struct kvm_vcpu* vcpu, int* db, int* l)
 	kvm_get_segment(vcpu, &cs, VCPU_SREG_CS);
 	*db = cs.db;
 	*l = cs.l;
+}
+
+NTSTATUS __kvm_x86_vendor_init(struct kvm_x86_init_ops* ops) {
+	UNREFERENCED_PARAMETER(ops);
+
+	if (kvm_x86_ops.hardware_enable) {
+		LogError("Already loaeded vendor module\n");
+		return STATUS_UNSUCCESSFUL;
+	}
+
+	
+	return STATUS_SUCCESS;
+}
+
+NTSTATUS kvm_x86_vendor_init(struct kvm_x86_init_ops* ops) {
+	NTSTATUS status;
+	status = __kvm_x86_vendor_init(ops);
+	return status;
+}
+
+void kvm_x86_vendor_exit(void) {
+
 }

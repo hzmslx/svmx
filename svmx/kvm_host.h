@@ -2,6 +2,8 @@
 #include "kvm.h"
 #include "kvm_types.h"
 #include "processor-flags.h"
+#include "desc_ptr.h"
+#include "kvm_emulate.h"
 
 #define KVM_GUEST_CR0_MASK_UNRESTRICTED_GUEST				\
 	(X86_CR0_WP | X86_CR0_NE | X86_CR0_NW | X86_CR0_CD)
@@ -253,6 +255,12 @@ struct kvm {
 	int nmemslots;
 };
 
+struct msr_data {
+	bool host_initiated;
+	u32 index;
+	u64 data;
+};
+
 #include <pshpack1.h>
 struct descriptor_table {
 	u16 limit;
@@ -261,28 +269,31 @@ struct descriptor_table {
 #include <poppack.h>
 
 struct kvm_x86_ops {
-	int (*cpu_has_kvm_support)();			/* __init */
-	int (*disabled_by_bios)();				/* __init */
-	void (*hardware_enable)(void* dummy);	/* __init */
-	void (*hardware_disable)(void* dummy);	
-	void (*check_processor_compatibility)(void* rtn);
-	NTSTATUS (*hardware_setup)();				/* __init */
-	void (*hardware_unsetup)();				/* __exit */
-	bool (*cpu_has_accelerated_tpr)();
+	NTSTATUS (*check_processor_compatibility)(void);
+
+	int (*hardware_enable)(void);
+	void (*hardware_disable)(void);
+	void (*hardware_unsetup)(void);
+	bool (*has_emulated_msr)(struct kvm* kvm, u32 index);
+	void (*vcpu_after_set_cpuid)(struct kvm_vcpu* vcpu);
+
+	unsigned int vm_size;
+	int (*vm_init)(struct kvm* kvm);
+	void (*vm_destroy)(struct kvm* kvm);
 
 	/* Create, but do not attach this VCPU */
-	struct kvm_vcpu* (*vcpu_create)(struct kvm* kvm, unsigned id);
+	int (*vcpu_precreate)(struct kvm* kvm);
+	int (*vcpu_create)(struct kvm_vcpu* vcpu);
 	void (*vcpu_free)(struct kvm_vcpu* vcpu);
-	NTSTATUS (*vcpu_reset)(struct kvm_vcpu* vcpu);
+	void (*vcpu_reset)(struct kvm_vcpu* vcpu, bool init_event);
 
-	void (*prepare_guest_switch)(struct kvm_vcpu* vcpu);
+	void (*prepare_switch_to_guest)(struct kvm_vcpu* vcpu);
 	void (*vcpu_load)(struct kvm_vcpu* vcpu, int cpu);
 	void (*vcpu_put)(struct kvm_vcpu* vcpu);
 
-	int (*set_guest_debug)(struct kvm_vcpu* vcpu,
-		struct kvm_guest_debug* dbg);
-	NTSTATUS (*get_msr)(struct kvm_vcpu* vcpu, u32 msr_index, u64* pdata);
-	NTSTATUS (*set_msr)(struct kvm_vcpu* vcpu, u32 msr_index, u64 data);
+	void (*update_exception_bitmap)(struct kvm_vcpu* vcpu);
+	int (*get_msr)(struct kvm_vcpu* vcpu, struct msr_data* msr);
+	int (*set_msr)(struct kvm_vcpu* vcpu, struct msr_data* msr);
 	u64(*get_segment_base)(struct kvm_vcpu* vcpu, int seg);
 	void (*get_segment)(struct kvm_vcpu* vcpu,
 		struct kvm_segment* var, int seg);
@@ -290,54 +301,272 @@ struct kvm_x86_ops {
 	void (*set_segment)(struct kvm_vcpu* vcpu,
 		struct kvm_segment* var, int seg);
 	void (*get_cs_db_l_bits)(struct kvm_vcpu* vcpu, int* db, int* l);
-	void (*decache_cr4_guest_bits)(struct kvm_vcpu* vcpu);
 	void (*set_cr0)(struct kvm_vcpu* vcpu, unsigned long cr0);
-	void (*set_cr3)(struct kvm_vcpu* vcpu, unsigned long cr3);
+	void (*post_set_cr3)(struct kvm_vcpu* vcpu, unsigned long cr3);
+	bool (*is_valid_cr4)(struct kvm_vcpu* vcpu, unsigned long cr0);
 	void (*set_cr4)(struct kvm_vcpu* vcpu, unsigned long cr4);
-	void (*set_efer)(struct kvm_vcpu* vcpu, u64 efer);
-	void (*get_idt)(struct kvm_vcpu* vcpu, struct descriptor_table* dt);
-	void (*set_idt)(struct kvm_vcpu* vcpu, struct descriptor_table* dt);
-	void (*get_gdt)(struct kvm_vcpu* vcpu, struct descriptor_table* dt);
-	void (*set_gdt)(struct kvm_vcpu* vcpu, struct descriptor_table* dt);
-	unsigned long (*get_dr)(struct kvm_vcpu* vcpu, int dr);
-	void (*set_dr)(struct kvm_vcpu* vcpu, int dr, unsigned long value,
-		int* exception);
+	int (*set_efer)(struct kvm_vcpu* vcpu, u64 efer);
+	void (*get_idt)(struct kvm_vcpu* vcpu, struct desc_ptr* dt);
+	void (*set_idt)(struct kvm_vcpu* vcpu, struct desc_ptr* dt);
+	void (*get_gdt)(struct kvm_vcpu* vcpu, struct desc_ptr* dt);
+	void (*set_gdt)(struct kvm_vcpu* vcpu, struct desc_ptr* dt);
+	void (*sync_dirty_debug_regs)(struct kvm_vcpu* vcpu);
+	void (*set_dr7)(struct kvm_vcpu* vcpu, unsigned long value);
 	void (*cache_reg)(struct kvm_vcpu* vcpu, enum kvm_reg reg);
 	unsigned long (*get_rflags)(struct kvm_vcpu* vcpu);
 	void (*set_rflags)(struct kvm_vcpu* vcpu, unsigned long rflags);
+	bool (*get_if_flag)(struct kvm_vcpu* vcpu);
 
-	void (*tlb_flush)(struct kvm_vcpu* vcpu);
+	void (*flush_tlb_all)(struct kvm_vcpu* vcpu);
+	void (*flush_tlb_current)(struct kvm_vcpu* vcpu);
+	int  (*flush_remote_tlbs)(struct kvm* kvm);
+	int  (*flush_remote_tlbs_range)(struct kvm* kvm, gfn_t gfn,
+		gfn_t nr_pages);
 
-	void (*run)(struct kvm_vcpu* vcpu, struct kvm_run* run);
-	int (*handle_exit)(struct kvm_run* run, struct kvm_vcpu* vcpu);
-	void (*skip_emulated_instruction)(struct kvm_vcpu* vcpu);
+	/*
+	 * Flush any TLB entries associated with the given GVA.
+	 * Does not need to flush GPA->HPA mappings.
+	 * Can potentially get non-canonical addresses through INVLPGs, which
+	 * the implementation may choose to ignore if appropriate.
+	 */
+	void (*flush_tlb_gva)(struct kvm_vcpu* vcpu, gva_t addr);
+
+	/*
+	 * Flush any TLB entries created by the guest.  Like tlb_flush_gva(),
+	 * does not need to flush GPA->HPA mappings.
+	 */
+	void (*flush_tlb_guest)(struct kvm_vcpu* vcpu);
+
+	int (*vcpu_pre_run)(struct kvm_vcpu* vcpu);
+	enum exit_fastpath_completion(*vcpu_run)(struct kvm_vcpu* vcpu);
+	int (*handle_exit)(struct kvm_vcpu* vcpu,
+		enum exit_fastpath_completion exit_fastpath);
+	int (*skip_emulated_instruction)(struct kvm_vcpu* vcpu);
+	void (*update_emulated_instruction)(struct kvm_vcpu* vcpu);
 	void (*set_interrupt_shadow)(struct kvm_vcpu* vcpu, int mask);
-	u32(*get_interrupt_shadow)(struct kvm_vcpu* vcpu, int mask);
+	u32(*get_interrupt_shadow)(struct kvm_vcpu* vcpu);
 	void (*patch_hypercall)(struct kvm_vcpu* vcpu,
 		unsigned char* hypercall_addr);
-	void (*set_irq)(struct kvm_vcpu* vcpu);
-	void (*set_nmi)(struct kvm_vcpu* vcpu);
-	void (*queue_exception)(struct kvm_vcpu* vcpu, unsigned nr,
-		bool has_error_code, u32 error_code);
-	int (*interrupt_allowed)(struct kvm_vcpu* vcpu);
-	int (*nmi_allowed)(struct kvm_vcpu* vcpu);
+	void (*inject_irq)(struct kvm_vcpu* vcpu, bool reinjected);
+	void (*inject_nmi)(struct kvm_vcpu* vcpu);
+	void (*inject_exception)(struct kvm_vcpu* vcpu);
+	void (*cancel_injection)(struct kvm_vcpu* vcpu);
+	int (*interrupt_allowed)(struct kvm_vcpu* vcpu, bool for_injection);
+	int (*nmi_allowed)(struct kvm_vcpu* vcpu, bool for_injection);
+	bool (*get_nmi_mask)(struct kvm_vcpu* vcpu);
+	void (*set_nmi_mask)(struct kvm_vcpu* vcpu, bool masked);
+	/* Whether or not a virtual NMI is pending in hardware. */
+	bool (*is_vnmi_pending)(struct kvm_vcpu* vcpu);
+	/*
+	 * Attempt to pend a virtual NMI in harware.  Returns %true on success
+	 * to allow using static_call_ret0 as the fallback.
+	 */
+	bool (*set_vnmi_pending)(struct kvm_vcpu* vcpu);
 	void (*enable_nmi_window)(struct kvm_vcpu* vcpu);
 	void (*enable_irq_window)(struct kvm_vcpu* vcpu);
 	void (*update_cr8_intercept)(struct kvm_vcpu* vcpu, int tpr, int irr);
+	//bool (*check_apicv_inhibit_reasons)(enum kvm_apicv_inhibit reason);
+	const unsigned long required_apicv_inhibits;
+	bool allow_apicv_in_x2apic_without_x2apic_virtualization;
+	void (*refresh_apicv_exec_ctrl)(struct kvm_vcpu* vcpu);
+	void (*hwapic_irr_update)(struct kvm_vcpu* vcpu, int max_irr);
+	void (*hwapic_isr_update)(int isr);
+	bool (*guest_apic_has_interrupt)(struct kvm_vcpu* vcpu);
+	void (*load_eoi_exitmap)(struct kvm_vcpu* vcpu, u64* eoi_exit_bitmap);
+	void (*set_virtual_apic_mode)(struct kvm_vcpu* vcpu);
+	void (*set_apic_access_page_addr)(struct kvm_vcpu* vcpu);
+	void (*deliver_interrupt)(struct kvm_lapic* apic, int delivery_mode,
+		int trig_mode, int vector);
+	int (*sync_pir_to_irr)(struct kvm_vcpu* vcpu);
 	int (*set_tss_addr)(struct kvm* kvm, unsigned int addr);
-	int (*get_tdp_level)();
-	u64(*get_mt_mask)(struct kvm_vcpu* vcpu, gfn_t gfn, bool is_mmio);
-	bool (*gb_page_enable)();
+	int (*set_identity_map_addr)(struct kvm* kvm, u64 ident_addr);
+	u8(*get_mt_mask)(struct kvm_vcpu* vcpu, gfn_t gfn, bool is_mmio);
 
-	const struct trace_print_flags* exit_reasons_str;
+	void (*load_mmu_pgd)(struct kvm_vcpu* vcpu, hpa_t root_hpa,
+		int root_level);
+
+	bool (*has_wbinvd_exit)(void);
+
+	u64(*get_l2_tsc_offset)(struct kvm_vcpu* vcpu);
+	u64(*get_l2_tsc_multiplier)(struct kvm_vcpu* vcpu);
+	void (*write_tsc_offset)(struct kvm_vcpu* vcpu, u64 offset);
+	void (*write_tsc_multiplier)(struct kvm_vcpu* vcpu, u64 multiplier);
+
+	/*
+	 * Retrieve somewhat arbitrary exit information.  Intended to
+	 * be used only from within tracepoints or error paths.
+	 */
+	void (*get_exit_info)(struct kvm_vcpu* vcpu, u32* reason,
+		u64* info1, u64* info2,
+		u32* exit_int_info, u32* exit_int_info_err_code);
+
+	int (*check_intercept)(struct kvm_vcpu* vcpu,
+		struct x86_instruction_info* info,
+		enum x86_intercept_stage stage,
+		struct x86_exception* exception);
+	void (*handle_exit_irqoff)(struct kvm_vcpu* vcpu);
+
+	void (*request_immediate_exit)(struct kvm_vcpu* vcpu);
+
+	void (*sched_in)(struct kvm_vcpu* kvm, int cpu);
+
+	/*
+	 * Size of the CPU's dirty log buffer, i.e. VMX's PML buffer.  A zero
+	 * value indicates CPU dirty logging is unsupported or disabled.
+	 */
+	int cpu_dirty_log_size;
+	void (*update_cpu_dirty_logging)(struct kvm_vcpu* vcpu);
+
+	const struct kvm_x86_nested_ops* nested_ops;
+
+	void (*vcpu_blocking)(struct kvm_vcpu* vcpu);
+	void (*vcpu_unblocking)(struct kvm_vcpu* vcpu);
+
+	int (*pi_update_irte)(struct kvm* kvm, unsigned int host_irq,
+		uint32_t guest_irq, bool set);
+	void (*pi_start_assignment)(struct kvm* kvm);
+	void (*apicv_post_state_restore)(struct kvm_vcpu* vcpu);
+	bool (*dy_apicv_has_pending_interrupt)(struct kvm_vcpu* vcpu);
+
+	int (*set_hv_timer)(struct kvm_vcpu* vcpu, u64 guest_deadline_tsc,
+		bool* expired);
+	void (*cancel_hv_timer)(struct kvm_vcpu* vcpu);
+
+	void (*setup_mce)(struct kvm_vcpu* vcpu);
+
+#ifdef CONFIG_KVM_SMM
+	int (*smi_allowed)(struct kvm_vcpu* vcpu, bool for_injection);
+	int (*enter_smm)(struct kvm_vcpu* vcpu, union kvm_smram* smram);
+	int (*leave_smm)(struct kvm_vcpu* vcpu, const union kvm_smram* smram);
+	void (*enable_smi_window)(struct kvm_vcpu* vcpu);
+#endif
+
+	//int (*mem_enc_register_region)(struct kvm* kvm, struct kvm_enc_region* argp);
+	//int (*mem_enc_unregister_region)(struct kvm* kvm, struct kvm_enc_region* argp);
+	int (*vm_copy_enc_context_from)(struct kvm* kvm, unsigned int source_fd);
+	int (*vm_move_enc_context_from)(struct kvm* kvm, unsigned int source_fd);
+	void (*guest_memory_reclaimed)(struct kvm* kvm);
+
+	int (*get_msr_feature)(struct kvm_msr_entry* entry);
+
+	bool (*can_emulate_instruction)(struct kvm_vcpu* vcpu, int emul_type,
+		void* insn, int insn_len);
+
+	bool (*apic_init_signal_blocked)(struct kvm_vcpu* vcpu);
+	int (*enable_l2_tlb_flush)(struct kvm_vcpu* vcpu);
+
+	void (*migrate_timers)(struct kvm_vcpu* vcpu);
+	void (*msr_filter_changed)(struct kvm_vcpu* vcpu);
+	int (*complete_emulated_msr)(struct kvm_vcpu* vcpu, int err);
+
+	void (*vcpu_deliver_sipi_vector)(struct kvm_vcpu* vcpu, u8 vector);
+
+	/*
+	 * Returns vCPU specific APICv inhibit reasons
+	 */
+	unsigned long (*vcpu_get_apicv_inhibit_reasons)(struct kvm_vcpu* vcpu);
 };
 
-extern struct kvm_x86_ops* kvm_x86_ops;
+enum pmc_type {
+	KVM_PMC_GP = 0,
+	KVM_PMC_FIXED,
+};
 
-NTSTATUS kvm_init(void* opaque, unsigned int vcpu_size);
+struct kvm_pmc {
+	enum pmc_type type;
+	u8 idx;
+	bool is_paused;
+	bool intr;
+	u64 counter;
+	u64 prev_counter;
+	u64 eventsel;
+	//struct perf_event* perf_event;
+	struct kvm_vcpu* vcpu;
+	/*
+	 * only for creating or reusing perf_event,
+	 * eventsel value for general purpose counters,
+	 * ctrl value for fixed counters.
+	 */
+	u64 current_config;
+};
+
+/* More counters may conflict with other existing Architectural MSRs */
+#define KVM_INTEL_PMC_MAX_GENERIC	8
+#define KVM_PMC_MAX_FIXED	3
+
+#define KVM_AMD_PMC_MAX_GENERIC	6
+struct kvm_pmu {
+	u8 version;
+	unsigned nr_arch_gp_counters;
+	unsigned nr_arch_fixed_counters;
+	unsigned available_event_types;
+	u64 fixed_ctr_ctrl;
+	u64 fixed_ctr_ctrl_mask;
+	u64 global_ctrl;
+	u64 global_status;
+	u64 counter_bitmask[2];
+	u64 global_ctrl_mask;
+	u64 global_ovf_ctrl_mask;
+	u64 reserved_bits;
+	u64 raw_event_mask;
+	struct kvm_pmc gp_counters[KVM_INTEL_PMC_MAX_GENERIC];
+	struct kvm_pmc fixed_counters[KVM_PMC_MAX_FIXED];
+	//struct irq_work irq_work;
+
+	/*
+	 * Overlay the bitmap with a 64-bit atomic so that all bits can be
+	 * set in a single access, e.g. to reprogram all counters when the PMU
+	 * filter changes.
+	 */
+	//union {
+	//	//DECLARE_BITMAP(reprogram_pmi, X86_PMC_IDX_MAX);
+	//	//atomic64_t __reprogram_pmi;
+	//};
+	//DECLARE_BITMAP(all_valid_pmc_idx, X86_PMC_IDX_MAX);
+	//DECLARE_BITMAP(pmc_in_use, X86_PMC_IDX_MAX);
+
+	u64 ds_area;
+	u64 pebs_enable;
+	u64 pebs_enable_mask;
+	u64 pebs_data_cfg;
+	u64 pebs_data_cfg_mask;
+
+	/*
+	 * If a guest counter is cross-mapped to host counter with different
+	 * index, its PEBS capability will be temporarily disabled.
+	 *
+	 * The user should make sure that this mask is updated
+	 * after disabling interrupts and before perf_guest_get_msrs();
+	 */
+	u64 host_cross_mapped_mask;
+
+	/*
+	 * The gate to release perf_events not marked in
+	 * pmc_in_use only once in a vcpu time slice.
+	 */
+	bool need_cleanup;
+
+	/*
+	 * The total number of programmed perf_events and it helps to avoid
+	 * redundant check before cleanup if guest don't use vPMU at all.
+	 */
+	u8 event_count;
+};
+
+struct kvm_x86_init_ops {
+	NTSTATUS (*hardware_setup)();
+	unsigned int (*handle_intel_pt_intr)(void);
+
+	struct kvm_x86_ops* runtime_ops;
+	struct kvm_pmu_ops* pmu_ops;
+};
+
+extern struct kvm_x86_ops kvm_x86_ops;
+
+int kvm_init(unsigned vcpu_size, unsigned vcpu_align);
 void kvm_exit();
 
-NTSTATUS kvm_arch_init(void* opaque);
+
 void kvm_arch_hardware_enable(void* garbage);
 
 void kvm_get_cs_db_l_bits(struct kvm_vcpu* vcpu, int* db, int* l);
@@ -347,7 +576,7 @@ void kvm_get_cs_db_l_bits(struct kvm_vcpu* vcpu, int* db, int* l);
 NTSTATUS kvm_mmu_module_init();
 
 NTSTATUS kvm_arch_hardware_setup();
-void kvm_arch_check_processor_compat(void* rtn);
+void kvm_arch_check_processor_compat();
 
 void kvm_enable_efer_bits(u64);
 
@@ -360,3 +589,5 @@ void kvm_disable_largepages();
 
 void kvm_enable_tdp();
 void kvm_disable_tdp();
+NTSTATUS kvm_x86_vendor_init(struct kvm_x86_init_ops* ops);
+void kvm_x86_vendor_exit(void);

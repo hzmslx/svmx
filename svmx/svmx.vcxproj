@@ -179,6 +179,8 @@
     <ClCompile Include="kvm.c" />
     <ClCompile Include="Logging.c" />
     <ClCompile Include="mmu.c" />
+    <ClCompile Include="pmu.c" />
+    <ClCompile Include="pmu_intel.c" />
     <ClCompile Include="processor.c" />
     <ClCompile Include="svm.c" />
     <ClCompile Include="svmx.c" />
@@ -188,6 +190,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="bitops.h" />
+    <ClInclude Include="desc_ptr.h" />
     <ClInclude Include="int-ll64.h" />
     <ClInclude Include="kvm.h" />
     <ClInclude Include="kvm_emulate.h" />
@@ -201,11 +204,14 @@
     <ClInclude Include="mtrr.h" />
     <ClInclude Include="ntexapi.h" />
     <ClInclude Include="pch.h" />
+    <ClInclude Include="pmu.h" />
+    <ClInclude Include="posted_intr.h" />
     <ClInclude Include="processor-flags.h" />
     <ClInclude Include="processor.h" />
     <ClInclude Include="svm.h" />
     <ClInclude Include="types.h" />
     <ClInclude Include="virtext.h" />
+    <ClInclude Include="vmcs.h" />
     <ClInclude Include="vmx.h" />
     <ClInclude Include="x86.h" />
   </ItemGroup>

@@ -4,6 +4,9 @@
 * Copyright (c) 2004, Intel Corporation.
 * 
 */
+#include "vmcs.h"
+#include "posted_intr.h"
+#include "desc_ptr.h"
 
 /* VMCS Encodings */
 enum vmcs_field {
@@ -290,6 +293,184 @@ enum vmcs_field {
 #define EXIT_REASON_EPT_MISCONFIG       49
 #define EXIT_REASON_WBINVD				54
 
+enum vmx_l1d_flush_state {
+	VMENTER_L1D_FLUSH_AUTO,
+	VMENTER_L1D_FLUSH_NEVER,
+	VMENTER_L1D_FLUSH_COND,
+	VMENTER_L1D_FLUSH_ALWAYS,
+	VMENTER_L1D_FLUSH_EPT_DISABLED,
+	VMENTER_L1D_FLUSH_NOT_REQUIRED,
+};
+
+#ifdef _WIN64
+#define MAX_NR_USER_RETURN_MSRS	7
+#else
+#define MAX_NR_USER_RETURN_MSRS	4
+#endif
+
+struct vmx_uret_msr {
+	bool load_into_hardware;
+	u64 data;
+	u64 mask;
+};
+
+union vmx_exit_reason {
+	struct {
+		u32	basic : 16;
+		u32	reserved16 : 1;
+		u32	reserved17 : 1;
+		u32	reserved18 : 1;
+		u32	reserved19 : 1;
+		u32	reserved20 : 1;
+		u32	reserved21 : 1;
+		u32	reserved22 : 1;
+		u32	reserved23 : 1;
+		u32	reserved24 : 1;
+		u32	reserved25 : 1;
+		u32	bus_lock_detected : 1;
+		u32	enclave_mode : 1;
+		u32	smi_pending_mtf : 1;
+		u32	smi_from_vmx_root : 1;
+		u32	reserved30 : 1;
+		u32	failed_vmentry : 1;
+	};
+	u32 full;
+};
+
+/* The mask to use to trigger an EPT Misconfiguration in order to track MMIO */
+#define VMX_EPT_MISCONFIG_WX_VALUE		(VMX_EPT_WRITABLE_MASK |       \
+						 VMX_EPT_EXECUTABLE_MASK)
+
+#define VMX_EPT_IDENTITY_PAGETABLE_ADDR		0xfffbc000ul
+
+#include <pshpck16.h>
+struct vmx_msr_entry {
+	u32 index;
+	u32 reserved;
+	u64 value;
+};
+#include <poppack.h>
+
+#define MAX_NR_LOADSTORE_MSRS	8
+
+struct vmx_msrs {
+	unsigned int		nr;
+	struct vmx_msr_entry	val[MAX_NR_LOADSTORE_MSRS];
+};
+
+struct vcpu_vmx {
+	struct kvm_vcpu vcpu;
+	u8                    fail;
+	u8		      x2apic_msr_bitmap_mode;
+
+	/*
+	 * If true, host state has been stored in vmx->loaded_vmcs for
+	 * the CPU registers that only need to be switched when transitioning
+	 * to/from the kernel, and the registers have been loaded with guest
+	 * values.  If false, host state is loaded in the CPU registers
+	 * and vmx->loaded_vmcs->host_state is invalid.
+	 */
+	bool		      guest_state_loaded;
+
+	unsigned long         exit_qualification;
+	u32                   exit_intr_info;
+	u32                   idt_vectoring_info;
+	ulong                 rflags;
+
+	/*
+	 * User return MSRs are always emulated when enabled in the guest, but
+	 * only loaded into hardware when necessary, e.g. SYSCALL #UDs outside
+	 * of 64-bit mode or if EFER.SCE=1, thus the SYSCALL MSRs don't need to
+	 * be loaded into hardware if those conditions aren't met.
+	 */
+	struct vmx_uret_msr   guest_uret_msrs[MAX_NR_USER_RETURN_MSRS];
+	bool                  guest_uret_msrs_loaded;
+#ifdef _WIN64
+	u64		      msr_host_kernel_gs_base;
+	u64		      msr_guest_kernel_gs_base;
+#endif
+
+	u64		      spec_ctrl;
+	u32		      msr_ia32_umwait_control;
+
+	/*
+	 * loaded_vmcs points to the VMCS currently used in this vcpu. For a
+	 * non-nested (L1) guest, it always points to vmcs01. For a nested
+	 * guest (L2), it points to a different VMCS.
+	 */
+	struct loaded_vmcs    vmcs01;
+	struct loaded_vmcs* loaded_vmcs;
+
+	struct msr_autoload {
+		struct vmx_msrs guest;
+		struct vmx_msrs host;
+	} msr_autoload;
+
+	struct msr_autostore {
+		struct vmx_msrs guest;
+	} msr_autostore;
+
+	struct {
+		int vm86_active;
+		ulong save_rflags;
+		struct kvm_segment segs[8];
+	} rmode;
+	struct {
+		u32 bitmask; /* 4 bits per segment (1 bit per field) */
+		struct kvm_save_segment {
+			u16 selector;
+			unsigned long base;
+			u32 limit;
+			u32 ar;
+		} seg[8];
+	} segment_cache;
+	int vpid;
+	bool emulation_required;
+
+	union vmx_exit_reason exit_reason;
+
+	/* Posted interrupt descriptor */
+	struct pi_desc pi_desc;
+
+	/* Used if this vCPU is waiting for PI notification wakeup. */
+
+	/* Support for a guest hypervisor (nested VMX) */
+	// struct nested_vmx nested;
+
+	/* Dynamic PLE window. */
+	unsigned int ple_window;
+	bool ple_window_dirty;
+
+	bool req_immediate_exit;
+
+	/* Support for PML */
+#define PML_ENTITY_NUM		512
+	struct page* pml_pg;
+
+	/* apic deadline value in host tsc */
+	u64 hv_deadline_tsc;
+
+	unsigned long host_debugctlmsr;
+
+	/*
+	 * Only bits masked by msr_ia32_feature_control_valid_bits can be set in
+	 * msr_ia32_feature_control. FEAT_CTL_LOCKED is always included
+	 * in msr_ia32_feature_control_valid_bits.
+	 */
+	u64 msr_ia32_feature_control;
+	u64 msr_ia32_feature_control_valid_bits;
+	/* SGX Launch Control public key hash */
+	u64 msr_ia32_sgxlepubkeyhash[4];
+	u64 msr_ia32_mcu_opt_ctrl;
+	bool disable_fb_clear;
+
+	//struct pt_desc pt_desc;
+	//struct lbr_desc lbr_desc;
+
+	/* Save desired MSR intercept (read: pass-through) state */
+#define MAX_POSSIBLE_PASSTHROUGH_MSRS	16
+};
+
 NTSTATUS vmx_init();
 void vmx_exit();
 
@@ -304,10 +485,14 @@ int vmx_disabled_by_bios();
 NTSTATUS hardware_setup();
 void hardware_unsetup();
 
-void vmx_check_processor_compat(void* rtn);
+
 
 void hardware_enable(void* junk);
 
 bool report_flexpriority();
+
+void hv_init_evmcs();
+
+NTSTATUS vmx_setup_l1d_flush(enum vmx_l1d_flush_state l1tf);
 
 

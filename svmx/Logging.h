@@ -15,3 +15,4 @@ static const ULONG KERN_DEBUG = 7;
 #endif // !DRIVER_PREFIX
 
 ULONG Log(ULONG level, PCSTR format, ...);
+ULONG LogError(PCSTR format, ...);

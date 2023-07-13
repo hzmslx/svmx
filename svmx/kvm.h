@@ -37,3 +37,8 @@ struct kvm_guest_debug {
 	struct kvm_guest_debug_arch arch;
 };
 
+struct kvm_msr_entry {
+	__u32 index;
+	__u32 reserved;
+	__u64 data;
+};

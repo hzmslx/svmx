@@ -58,6 +58,12 @@
     <ClCompile Include="svm.c">
       <Filter>svm</Filter>
     </ClCompile>
+    <ClCompile Include="pmu.c">
+      <Filter>kvm</Filter>
+    </ClCompile>
+    <ClCompile Include="pmu_intel.c">
+      <Filter>vmx</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="pch.h">
@@ -111,9 +117,6 @@
     <ClInclude Include="processor-flags.h">
       <Filter>asm</Filter>
     </ClInclude>
-    <ClInclude Include="kvm_emulate.h">
-      <Filter>asm</Filter>
-    </ClInclude>
     <ClInclude Include="mtrr.h">
       <Filter>asm</Filter>
     </ClInclude>
@@ -122,6 +125,21 @@
     </ClInclude>
     <ClInclude Include="ntexapi.h">
       <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="pmu.h">
+      <Filter>kvm</Filter>
+    </ClInclude>
+    <ClInclude Include="vmcs.h">
+      <Filter>vmx</Filter>
+    </ClInclude>
+    <ClInclude Include="posted_intr.h">
+      <Filter>vmx</Filter>
+    </ClInclude>
+    <ClInclude Include="desc_ptr.h">
+      <Filter>asm</Filter>
+    </ClInclude>
+    <ClInclude Include="kvm_emulate.h">
+      <Filter>kvm</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>
