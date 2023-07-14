@@ -17,6 +17,10 @@ static u64 efer_reserved_bits = 0xfffffffffffffffeULL;
 struct kvm_x86_ops kvm_x86_ops;
 bool allow_smaller_maxphyaddr = 0;
 
+KMUTEX vendor_module_lock;
+
+u64 host_efer;
+
 
 /*
  * List of msr numbers which we expose to userspace through KVM_GET_MSRS
@@ -81,21 +85,58 @@ void kvm_get_cs_db_l_bits(struct kvm_vcpu* vcpu, int* db, int* l)
 	*l = cs.l;
 }
 
+static inline void kvm_ops_update(struct kvm_x86_init_ops* ops) {
+	memcpy(&kvm_x86_ops, ops->runtime_ops, sizeof(kvm_x86_ops));
+}
+
 NTSTATUS __kvm_x86_vendor_init(struct kvm_x86_init_ops* ops) {
-	UNREFERENCED_PARAMETER(ops);
+	u64 host_pat;
+	NTSTATUS status = STATUS_SUCCESS;
 
 	if (kvm_x86_ops.hardware_enable) {
 		LogError("Already loaeded vendor module\n");
 		return STATUS_UNSUCCESSFUL;
 	}
 
+	/*
+	* KVM assumes that PAT entry '0' encodes WB memtype and simply zeroes
+	* the PAT bits in SPTEs.  Bail if PAT[0] is programmed to something
+	* other than WB.  Note, EPT doesn't utilize the PAT, but don't bother
+	* with an exception.  PAT[0] is set to WB on RESET and also by the
+	* kernel, i.e. failure indicates a kernel bug or broken firmware.
+	*/
+	host_pat = __readmsr(MSR_IA32_CR_PAT);
 	
-	return STATUS_SUCCESS;
+	host_efer = __readmsr(MSR_EFER);
+
+	bool out_mmu_exit = FALSE;
+	do
+	{
+		status = ops->hardware_setup();
+		if (!NT_SUCCESS(status)) {
+			out_mmu_exit = TRUE;
+			break;
+		}
+
+		kvm_ops_update(ops);
+
+
+
+	} while (FALSE);
+	
+	if (out_mmu_exit) {
+		
+	}
+	
+	return status;
 }
 
 NTSTATUS kvm_x86_vendor_init(struct kvm_x86_init_ops* ops) {
 	NTSTATUS status;
+	KeWaitForSingleObject(&vendor_module_lock, Executive, 
+		KernelMode, FALSE, NULL);
 	status = __kvm_x86_vendor_init(ops);
+	KeReleaseMutex(&vendor_module_lock, FALSE);
 	return status;
 }
 

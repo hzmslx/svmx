@@ -3,7 +3,7 @@
 #include "kvm_emulate.h"
 #include "mtrr.h"
 #include "pmu.h"
-
+#include "desc.h"
 
 
 static int bypass_guest_pf = 1;
@@ -23,6 +23,9 @@ static RTL_BITMAP vmx_io_bitmap_b;
 static RTL_BITMAP vmx_msr_bitmap_legacy;
 static RTL_BITMAP vmx_msr_bitmap_longmode;
 static RTL_BITMAP vmx_vpid_bitmap;
+
+static unsigned long host_idt_base;
+
 
 struct vmcs {
 	u32 revision_id;
@@ -46,6 +49,9 @@ static struct vmx_capability {
 	u32 ept;
 	u32 vpid;
 } vmx_capability;
+
+struct vmx_capability vmx_capability;
+
 
 
 
@@ -96,10 +102,9 @@ void vmcs_write32(unsigned long field, u32 value);
 struct kvm_vcpu* vmx_create_vcpu(struct kvm* kvm, unsigned int id);
 void vmx_free_vcpu(struct kvm_vcpu* vcpu);
 struct vcpu_vmx* to_vmx(struct kvm_vcpu* vcpu);
-NTSTATUS vmx_vcpu_reset(struct kvm_vcpu* vcpu);
+
 void hardware_disable(void* garbage);
 void vmx_save_host_state(struct kvm_vcpu* vcpu);
-void vmx_vcpu_put(struct kvm_vcpu* vcpu);
 int set_guest_debug(struct kvm_vcpu* vcpu, struct kvm_guest_debug* dbg);
 u64 vmx_get_segment_base(struct kvm_vcpu* vcpu, int seg);
 void vmx_get_segment(struct kvm_vcpu* vcpu,
@@ -121,7 +126,6 @@ void vmx_cache_reg(struct kvm_vcpu* vcpu, enum kvm_reg reg);
 unsigned long vmx_get_rflags(struct kvm_vcpu* vcpu);
 void vmx_set_rflags(struct kvm_vcpu* vcpu, unsigned long rflags);
 void vmx_flush_tlb(struct kvm_vcpu* vcpu);
-void vmx_vcpu_run(struct kvm_vcpu* vcpu, struct kvm_run* kvm_run);
 void skip_emulated_instruction(struct kvm_vcpu* vcpu);
 void vmx_set_interrupt_shadow(struct kvm_vcpu* vcpu, int mask);
 u32 vmx_get_interrupt_shadow(struct kvm_vcpu* vcpu, int mask);
@@ -140,11 +144,7 @@ int get_ept_level();
 u64 vmx_get_mt_mask(struct kvm_vcpu* vcpu, gfn_t gfn, bool is_mmio);
 bool vmx_gb_page_enable();
 
-/*
- * The guest has exited.  See if we can fix it or if we need userspace
- * assistance.
- */
-int vmx_handle_exit(struct kvm_run* kvm_run, struct kvm_vcpu* vcpu);
+
 
 /*
 * Reads an msr value (of 'msr_index') into 'pdata'.
@@ -160,11 +160,7 @@ NTSTATUS vmx_get_msr(struct kvm_vcpu* vcpu, u32 msr_index, u64* pdata);
  */
 NTSTATUS vmx_set_msr(struct kvm_vcpu* vcpu, u32 msr_index, u64 data);
 
-/*
-* Switches to specified vcpu, until a matching vcpu_put(), but assumes
-* vcpu mutex is already taken.
-*/
-void vmx_vcpu_load(struct kvm_vcpu* vcpu, int cpu);
+
 
 static NTSTATUS vmx_check_processor_compat(void) {
 	if (!kvm_is_vmx_supported())
@@ -174,8 +170,140 @@ static NTSTATUS vmx_check_processor_compat(void) {
 	return STATUS_SUCCESS;
 }
 
+static void free_kvm_area(void)
+{
+
+}
+
+static void vmx_hardware_unsetup(void) {
+	
+}
+
+static int vmx_hardware_enable(void) {
+
+	return 0;
+}
+
+static void vmx_hardware_disable(void) {
+
+}
+
+/*
+ * The kvm parameter can be NULL (module initialization, or invocation before
+ * VM creation). Be sure to check the kvm parameter before using it.
+ */
+static bool vmx_has_emulated_msr(struct kvm* kvm, u32 index)
+{
+	UNREFERENCED_PARAMETER(kvm);
+	UNREFERENCED_PARAMETER(index);
+	return FALSE;
+}
+
+#define L1TF_MSG_SMT "L1TF CPU bug present and SMT on, data leak possible. See CVE-2018-3646 and https://www.kernel.org/doc/html/latest/admin-guide/hw-vuln/l1tf.html for details.\n"
+#define L1TF_MSG_L1D "L1TF CPU bug present and virtualization mitigation disabled, data leak possible. See CVE-2018-3646 and https://www.kernel.org/doc/html/latest/admin-guide/hw-vuln/l1tf.html for details.\n"
+
+static int vmx_vm_init(struct kvm* kvm) {
+	UNREFERENCED_PARAMETER(kvm);
+
+	return 0;
+}
+
+static void vmx_vm_destroy(struct kvm* kvm) {
+	UNREFERENCED_PARAMETER(kvm);
+}
+
+static int vmx_vcpu_precreate(struct kvm* kvm) {
+	UNREFERENCED_PARAMETER(kvm);
+	return 0;
+}
+
+static NTSTATUS vmx_vcpu_create(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+
+	return STATUS_SUCCESS;
+}
+
+static void vmx_vcpu_free(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+}
+
+static void vmx_vcpu_reset(struct kvm_vcpu* vcpu, bool init_event) {
+	UNREFERENCED_PARAMETER(vcpu);
+	UNREFERENCED_PARAMETER(init_event);
+}
+
+void vmx_prepare_switch_to_guest(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+}
+
+/*
+ * Switches to specified vcpu, until a matching vcpu_put(), but assumes
+ * vcpu mutex is already taken.
+ */
+static void vmx_vcpu_load(struct kvm_vcpu* vcpu, int cpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+	UNREFERENCED_PARAMETER(cpu);
+}
+
+static void vmx_vcpu_put(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+}
+
+static int vmx_vcpu_pre_run(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+	return 1;
+}
+
+static fastpath_t vmx_vcpu_run(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+
+	return EXIT_FASTPATH_NONE;
+}
+
+/*
+ * The guest has exited.  See if we can fix it or if we need userspace
+ * assistance.
+ */
+static int __vmx_handle_exit(struct kvm_vcpu* vcpu, fastpath_t exit_fastpath)
+{
+	UNREFERENCED_PARAMETER(vcpu);
+	UNREFERENCED_PARAMETER(exit_fastpath);
+	return 0;
+}
+
+static int vmx_handle_exit(struct kvm_vcpu* vcpu, fastpath_t exit_fastpath) {
+	int ret = __vmx_handle_exit(vcpu, exit_fastpath);
+
+	return ret;
+}
+
 static struct kvm_x86_ops vmx_x86_ops = {
 	.check_processor_compatibility = vmx_check_processor_compat,
+
+	.hardware_unsetup = vmx_hardware_unsetup,
+
+	.hardware_enable = vmx_hardware_enable,
+	.hardware_disable = vmx_hardware_disable,
+	.has_emulated_msr = vmx_has_emulated_msr,
+
+	.vm_size = sizeof(struct kvm_vmx),
+	.vm_init = vmx_vm_init,
+	.vm_destroy = vmx_vm_destroy,
+
+	.vcpu_precreate = vmx_vcpu_precreate,
+	.vcpu_create = vmx_vcpu_create,
+	.vcpu_free = vmx_vcpu_free,
+	.vcpu_reset = vmx_vcpu_reset,
+
+	.prepare_switch_to_guest = vmx_prepare_switch_to_guest,
+	.vcpu_load = vmx_vcpu_load,
+	.vcpu_put = vmx_vcpu_put,
+
+
+	.vcpu_pre_run = vmx_vcpu_pre_run,
+	.vcpu_run = vmx_vcpu_run,
+	.handle_exit = vmx_handle_exit,
+
 };
 
 static struct kvm_x86_init_ops vmx_init_ops = {
@@ -186,7 +314,19 @@ static struct kvm_x86_init_ops vmx_init_ops = {
 	.pmu_ops = &intel_pmu_ops,
 };
 
-NTSTATUS setup_vmcs_config(struct vmcs_config* vmcs_conf);
+static NTSTATUS setup_vmcs_config(struct vmcs_config* vmcs_conf,
+	struct vmx_capability* vmx_cap) {
+	UNREFERENCED_PARAMETER(vmx_cap);
+	NTSTATUS status = STATUS_SUCCESS;
+	u32 vmx_msr_low, vmx_msr_high;
+
+	memset(vmcs_conf, 0, sizeof(vmcs_conf));
+
+	rdmsr(MSR_IA32_VMX_BASIC, vmx_msr_low, vmx_msr_high);
+
+
+	return status;
+}
 
 void vmx_setup_fb_clear_ctrl() {
 
@@ -234,120 +374,7 @@ NTSTATUS adjust_vmx_controls(u32 ctl_min, u32 ctl_opt, u32 msr, u32* result) {
 	return STATUS_SUCCESS;
 }
 
-NTSTATUS setup_vmcs_config(struct vmcs_config* vmcs_conf) {
-	u32 vmx_msr_low, vmx_msr_high;
-	u32 min, opt, min2, opt2;
-	u32 _pin_based_exec_control = 0;
-	u32 _cpu_based_exec_control = 0;
-	u32 _cpu_based_2nd_exec_control = 0;
-	u32 _vmexit_control = 0;
-	u32 _vmentry_control = 0;
 
-	min = PIN_BASED_EXT_INTR_MASK | PIN_BASED_NMI_EXITING;
-	opt = PIN_BASED_VIRTUAL_NMIS;
-	NTSTATUS status = adjust_vmx_controls(min, opt, MSR_IA32_VMX_PINBASED_CTLS,
-		&_pin_based_exec_control);
-	if (!NT_SUCCESS(status))
-		return status;
-
-	min = CPU_BASED_HLT_EXITING |
-#ifdef _WIN64
-		CPU_BASED_CR8_LOAD_EXITING |
-		CPU_BASED_CR8_STORE_EXITING |
-#endif
-		CPU_BASED_CR3_LOAD_EXITING |
-		CPU_BASED_CR3_STORE_EXITING |
-		CPU_BASED_USE_IO_BITMAPS |
-		CPU_BASED_MOV_DR_EXITING |
-		CPU_BASED_USE_TSC_OFFSETING |
-		CPU_BASED_INVLPG_EXITING;
-	opt = CPU_BASED_TPR_SHADOW |
-		CPU_BASED_USE_MSR_BITMAPS |
-		CPU_BASED_ACTIVATE_SECONDARY_CONTROLS;
-	status = adjust_vmx_controls(min, opt, MSR_IA32_VMX_PROCBASED_CTLS,
-		&_cpu_based_exec_control);
-	if (!NT_SUCCESS(status))
-		return status;
-
-#ifdef _WIN64
-	if ((_cpu_based_exec_control & CPU_BASED_TPR_SHADOW))
-		_cpu_based_exec_control &= ~CPU_BASED_CR8_LOAD_EXITING &
-		~CPU_BASED_CR8_STORE_EXITING;
-#endif
-	if (_cpu_based_exec_control & CPU_BASED_ACTIVATE_SECONDARY_CONTROLS) {
-		min2 = 0;
-		opt2 = SECONDARY_EXEC_VIRTUALIZE_APIC_ACCESSES |
-			SECONDARY_EXEC_WBINVD_EXITING |
-			SECONDARY_EXEC_ENABLE_VPID |
-			SECONDARY_EXEC_ENABLE_EPT |
-			SECONDARY_EXEC_UNRESTRICTED_GUEST;
-
-		status = adjust_vmx_controls(min2, opt2,
-			MSR_IA32_VMX_PROCBASED_CTLS2,
-			&_cpu_based_2nd_exec_control);
-		if (!NT_SUCCESS(status))
-			return status;
-	}
-
-#ifdef _WIN64
-	if (!(_cpu_based_2nd_exec_control &
-		SECONDARY_EXEC_VIRTUALIZE_APIC_ACCESSES))
-		_cpu_based_exec_control &= ~CPU_BASED_TPR_SHADOW;
-#endif // _WIN64
-	if (_cpu_based_2nd_exec_control & SECONDARY_EXEC_ENABLE_EPT) {
-		/* CR3 accesses and invlpg don't need to cause VM Exits when EPT
-		   enabled */
-		_cpu_based_exec_control &= ~(CPU_BASED_CR3_LOAD_EXITING |
-			CPU_BASED_CR3_STORE_EXITING |
-			CPU_BASED_INVLPG_EXITING);
-		rdmsr(MSR_IA32_VMX_EPT_VPID_CAP,
-			vmx_capability.ept, vmx_capability.vpid);
-	}
-
-	min = 0;
-#ifdef _WIN64
-	min |= VM_EXIT_HOST_ADDR_SPACE_SIZE;
-#endif
-	opt = VM_EXIT_SAVE_IA32_PAT | VM_EXIT_LOAD_IA32_PAT;
-	status = adjust_vmx_controls(min, opt, MSR_IA32_VMX_EXIT_CTLS,
-		&_vmexit_control);
-	if (!NT_SUCCESS(status))
-		return STATUS_UNSUCCESSFUL;
-
-	min = 0;
-	opt = VM_ENTRY_LOAD_IA32_PAT;
-	status = adjust_vmx_controls(min, opt, MSR_IA32_VMX_ENTRY_CTLS,
-		&_vmentry_control);
-	if (!NT_SUCCESS(status))
-		return STATUS_UNSUCCESSFUL;
-
-	rdmsr(MSR_IA32_VMX_BASIC, vmx_msr_low, vmx_msr_high);
-
-	/* IA-32 SDM Vol 3B: VMCS size is never greater than 4kB. */
-	if ((vmx_msr_high & 0x1fff) > PAGE_SIZE)
-		return STATUS_UNSUCCESSFUL;
-
-#ifdef _WIN64
-	/* IA-32 SDM Vol 3B: 64-bit CPUs always have VMX_BASIC_MSR[48]==0. */
-	if (vmx_msr_high & (1u << 16))
-		return STATUS_UNSUCCESSFUL;
-#endif
-
-	/* Require Write-Back (WB) memory type for VMCS accesses. */
-	if (((vmx_msr_high >> 18) & 15) != 6)
-		return STATUS_UNSUCCESSFUL;
-
-	vmcs_conf->size = vmx_msr_high & 0x1fff;
-	vmcs_conf->revision_id = vmx_msr_low;
-
-	vmcs_conf->pin_based_exec_ctrl = _pin_based_exec_control;
-	vmcs_conf->cpu_based_exec_ctrl = _cpu_based_exec_control;
-	vmcs_conf->cpu_based_2nd_exec_ctrl = _cpu_based_2nd_exec_control;
-	vmcs_conf->vmexit_ctrl = _vmexit_control;
-	vmcs_conf->vmentry_ctrl = _vmentry_control;
-
-	return STATUS_SUCCESS;
-}
 
 int cpu_has_vmx_ept() {
 	return vmcs_config.cpu_based_2nd_exec_ctrl &
@@ -395,8 +422,14 @@ NTSTATUS alloc_kvm_area() {
 
 NTSTATUS hardware_setup() {
 	NTSTATUS status = STATUS_SUCCESS;
+	struct desc_ptr dt;
 
-	status = setup_vmcs_config(&vmcs_config);
+	store_idt(&dt);
+	host_idt_base = dt.address;
+
+
+	
+	status = setup_vmcs_config(&vmcs_config, &vmx_capability);
 	if (!NT_SUCCESS(status))
 		return status;
 
@@ -431,10 +464,6 @@ NTSTATUS hardware_setup() {
 
 void free_vmcs(struct vmcs* vmcs) {
 	UNREFERENCED_PARAMETER(vmcs);
-}
-
-void free_kvm_area() {
-
 }
 
 void hardware_unsetup() {
@@ -494,12 +523,6 @@ struct vcpu_vmx* to_vmx(struct kvm_vcpu* vcpu) {
 	return NULL;
 }
 
-NTSTATUS vmx_vcpu_reset(struct kvm_vcpu* vcpu) {
-	UNREFERENCED_PARAMETER(vcpu);
-	NTSTATUS status = STATUS_SUCCESS;
-
-	return status;
-}
 
 void vmx_save_host_state(struct kvm_vcpu* vcpu) {
 	UNREFERENCED_PARAMETER(vcpu);
@@ -508,19 +531,14 @@ void vmx_save_host_state(struct kvm_vcpu* vcpu) {
 
 }
 
-void vmx_vcpu_load(struct kvm_vcpu* vcpu, int cpu) {
-	UNREFERENCED_PARAMETER(vcpu);
-	UNREFERENCED_PARAMETER(cpu);
-}
+
 
 void __vmx_load_host_state(struct vcpu_vmx* vmx) {
 	UNREFERENCED_PARAMETER(vmx);
 
 }
 
-void vmx_vcpu_put(struct kvm_vcpu* vcpu) {
-	__vmx_load_host_state(to_vmx(vcpu));
-}
+
 
 int set_guest_debug(struct kvm_vcpu* vcpu, struct kvm_guest_debug* dbg) {
 	UNREFERENCED_PARAMETER(vcpu);
@@ -691,17 +709,8 @@ void vmx_flush_tlb(struct kvm_vcpu* vcpu) {
 	
 }
 
-void vmx_vcpu_run(struct kvm_vcpu* vcpu, struct kvm_run* kvm_run) {
-	UNREFERENCED_PARAMETER(vcpu);
-	UNREFERENCED_PARAMETER(kvm_run);
-}
 
-int vmx_handle_exit(struct kvm_run* kvm_run, struct kvm_vcpu* vcpu) {
-	UNREFERENCED_PARAMETER(kvm_run);
-	UNREFERENCED_PARAMETER(vcpu);
 
-	return 0;
-}
 
 void skip_emulated_instruction(struct kvm_vcpu* vcpu) {
 	UNREFERENCED_PARAMETER(vcpu);

@@ -190,7 +190,8 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="bitops.h" />
-    <ClInclude Include="desc_ptr.h" />
+    <ClInclude Include="desc.h" />
+    <ClInclude Include="desc_defs.h" />
     <ClInclude Include="int-ll64.h" />
     <ClInclude Include="kvm.h" />
     <ClInclude Include="kvm_emulate.h" />

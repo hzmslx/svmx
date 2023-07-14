@@ -135,11 +135,14 @@
     <ClInclude Include="posted_intr.h">
       <Filter>vmx</Filter>
     </ClInclude>
-    <ClInclude Include="desc_ptr.h">
+    <ClInclude Include="desc_defs.h">
       <Filter>asm</Filter>
     </ClInclude>
     <ClInclude Include="kvm_emulate.h">
       <Filter>kvm</Filter>
+    </ClInclude>
+    <ClInclude Include="desc.h">
+      <Filter>asm</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

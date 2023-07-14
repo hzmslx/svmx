@@ -2,7 +2,7 @@
 #include "kvm.h"
 #include "kvm_types.h"
 #include "processor-flags.h"
-#include "desc_ptr.h"
+#include "desc_defs.h"
 #include "kvm_emulate.h"
 
 #define KVM_GUEST_CR0_MASK_UNRESTRICTED_GUEST				\
@@ -101,6 +101,13 @@ enum {
 };
 
 #define KVM_NR_MEM_OBJS 40
+
+enum exit_fastpath_completion {
+	EXIT_FASTPATH_NONE,
+	EXIT_FASTPATH_REENTER_GUEST,
+	EXIT_FASTPATH_EXIT_HANDLED,
+};
+typedef enum exit_fastpath_completion fastpath_t;
 
 #define KVM_NR_DB_REGS	4
 
@@ -283,7 +290,7 @@ struct kvm_x86_ops {
 
 	/* Create, but do not attach this VCPU */
 	int (*vcpu_precreate)(struct kvm* kvm);
-	int (*vcpu_create)(struct kvm_vcpu* vcpu);
+	NTSTATUS (*vcpu_create)(struct kvm_vcpu* vcpu);
 	void (*vcpu_free)(struct kvm_vcpu* vcpu);
 	void (*vcpu_reset)(struct kvm_vcpu* vcpu, bool init_event);
 

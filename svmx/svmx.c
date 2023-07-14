@@ -3,6 +3,8 @@
 #include "vmx.h"
 #include "svm.h"
 
+extern KMUTEX vendor_module_lock;
+
 DRIVER_UNLOAD DriverUnload;
 
 NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath);
@@ -17,6 +19,7 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) 
 
 	DriverObject->DriverUnload = DriverUnload;
 
+	KeInitializeMutex(&vendor_module_lock, 0);
 	
 	int cpuInfo[4];
 	CpuIdEx(cpuInfo, 0, 0);

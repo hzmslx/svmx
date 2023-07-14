@@ -6,7 +6,7 @@
 */
 #include "vmcs.h"
 #include "posted_intr.h"
-#include "desc_ptr.h"
+#include "desc_defs.h"
 
 /* VMCS Encodings */
 enum vmcs_field {
@@ -471,6 +471,16 @@ struct vcpu_vmx {
 #define MAX_POSSIBLE_PASSTHROUGH_MSRS	16
 };
 
+struct kvm_vmx {
+	struct kvm kvm;
+
+	unsigned int tss_addr;
+	bool ept_identity_pagetable_done;
+	gpa_t ept_identity_map_addr;
+	/* Posted Interrupt Descriptor (PID) table for IPI virtualization */
+	u64* pid_table;
+};
+
 NTSTATUS vmx_init();
 void vmx_exit();
 
@@ -495,4 +505,5 @@ void hv_init_evmcs();
 
 NTSTATUS vmx_setup_l1d_flush(enum vmx_l1d_flush_state l1tf);
 
+void vmx_prepare_switch_to_guest(struct kvm_vcpu* vcpu);
 
