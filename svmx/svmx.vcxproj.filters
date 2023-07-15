@@ -144,5 +144,8 @@
     <ClInclude Include="desc.h">
       <Filter>asm</Filter>
     </ClInclude>
+    <ClInclude Include="capabilities.h">
+      <Filter>vmx</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

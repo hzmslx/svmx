@@ -190,6 +190,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="bitops.h" />
+    <ClInclude Include="capabilities.h" />
     <ClInclude Include="desc.h" />
     <ClInclude Include="desc_defs.h" />
     <ClInclude Include="int-ll64.h" />

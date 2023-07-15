@@ -6,6 +6,7 @@
 extern KMUTEX vendor_module_lock;
 
 DRIVER_UNLOAD DriverUnload;
+DRIVER_DISPATCH DriverDeviceControl;
 
 NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath);
 
@@ -18,6 +19,7 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) 
 	NTSTATUS status = STATUS_SUCCESS;
 
 	DriverObject->DriverUnload = DriverUnload;
+	DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = DriverDeviceControl;
 
 	KeInitializeMutex(&vendor_module_lock, 0);
 	
@@ -37,5 +39,42 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) 
 		status = STATUS_NOT_SUPPORTED;
 	}
 
+	return status;
+}
+
+NTSTATUS DriverDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
+	UNREFERENCED_PARAMETER(DeviceObject);
+	NTSTATUS status = STATUS_SUCCESS;
+
+	ULONG ioctl = IoGetCurrentIrpStackLocation(Irp)->Parameters.DeviceIoControl.IoControlCode;
+	switch (ioctl)
+	{
+	case KVM_GET_API_VERSION:
+
+		break;
+
+	case KVM_CREATE_VM:
+
+		break;
+
+	case KVM_CHECK_EXTENSION:
+
+		break;
+
+	case KVM_GET_VCPU_MMPA_SIZE:
+
+		break;
+	case KVM_TRACE_ENABLE:
+	case KVM_TRACE_PAUSE:
+	case KVM_TRACE_DISABLE:
+		status = STATUS_NOT_SUPPORTED;
+		break;
+	default:
+
+		break;
+	}
+	Irp->IoStatus.Status = status;
+	Irp->IoStatus.Information = 0;
+	IoCompleteRequest(Irp, IO_NO_INCREMENT);
 	return status;
 }

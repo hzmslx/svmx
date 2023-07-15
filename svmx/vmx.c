@@ -4,6 +4,7 @@
 #include "mtrr.h"
 #include "pmu.h"
 #include "desc.h"
+#include "capabilities.h"
 
 
 static int bypass_guest_pf = 1;
@@ -27,22 +28,30 @@ static RTL_BITMAP vmx_vpid_bitmap;
 static unsigned long host_idt_base;
 
 
+struct vmcs_hdr {
+	u32 revision_id : 31;
+	u32 shadow_vmcs : 1;
+};
+
 struct vmcs {
-	u32 revision_id;
+	struct vmcs_hdr hdr;
 	u32 abort;
-	char data[ANYSIZE_ARRAY];
+	char data[];
 };
 
 
 static struct vmcs_config {
 	int size;
-	int order;
+	u32 basic_cap;
 	u32 revision_id;
 	u32 pin_based_exec_ctrl;
 	u32 cpu_based_exec_ctrl;
 	u32 cpu_based_2nd_exec_ctrl;
+	u64 cpu_based_3rd_exec_ctrl;
 	u32 vmexit_ctrl;
 	u32 vmentry_ctrl;
+	u64 misc;
+	struct nested_vmx_msrs nested;
 } vmcs_config;
 
 static struct vmx_capability {
@@ -170,9 +179,21 @@ static NTSTATUS vmx_check_processor_compat(void) {
 	return STATUS_SUCCESS;
 }
 
+ULONG_PTR KiFreeKvmArea(
+	_In_ ULONG_PTR Argument
+) {
+	UNREFERENCED_PARAMETER(Argument);
+	
+	PHYSICAL_ADDRESS physical;
+	physical.QuadPart = 0;
+	__vmx_vmptrst((unsigned __int64*)&physical);
+
+	return 0;
+}
+
 static void free_kvm_area(void)
 {
-
+	KeIpiGenericCall(KiFreeKvmArea, 0);
 }
 
 static void vmx_hardware_unsetup(void) {
@@ -319,10 +340,34 @@ static NTSTATUS setup_vmcs_config(struct vmcs_config* vmcs_conf,
 	UNREFERENCED_PARAMETER(vmx_cap);
 	NTSTATUS status = STATUS_SUCCESS;
 	u32 vmx_msr_low, vmx_msr_high;
+	u64 misc_msr;
 
 	memset(vmcs_conf, 0, sizeof(vmcs_conf));
 
 	rdmsr(MSR_IA32_VMX_BASIC, vmx_msr_low, vmx_msr_high);
+
+	if ((vmx_msr_high & 0x1fff) > PAGE_SIZE)
+		return STATUS_UNSUCCESSFUL;
+
+#ifdef _WIN64
+	/* IA-32 SDM Vol 3B: 64-bit CPUs always have VMX_BASIC_MSR[48]==0. */
+	if (vmx_msr_high & (1u << 16))
+		return STATUS_UNSUCCESSFUL;
+#endif
+
+	/* Require Write-Back (WB) memory type for VMCS accesses. */
+	if (((vmx_msr_high >> 18) & 15) != 6)
+		return STATUS_UNSUCCESSFUL;
+
+	misc_msr = __readmsr(MSR_IA32_VMX_MISC);
+
+	vmcs_conf->size = vmx_msr_high & 0x1fff;
+	vmcs_conf->basic_cap = vmx_msr_high & ~0x1fff;
+
+	vmcs_conf->revision_id = vmx_msr_low;
+
+
+	vmcs_conf->misc = misc_msr;
 
 
 	return status;
@@ -404,8 +449,30 @@ bool cpu_has_vmx_ept_2m_page() {
 	return !!(vmx_capability.ept & VMX_EPT_2MB_PAGE_BIT);
 }
 
-struct vmcs* alloc_vmcs_cpu() {
+struct vmcs* alloc_vmcs_cpu(bool shadow,int node) {
 	struct vmcs* vmcs = NULL;
+
+	LARGE_INTEGER lowAddress;
+	LARGE_INTEGER highAddress;
+	LARGE_INTEGER boundary;
+
+	lowAddress.QuadPart = 0ull;
+	highAddress.QuadPart = ~0ull;
+	boundary.QuadPart = 0ull;
+
+	vmcs = MmAllocateContiguousMemorySpecifyCacheNode(PAGE_SIZE,
+		lowAddress, highAddress, boundary, MmCached, node);
+	if (!vmcs)
+		return NULL;
+
+	RtlZeroMemory(vmcs, vmcs_config.size);
+
+	/* KVM supports Enlightened VMCS v1 only */
+	
+	vmcs->hdr.revision_id = vmcs_config.revision_id;
+
+	if (shadow)
+		vmcs->hdr.shadow_vmcs = 1;
 
 	return vmcs;
 }
@@ -414,9 +481,28 @@ struct vmcs* alloc_vmcs() {
 	return NULL;
 }
 
+ULONG_PTR KiAllocKvmArea(
+	_In_ ULONG_PTR Argument
+) {
+	UNREFERENCED_PARAMETER(Argument);
+
+	struct vmcs* vmcs;
+	vmcs = alloc_vmcs_cpu(FALSE, KeGetCurrentNodeNumber());
+	if (!vmcs) {
+		free_kvm_area();
+		return 1;
+	}
+
+	PHYSICAL_ADDRESS physical;
+	physical = MmGetPhysicalAddress(vmcs);
+	__vmx_vmptrst((unsigned __int64*)&physical);
+
+	return 0;
+}
+
+
 NTSTATUS alloc_kvm_area() {
-
-
+	KeIpiGenericCall(KiAllocKvmArea, 0);
 	return STATUS_SUCCESS;
 }
 
@@ -436,26 +522,6 @@ NTSTATUS hardware_setup() {
 	if (ExIsProcessorFeaturePresent(PF_NX_ENABLED)) {
 		kvm_enable_efer_bits(EFER_NX);
 	}
-
-	if (!cpu_has_vmx_vpid())
-		enable_vpid = 0;
-
-	if (!cpu_has_vmx_ept()) {
-		enable_ept = 0;
-		enable_unrestricted_guest = 0;
-	}
-
-	if (!cpu_has_vmx_unrestricted_guest())
-		enable_unrestricted_guest = 0;
-
-	if (!cpu_has_vmx_flexpriority())
-		flexpriority_enabled = 0;
-
-	if (!cpu_has_vmx_tpr_shadow())
-		kvm_x86_ops.update_cr8_intercept = NULL;
-
-	if (enable_ept && !cpu_has_vmx_ept_2m_page())
-		kvm_disable_largepages();
 
 	status = alloc_kvm_area();
 
