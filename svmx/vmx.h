@@ -497,7 +497,7 @@ void hardware_unsetup();
 
 
 
-void hardware_enable(void* junk);
+void hardware_enable();
 
 bool report_flexpriority();
 

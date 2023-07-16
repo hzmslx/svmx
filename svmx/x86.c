@@ -65,9 +65,14 @@ void kvm_enable_efer_bits(u64 mask) {
 	efer_reserved_bits &= ~mask;
 }
 
-void kvm_arch_hardware_enable(void* garbage) {
-	UNREFERENCED_PARAMETER(garbage);
-	kvm_x86_ops.hardware_enable();
+int kvm_arch_hardware_enable(void) {
+	int ret;
+
+	ret = kvm_x86_ops.hardware_enable();
+	if (ret != 0)
+		return ret;
+
+	return 0;
 }
 
 void kvm_get_segment(struct kvm_vcpu* vcpu,

@@ -64,6 +64,9 @@
     <ClCompile Include="pmu_intel.c">
       <Filter>vmx</Filter>
     </ClCompile>
+    <ClCompile Include="tdp_mmu.c">
+      <Filter>kvm</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="pch.h">
@@ -146,6 +149,24 @@
     </ClInclude>
     <ClInclude Include="capabilities.h">
       <Filter>vmx</Filter>
+    </ClInclude>
+    <ClInclude Include="mmu_internal.h">
+      <Filter>kvm</Filter>
+    </ClInclude>
+    <ClInclude Include="lapic.h">
+      <Filter>kvm</Filter>
+    </ClInclude>
+    <ClInclude Include="tdp_mmu.h">
+      <Filter>kvm</Filter>
+    </ClInclude>
+    <ClInclude Include="kvm_mm.h">
+      <Filter>kvm</Filter>
+    </ClInclude>
+    <ClInclude Include="vmcs12.h">
+      <Filter>vmx</Filter>
+    </ClInclude>
+    <ClInclude Include="svmx.h">
+      <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

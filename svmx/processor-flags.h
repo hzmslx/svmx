@@ -1,5 +1,10 @@
 #pragma once
 
+#define __AC(X,Y)	(X##Y)
+#define _AC(X,Y)	__AC(X,Y)
+#define _AT(T,X)	((T)(X))
+#define _UL(x)		(_AC(x, UL))
+#define _BITUL(x)	(_UL(1) << (x))
 /*
  * EFLAGS bits
  */
@@ -36,19 +41,52 @@
 #define X86_CR0_CD	0x40000000 /* Cache Disable */
 #define X86_CR0_PG	0x80000000 /* Paging */
 
-/*
- * Intel CPU features in CR4
- */
-#define X86_CR4_VME	0x00000001 /* enable vm86 extensions */
-#define X86_CR4_PVI	0x00000002 /* virtual interrupts flag enable */
-#define X86_CR4_TSD	0x00000004 /* disable time stamp at ipl 3 */
-#define X86_CR4_DE	0x00000008 /* enable debugging extensions */
-#define X86_CR4_PSE	0x00000010 /* enable page size extensions */
-#define X86_CR4_PAE	0x00000020 /* enable physical address extensions */
-#define X86_CR4_MCE	0x00000040 /* Machine check enable */
-#define X86_CR4_PGE	0x00000080 /* enable global pages */
-#define X86_CR4_PCE	0x00000100 /* enable performance counters at ipl 3 */
-#define X86_CR4_OSFXSR	0x00000200 /* enable fast FPU save and restore */
-#define X86_CR4_OSXMMEXCPT 0x00000400 /* enable unmasked SSE exceptions */
-#define X86_CR4_VMXE	0x00002000 /* enable VMX virtualization */
-#define X86_CR4_OSXSAVE 0x00040000 /* enable xsave and xrestore */
+ /*
+  * Intel CPU features in CR4
+  */
+#define X86_CR4_VME_BIT		0 /* enable vm86 extensions */
+#define X86_CR4_VME		_BITUL(X86_CR4_VME_BIT)
+#define X86_CR4_PVI_BIT		1 /* virtual interrupts flag enable */
+#define X86_CR4_PVI		_BITUL(X86_CR4_PVI_BIT)
+#define X86_CR4_TSD_BIT		2 /* disable time stamp at ipl 3 */
+#define X86_CR4_TSD		_BITUL(X86_CR4_TSD_BIT)
+#define X86_CR4_DE_BIT		3 /* enable debugging extensions */
+#define X86_CR4_DE		_BITUL(X86_CR4_DE_BIT)
+#define X86_CR4_PSE_BIT		4 /* enable page size extensions */
+#define X86_CR4_PSE		_BITUL(X86_CR4_PSE_BIT)
+#define X86_CR4_PAE_BIT		5 /* enable physical address extensions */
+#define X86_CR4_PAE		_BITUL(X86_CR4_PAE_BIT)
+#define X86_CR4_MCE_BIT		6 /* Machine check enable */
+#define X86_CR4_MCE		_BITUL(X86_CR4_MCE_BIT)
+#define X86_CR4_PGE_BIT		7 /* enable global pages */
+#define X86_CR4_PGE		_BITUL(X86_CR4_PGE_BIT)
+#define X86_CR4_PCE_BIT		8 /* enable performance counters at ipl 3 */
+#define X86_CR4_PCE		_BITUL(X86_CR4_PCE_BIT)
+#define X86_CR4_OSFXSR_BIT	9 /* enable fast FPU save and restore */
+#define X86_CR4_OSFXSR		_BITUL(X86_CR4_OSFXSR_BIT)
+#define X86_CR4_OSXMMEXCPT_BIT	10 /* enable unmasked SSE exceptions */
+#define X86_CR4_OSXMMEXCPT	_BITUL(X86_CR4_OSXMMEXCPT_BIT)
+#define X86_CR4_UMIP_BIT	11 /* enable UMIP support */
+#define X86_CR4_UMIP		_BITUL(X86_CR4_UMIP_BIT)
+#define X86_CR4_LA57_BIT	12 /* enable 5-level page tables */
+#define X86_CR4_LA57		_BITUL(X86_CR4_LA57_BIT)
+#define X86_CR4_VMXE_BIT	13 /* enable VMX virtualization */
+#define X86_CR4_VMXE		_BITUL(X86_CR4_VMXE_BIT)
+#define X86_CR4_SMXE_BIT	14 /* enable safer mode (TXT) */
+#define X86_CR4_SMXE		_BITUL(X86_CR4_SMXE_BIT)
+#define X86_CR4_FSGSBASE_BIT	16 /* enable RDWRFSGS support */
+#define X86_CR4_FSGSBASE	_BITUL(X86_CR4_FSGSBASE_BIT)
+#define X86_CR4_PCIDE_BIT	17 /* enable PCID support */
+#define X86_CR4_PCIDE		_BITUL(X86_CR4_PCIDE_BIT)
+#define X86_CR4_OSXSAVE_BIT	18 /* enable xsave and xrestore */
+#define X86_CR4_OSXSAVE		_BITUL(X86_CR4_OSXSAVE_BIT)
+#define X86_CR4_SMEP_BIT	20 /* enable SMEP support */
+#define X86_CR4_SMEP		_BITUL(X86_CR4_SMEP_BIT)
+#define X86_CR4_SMAP_BIT	21 /* enable SMAP support */
+#define X86_CR4_SMAP		_BITUL(X86_CR4_SMAP_BIT)
+#define X86_CR4_PKE_BIT		22 /* enable Protection Keys support */
+#define X86_CR4_PKE		_BITUL(X86_CR4_PKE_BIT)
+#define X86_CR4_CET_BIT		23 /* enable Control-flow Enforcement Technology */
+#define X86_CR4_CET		_BITUL(X86_CR4_CET_BIT)
+#define X86_CR4_LAM_SUP_BIT	28 /* LAM for supervisor pointers */
+#define X86_CR4_LAM_SUP		_BITUL(X86_CR4_LAM_SUP_BIT)

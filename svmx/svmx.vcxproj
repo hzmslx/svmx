@@ -184,6 +184,7 @@
     <ClCompile Include="processor.c" />
     <ClCompile Include="svm.c" />
     <ClCompile Include="svmx.c" />
+    <ClCompile Include="tdp_mmu.c" />
     <ClCompile Include="virtext.c" />
     <ClCompile Include="vmx.c" />
     <ClCompile Include="x86.c" />
@@ -197,10 +198,13 @@
     <ClInclude Include="kvm.h" />
     <ClInclude Include="kvm_emulate.h" />
     <ClInclude Include="kvm_host.h" />
+    <ClInclude Include="kvm_mm.h" />
     <ClInclude Include="kvm_para.h" />
     <ClInclude Include="kvm_types.h" />
+    <ClInclude Include="lapic.h" />
     <ClInclude Include="Logging.h" />
     <ClInclude Include="mmu.h" />
+    <ClInclude Include="mmu_internal.h" />
     <ClInclude Include="msr-index.h" />
     <ClInclude Include="msr.h" />
     <ClInclude Include="mtrr.h" />
@@ -211,9 +215,12 @@
     <ClInclude Include="processor-flags.h" />
     <ClInclude Include="processor.h" />
     <ClInclude Include="svm.h" />
+    <ClInclude Include="svmx.h" />
+    <ClInclude Include="tdp_mmu.h" />
     <ClInclude Include="types.h" />
     <ClInclude Include="virtext.h" />
     <ClInclude Include="vmcs.h" />
+    <ClInclude Include="vmcs12.h" />
     <ClInclude Include="vmx.h" />
     <ClInclude Include="x86.h" />
   </ItemGroup>

@@ -36,6 +36,12 @@ static u64 shadow_user_mask;
 static u64 shadow_accessed_mask;
 static u64 shadow_dirty_mask;
 
+struct kvm_mmu_role_regs {
+	const unsigned long cr0;
+	const unsigned long cr4;
+	const u64 efer;
+};
+
 NTSTATUS kvm_mmu_module_init() {
 	NTSTATUS status = STATUS_SUCCESS;
 	do
@@ -143,4 +149,28 @@ void kvm_enable_tdp() {
 
 void kvm_disable_tdp() {
 	tdp_enabled = FALSE;
+}
+
+static ulong kvm_read_cr0_bits(struct kvm_vcpu* vcpu, ulong mask) {
+
+	return vcpu->arch.cr0 & mask;
+}
+
+static ulong kvm_read_cr4_bits(struct kvm_vcpu* vcpu, ulong mask)
+{
+	return vcpu->arch.cr4 & mask;
+}
+
+static struct kvm_mmu_role_regs vcpu_to_role_regs(struct kvm_vcpu* vcpu) {
+	struct kvm_mmu_role_regs regs = {
+		.cr0 = kvm_read_cr0_bits(vcpu, KVM_MMU_CR0_ROLE_BITS),
+		.cr4 = kvm_read_cr4_bits(vcpu, KVM_MMU_CR4_ROLE_BITS),
+		.efer = vcpu->arch.efer,
+	};
+
+	return regs;
+}
+
+void kvm_init_mmu(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
 }

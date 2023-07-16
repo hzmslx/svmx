@@ -419,7 +419,7 @@ void svm_set_efer(struct kvm_vcpu* vcpu, u64 efer) {
 		efer &= ~EFER_LME;
 
 	to_svm(vcpu)->vmcb->save.efer = efer | EFER_SVME;
-	vcpu->arch.shadow_efer = efer;
+	
 }
 
 void svm_get_idt(struct kvm_vcpu* vcpu, struct descriptor_table* dt) {
@@ -452,23 +452,20 @@ void svm_set_gdt(struct kvm_vcpu* vcpu, struct descriptor_table* dt)
 }
 
 unsigned long svm_get_dr(struct kvm_vcpu* vcpu, int dr) {
-	struct vcpu_svm* svm = to_svm(vcpu);
-	unsigned long val;
+	UNREFERENCED_PARAMETER(vcpu);
 
 	switch (dr)
 	{
 	
 	case 7:
-		if (vcpu->guest_debug & KVM_GUESTDBG_USE_HW_BP)
-			val = vcpu->arch.dr7;
-		else
-			val = (unsigned long)svm->vmcb->save.dr7;
+		
 		break;
 	default:
-		val = 0;
+		
+		break;
 	}
 
-	return val;
+	return 0;
 }
 
 void svm_set_dr(struct kvm_vcpu* vcpu, int dr, unsigned long value,
@@ -482,8 +479,7 @@ void svm_set_dr(struct kvm_vcpu* vcpu, int dr, unsigned long value,
 
 	case 4:
 	case 5:
-		if (vcpu->arch.cr4 & X86_CR4_DE)
-			*exception = UD_VECTOR;
+	
 		return;
 
 	case 6:
@@ -491,7 +487,7 @@ void svm_set_dr(struct kvm_vcpu* vcpu, int dr, unsigned long value,
 			*exception = GP_VECTOR;
 			return;
 		}
-		vcpu->arch.dr6 = (value & DR6_VOLATILE) | DR6_FIXED_1;
+		
 		return;
 	default:
 		
@@ -595,7 +591,7 @@ void svm_inject_nmi(struct kvm_vcpu* vcpu)
 	struct vcpu_svm* svm = to_svm(vcpu);
 
 	svm->vmcb->control.event_inj = (u32)(SVM_EVTINJ_VALID | SVM_EVTINJ_TYPE_NMI);
-	vcpu->arch.hflags |= HF_NMI_MASK;
+	
 	svm->vmcb->control.intercept |= (1UL << INTERCEPT_IRET);
 	
 }
@@ -625,10 +621,8 @@ int svm_interrupt_allowed(struct kvm_vcpu* vcpu) {
 
 int svm_nmi_allowed(struct kvm_vcpu* vcpu)
 {
-	struct vcpu_svm* svm = to_svm(vcpu);
-	struct vmcb* vmcb = svm->vmcb;
-	return !(vmcb->control.int_state & SVM_INTERRUPT_SHADOW_MASK) &&
-		!(svm->vcpu.arch.hflags & HF_NMI_MASK);
+	UNREFERENCED_PARAMETER(vcpu);
+	return FALSE;
 }
 
 static void enable_nmi_window(struct kvm_vcpu* vcpu) {

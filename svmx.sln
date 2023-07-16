@@ -5,6 +5,8 @@ VisualStudioVersion = 16.0.31911.196
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "svmx", "svmx\svmx.vcxproj", "{A7692EEC-FAE2-4C3E-95FD-F6900FE99439}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "virt", "virt\virt.vcxproj", "{3EF6CE0F-704E-4F30-944A-D0B2B723E412}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|ARM = Debug|ARM
@@ -41,6 +43,18 @@ Global
 		{A7692EEC-FAE2-4C3E-95FD-F6900FE99439}.Release|x86.ActiveCfg = Release|Win32
 		{A7692EEC-FAE2-4C3E-95FD-F6900FE99439}.Release|x86.Build.0 = Release|Win32
 		{A7692EEC-FAE2-4C3E-95FD-F6900FE99439}.Release|x86.Deploy.0 = Release|Win32
+		{3EF6CE0F-704E-4F30-944A-D0B2B723E412}.Debug|ARM.ActiveCfg = Debug|Win32
+		{3EF6CE0F-704E-4F30-944A-D0B2B723E412}.Debug|ARM64.ActiveCfg = Debug|Win32
+		{3EF6CE0F-704E-4F30-944A-D0B2B723E412}.Debug|x64.ActiveCfg = Debug|x64
+		{3EF6CE0F-704E-4F30-944A-D0B2B723E412}.Debug|x64.Build.0 = Debug|x64
+		{3EF6CE0F-704E-4F30-944A-D0B2B723E412}.Debug|x86.ActiveCfg = Debug|Win32
+		{3EF6CE0F-704E-4F30-944A-D0B2B723E412}.Debug|x86.Build.0 = Debug|Win32
+		{3EF6CE0F-704E-4F30-944A-D0B2B723E412}.Release|ARM.ActiveCfg = Release|Win32
+		{3EF6CE0F-704E-4F30-944A-D0B2B723E412}.Release|ARM64.ActiveCfg = Release|Win32
+		{3EF6CE0F-704E-4F30-944A-D0B2B723E412}.Release|x64.ActiveCfg = Release|x64
+		{3EF6CE0F-704E-4F30-944A-D0B2B723E412}.Release|x64.Build.0 = Release|x64
+		{3EF6CE0F-704E-4F30-944A-D0B2B723E412}.Release|x86.ActiveCfg = Release|Win32
+		{3EF6CE0F-704E-4F30-944A-D0B2B723E412}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

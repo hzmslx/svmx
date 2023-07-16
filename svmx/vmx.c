@@ -28,6 +28,8 @@ static RTL_BITMAP vmx_vpid_bitmap;
 static unsigned long host_idt_base;
 
 
+
+
 struct vmcs_hdr {
 	u32 revision_id : 31;
 	u32 shadow_vmcs : 1;
@@ -62,7 +64,7 @@ static struct vmx_capability {
 struct vmx_capability vmx_capability;
 
 
-
+struct vmcs** vmxarea;
 
 static const struct trace_print_flags vmx_exit_reasons_str[] = {
 	{ EXIT_REASON_EXCEPTION_NMI,           "exception" },
@@ -179,28 +181,44 @@ static NTSTATUS vmx_check_processor_compat(void) {
 	return STATUS_SUCCESS;
 }
 
-ULONG_PTR KiFreeKvmArea(
-	_In_ ULONG_PTR Argument
-) {
-	UNREFERENCED_PARAMETER(Argument);
-	
-	PHYSICAL_ADDRESS physical;
-	physical.QuadPart = 0;
-	__vmx_vmptrst((unsigned __int64*)&physical);
-
-	return 0;
+void free_vmcs(struct vmcs* vmcs) {
+	MmFreeContiguousMemory(vmcs);
 }
 
 static void free_kvm_area(void)
 {
-	KeIpiGenericCall(KiFreeKvmArea, 0);
+	int cpu;
+	int processors = KeQueryActiveProcessorCount(NULL);
+	for (cpu = 0; cpu < processors; cpu++) {
+		free_vmcs(vmxarea[cpu]);
+	}
 }
 
 static void vmx_hardware_unsetup(void) {
 	
 }
 
+static int kvm_cpu_vmxon(u64 vmxon_pointer) {
+	__writecr4(__readcr4() | X86_CR4_VMXE);
+	__vmx_on(&vmxon_pointer);
+	return 0;
+}
+
 static int vmx_hardware_enable(void) {
+	u64 phys_addr = 0;
+	int r;
+
+	struct vmcs* vmcs = vmxarea[KeGetCurrentProcessorNumber()];
+	PHYSICAL_ADDRESS physical = MmGetPhysicalAddress(vmcs);
+	phys_addr = physical.QuadPart;
+	r = kvm_cpu_vmxon(phys_addr);
+	if (r) {
+		return r;
+	}
+
+	if (enable_ept) {
+
+	}
 
 	return 0;
 }
@@ -481,28 +499,23 @@ struct vmcs* alloc_vmcs() {
 	return NULL;
 }
 
-ULONG_PTR KiAllocKvmArea(
-	_In_ ULONG_PTR Argument
-) {
-	UNREFERENCED_PARAMETER(Argument);
 
-	struct vmcs* vmcs;
-	vmcs = alloc_vmcs_cpu(FALSE, KeGetCurrentNodeNumber());
-	if (!vmcs) {
-		free_kvm_area();
-		return 1;
-	}
-
-	PHYSICAL_ADDRESS physical;
-	physical = MmGetPhysicalAddress(vmcs);
-	__vmx_vmptrst((unsigned __int64*)&physical);
-
-	return 0;
-}
 
 
 NTSTATUS alloc_kvm_area() {
-	KeIpiGenericCall(KiAllocKvmArea, 0);
+	int cpu = 0;
+	int processors = KeQueryActiveProcessorCount(NULL);
+	for (cpu; cpu < processors; cpu++) {
+		struct vmcs* vmcs;
+		vmcs = alloc_vmcs_cpu(FALSE, KeGetCurrentNodeNumber());
+		if (!vmcs) {
+			free_kvm_area();
+			return 1;
+		}
+		vmxarea[cpu] = vmcs;
+	}
+	
+
 	return STATUS_SUCCESS;
 }
 
@@ -528,16 +541,13 @@ NTSTATUS hardware_setup() {
 	return status;
 }
 
-void free_vmcs(struct vmcs* vmcs) {
-	UNREFERENCED_PARAMETER(vmcs);
-}
+
 
 void hardware_unsetup() {
 	free_kvm_area();
 }
 
-void hardware_enable(void* junk) {
-	UNREFERENCED_PARAMETER(junk);
+void hardware_enable() {
 	u64 old;
 
 	old = __readmsr(MSR_IA32_FEATURE_CONTROL);
@@ -675,8 +685,7 @@ void vmx_get_cs_db_l_bits(struct kvm_vcpu* vcpu, int* db, int* l) {
 }
 
 void vmx_decache_cr4_guest_bits(struct kvm_vcpu* vcpu) {
-	vcpu->arch.cr4 &= KVM_GUEST_CR4_MASK;
-	vcpu->arch.cr4 |= vmcs_readl(GUEST_CR4) & ~KVM_GUEST_CR4_MASK;
+	UNREFERENCED_PARAMETER(vcpu);
 }
 
 void vmx_set_cr0(struct kvm_vcpu* vcpu, unsigned long cr0) {
@@ -699,8 +708,8 @@ void vmx_set_cr3(struct kvm_vcpu* vcpu, unsigned long cr3) {
 
 void vmx_set_cr4(struct kvm_vcpu* vcpu, unsigned long cr4) {
 	UNREFERENCED_PARAMETER(vcpu);
-
-	vcpu->arch.cr4 = cr4;
+	UNREFERENCED_PARAMETER(cr4);
+	
 	if (enable_ept) {
 
 	}
