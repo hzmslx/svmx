@@ -8,6 +8,7 @@ extern struct vmcs* vmxarea;
 
 DRIVER_UNLOAD DriverUnload;
 DRIVER_DISPATCH DriverDeviceControl;
+DRIVER_DISPATCH DriverCreateClose;
 
 NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath);
 
@@ -27,6 +28,8 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) 
 
 	DriverObject->DriverUnload = DriverUnload;
 	DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = DriverDeviceControl;
+	DriverObject->MajorFunction[IRP_MJ_CREATE] = DriverCreateClose;
+	DriverObject->MajorFunction[IRP_MJ_CLOSE] = DriverCreateClose;
 
 	KeInitializeMutex(&vendor_module_lock, 0);
 	
@@ -115,4 +118,16 @@ NTSTATUS DriverDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
 	Irp->IoStatus.Information = 0;
 	IoCompleteRequest(Irp, IO_NO_INCREMENT);
 	return status;
+}
+
+NTSTATUS CompleteRequest(PIRP Irp, NTSTATUS status, ULONG_PTR info) {
+	Irp->IoStatus.Status = status;
+	Irp->IoStatus.Information = info;
+	IoCompleteRequest(Irp, IO_NO_INCREMENT);
+	return status;
+}
+
+NTSTATUS DriverCreateClose(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
+	UNREFERENCED_PARAMETER(DeviceObject);
+	return CompleteRequest(Irp, STATUS_SUCCESS, 0);
 }

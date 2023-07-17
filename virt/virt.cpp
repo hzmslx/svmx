@@ -19,7 +19,7 @@ int Error(const char* text) {
     return 1;
 }
 
-int main(int argc,wchar_t* argv[]){
+int wmain(int argc,wchar_t* argv[]){
     if (argc < 2)
         return Usage();
 
@@ -31,6 +31,7 @@ int main(int argc,wchar_t* argv[]){
         return Error("Failed to open device");
 
     DWORD bytes;
+    printf("cmd: %ws\n", cmd);
     if (_wcsicmp(cmd, L"create") == 0) {
         if (!DeviceIoControl(hDevice.get(), KVM_CREATE_VM, nullptr, 0,
             nullptr, 0, &bytes, nullptr)) {

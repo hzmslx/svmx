@@ -1264,3 +1264,5 @@ void kvm_x86_vendor_exit(void);
 static struct kvm* kvm_arch_alloc_vm(void) {
 	return ExAllocatePoolZero(PagedPool, kvm_x86_ops.vm_size, DRIVER_TAG);
 }
+
+void kvm_arch_hardware_disable(void);

@@ -29,7 +29,7 @@ int kvm_init(unsigned vcpu_size, unsigned vcpu_align){
 	UNREFERENCED_PARAMETER(vcpu_size);
 	NTSTATUS status = STATUS_SUCCESS;
 	
-
+	KeInitializeMutex(&kvm_lock, 0);
 
 	return status;
 }
@@ -108,4 +108,28 @@ struct kvm* kvm_create_vm(unsigned long type) {
 	status = hardware_enable_all();
 
 	return kvm;
+}
+
+static int kvm_offline_cpu(unsigned int cpu)
+{
+	UNREFERENCED_PARAMETER(cpu);
+	KeWaitForSingleObject(&kvm_lock, Executive, KernelMode, FALSE, NULL);
+	if (kvm_usage_count)
+		hardware_enable_nolock(NULL);
+	KeReleaseMutex(&kvm_lock, FALSE);
+}
+
+static int kvm_suspend(void) {
+	/*
+	* Secondary CPUs and CPU hotplug are disabled across the suspend/resume
+	* callbacks, i.e. no need to acquire kvm_lock to ensure the usage count
+	* is stable.  Assert that kvm_lock is not held to ensure the system
+	* isn't suspended while KVM is enabling hardware.  Hardware enabling
+	* can be preempted, but the task cannot be frozen until it has dropped
+	* all locks (userspace tasks are frozen via a fake signal).
+	*/
+	if (kvm_usage_count)
+		hardware_enable_nolock(NULL);
+
+	return 0;
 }

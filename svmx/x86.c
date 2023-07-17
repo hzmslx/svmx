@@ -154,3 +154,17 @@ void kvm_x86_vendor_exit(void) {
 	kvm_x86_ops.hardware_enable = NULL;
 	KeReleaseMutex(&vendor_module_lock, FALSE);
 }
+
+void kvm_arch_hardware_disable(void) {
+	kvm_x86_ops.hardware_disable();
+}
+
+static void hardware_disable_nolock(void* junk) {
+	UNREFERENCED_PARAMETER(junk);
+	/*
+	* Note, hardware_disable_all_nolock() tells all online CPUs to disable
+	* hardware, not just CPUs that successfully enabled hardware!
+	*/
+
+	kvm_arch_hardware_disable();
+}

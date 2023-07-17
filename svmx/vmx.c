@@ -225,6 +225,9 @@ static int vmx_hardware_enable(void) {
 
 static void vmx_hardware_disable(void) {
 
+	if (cpu_vmxoff())
+		NT_ASSERT(FALSE);
+
 }
 
 /*
