@@ -482,7 +482,7 @@ struct kvm_vmx {
 };
 
 NTSTATUS vmx_init();
-void vmx_exit();
+
 
 bool kvm_is_vmx_supported();
 int cpu_has_kvm_support();

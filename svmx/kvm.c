@@ -38,7 +38,9 @@ void kvm_disable_largepages() {
 	largepages_enabled = FALSE;
 }
 
-void kvm_exit() {
+void kvm_exit(void) {
+	
+
 
 }
 

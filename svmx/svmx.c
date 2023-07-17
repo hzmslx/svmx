@@ -18,6 +18,7 @@ VOID DriverUnload(PDRIVER_OBJECT DriverObject) {
 	UNICODE_STRING linkName = RTL_CONSTANT_STRING(L"\\??\\KVM");
 	IoDeleteSymbolicLink(&linkName);
 	IoDeleteDevice(DriverObject->DeviceObject);
+	kvm_exit();
 }
 
 NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) {

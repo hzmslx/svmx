@@ -147,4 +147,10 @@ NTSTATUS kvm_x86_vendor_init(struct kvm_x86_init_ops* ops) {
 
 void kvm_x86_vendor_exit(void) {
 
+	kvm_x86_ops.hardware_unsetup();
+
+	KeWaitForSingleObject(&vendor_module_lock, Executive, 
+		KernelMode, FALSE, NULL);
+	kvm_x86_ops.hardware_enable = NULL;
+	KeReleaseMutex(&vendor_module_lock, FALSE);
 }

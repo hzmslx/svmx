@@ -195,7 +195,7 @@ static void free_kvm_area(void)
 }
 
 static void vmx_hardware_unsetup(void) {
-	
+	free_kvm_area();
 }
 
 static int kvm_cpu_vmxon(u64 vmxon_pointer) {
@@ -985,9 +985,23 @@ void ept_sync_global() {
 
 }
 
-void vmx_exit() {
+static void vmx_cleanup_l1d_flush(void) {
 
+}
+
+static void __vmx_exit(void) {
+	allow_smaller_maxphyaddr = FALSE;
+
+
+	vmx_cleanup_l1d_flush();
+}
+
+static void vmx_exit(void) {
+	kvm_exit();
+	kvm_x86_vendor_exit();
 	
+
+	__vmx_exit();
 }
 
 bool kvm_is_vmx_supported() {
@@ -1015,16 +1029,9 @@ NTSTATUS vmx_setup_l1d_flush(enum vmx_l1d_flush_state l1tf) {
 	return STATUS_SUCCESS;
 }
 
-static void vmx_cleanup_l1d_flush(void) {
 
-}
 
-static void __vmx_exit(void) {
-	allow_smaller_maxphyaddr = FALSE;
 
-	
-	vmx_cleanup_l1d_flush();
-}
 
 NTSTATUS vmx_init() {
 	NTSTATUS status = STATUS_SUCCESS;

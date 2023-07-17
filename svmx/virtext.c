@@ -8,7 +8,7 @@
 
 int cpu_has_vmx() {
 	unsigned long ecx = cpuid_ecx(1);
-	return test_bit(5, &ecx);/* CPUID.1:ECX.VMX[bit 5] -> VT */
+	return _bittest((const LONG*)&ecx, 5); /* CPUID.1:ECX.VMX[bit 5] -> VT */
 }
 
 bool cpu_is_enabled_vmx() {

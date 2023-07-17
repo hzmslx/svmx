@@ -7,7 +7,7 @@ unsigned int cpuid_ecx(unsigned int op) {
 
 	// Basic CPUID Information
 	CpuIdEx(cpuInfo, op, 0);
-	
+
 	return cpuInfo[2];
 }
 
