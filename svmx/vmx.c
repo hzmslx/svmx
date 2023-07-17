@@ -999,7 +999,7 @@ static void __vmx_exit(void) {
 	vmx_cleanup_l1d_flush();
 }
 
-static void vmx_exit(void) {
+void vmx_exit(void) {
 	kvm_exit();
 	kvm_x86_vendor_exit();
 	

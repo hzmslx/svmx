@@ -9,6 +9,8 @@ extern struct vmcs* vmxarea;
 DRIVER_UNLOAD DriverUnload;
 DRIVER_DISPATCH DriverDeviceControl;
 DRIVER_DISPATCH DriverCreateClose;
+bool g_vmx_init = FALSE;
+bool g_svm_init = FALSE;
 
 NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath);
 
@@ -19,7 +21,12 @@ VOID DriverUnload(PDRIVER_OBJECT DriverObject) {
 	UNICODE_STRING linkName = RTL_CONSTANT_STRING(L"\\??\\KVM");
 	IoDeleteSymbolicLink(&linkName);
 	IoDeleteDevice(DriverObject->DeviceObject);
-	kvm_exit();
+	if (g_vmx_init) {
+		vmx_exit();
+	}
+	else if (g_svm_init) {
+		svm_exit();
+	}
 }
 
 NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) {
@@ -65,9 +72,13 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) 
 			return status;
 		}
 		status = vmx_init();
+		if (NT_SUCCESS(status))
+			g_vmx_init = TRUE;
 	}
 	else if (strcmp(brand, "AuthenticAMD") == 0) {
 		status = svm_init();
+		if (NT_SUCCESS(status))
+			g_svm_init = TRUE;
 	}
 	else {
 		status = STATUS_NOT_SUPPORTED;
