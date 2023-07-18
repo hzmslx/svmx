@@ -222,6 +222,7 @@
     <ClInclude Include="vmcs.h" />
     <ClInclude Include="vmcs12.h" />
     <ClInclude Include="vmx.h" />
+    <ClInclude Include="vmxfeatures.h" />
     <ClInclude Include="x86.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

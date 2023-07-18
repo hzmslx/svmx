@@ -1244,7 +1244,7 @@ void kvm_get_cs_db_l_bits(struct kvm_vcpu* vcpu, int* db, int* l);
 
 NTSTATUS kvm_mmu_module_init();
 
-NTSTATUS kvm_arch_hardware_setup();
+
 void kvm_arch_check_processor_compat();
 
 void kvm_enable_efer_bits(u64);
@@ -1266,3 +1266,4 @@ static struct kvm* kvm_arch_alloc_vm(void) {
 }
 
 void kvm_arch_hardware_disable(void);
+void kvm_put_kvm(struct kvm* kvm);

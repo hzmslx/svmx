@@ -47,6 +47,7 @@ void kvm_exit(void) {
 NTSTATUS kvm_dev_ioctl_create_vm(unsigned long type) {
 	struct kvm* kvm;
 
+	// the main implementation of creating vm
 	kvm = kvm_create_vm(type);
 	if (!kvm) {
 		return STATUS_UNSUCCESSFUL;
@@ -80,9 +81,10 @@ static NTSTATUS hardware_enable_all(void) {
 	NTSTATUS status = STATUS_SUCCESS;
 
 	KeWaitForSingleObject(&kvm_lock, Executive, KernelMode, FALSE, NULL);
-
+	// we increment the count only here
 	kvm_usage_count++;
 	if (kvm_usage_count == 1) {
+		// for each cpu
 		KeIpiGenericCall(EnableHardware, 0);
 	}
 
@@ -104,7 +106,7 @@ struct kvm* kvm_create_vm(unsigned long type) {
 	KeInitializeMutex(&kvm->irq_lock, 0);
 
 	NTSTATUS status;
-
+	// enable the hardware
 	status = hardware_enable_all();
 
 	return kvm;
@@ -117,6 +119,11 @@ static int kvm_offline_cpu(unsigned int cpu)
 	if (kvm_usage_count)
 		hardware_enable_nolock(NULL);
 	KeReleaseMutex(&kvm_lock, FALSE);
+}
+
+static void kvm_destroy_vm(struct kvm* kvm) {
+	UNREFERENCED_PARAMETER(kvm);
+	hardware_enable_all();
 }
 
 static int kvm_suspend(void) {
@@ -132,4 +139,9 @@ static int kvm_suspend(void) {
 		hardware_enable_nolock(NULL);
 
 	return 0;
+}
+
+void kvm_put_kvm(struct kvm* kvm) {
+	UNREFERENCED_PARAMETER(kvm);
+	
 }

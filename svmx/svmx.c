@@ -8,7 +8,7 @@ extern struct vmcs* vmxarea;
 
 DRIVER_UNLOAD DriverUnload;
 DRIVER_DISPATCH DriverDeviceControl;
-DRIVER_DISPATCH DriverCreateClose;
+DRIVER_DISPATCH DriverCreateClose, DriverShutdown;
 bool g_vmx_init = FALSE;
 bool g_svm_init = FALSE;
 
@@ -37,6 +37,7 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) 
 	DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = DriverDeviceControl;
 	DriverObject->MajorFunction[IRP_MJ_CREATE] = DriverCreateClose;
 	DriverObject->MajorFunction[IRP_MJ_CLOSE] = DriverCreateClose;
+	DriverObject->MajorFunction[IRP_MJ_SHUTDOWN] = DriverShutdown;
 
 	KeInitializeMutex(&vendor_module_lock, 0);
 	
@@ -71,6 +72,7 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) 
 			IoDeleteDevice(DeviceObject);
 			return status;
 		}
+		// module initialize
 		status = vmx_init();
 		if (NT_SUCCESS(status))
 			g_vmx_init = TRUE;
@@ -94,6 +96,7 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) 
 	return status;
 }
 
+// kvm ioctl entry
 NTSTATUS DriverDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
 	UNREFERENCED_PARAMETER(DeviceObject);
 	NTSTATUS status = STATUS_SUCCESS;
@@ -106,6 +109,7 @@ NTSTATUS DriverDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
 		break;
 
 	case KVM_CREATE_VM:
+		// create virtual machine
 		status = kvm_dev_ioctl_create_vm(0);
 		break;
 
@@ -139,6 +143,11 @@ NTSTATUS CompleteRequest(PIRP Irp, NTSTATUS status, ULONG_PTR info) {
 }
 
 NTSTATUS DriverCreateClose(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
+	UNREFERENCED_PARAMETER(DeviceObject);
+	return CompleteRequest(Irp, STATUS_SUCCESS, 0);
+}
+
+NTSTATUS DriverShutdown(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
 	UNREFERENCED_PARAMETER(DeviceObject);
 	return CompleteRequest(Irp, STATUS_SUCCESS, 0);
 }

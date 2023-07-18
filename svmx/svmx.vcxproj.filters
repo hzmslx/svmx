@@ -168,5 +168,8 @@
     <ClInclude Include="svmx.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="vmxfeatures.h">
+      <Filter>asm</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

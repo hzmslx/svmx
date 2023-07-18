@@ -53,10 +53,6 @@ void kvm_init_msr_list() {
 	
 }
 
-NTSTATUS kvm_arch_hardware_setup() {
-	return STATUS_SUCCESS;
-}
-
 void kvm_arch_check_processor_compat() {
 	kvm_x86_ops.check_processor_compatibility();
 }
@@ -68,6 +64,7 @@ void kvm_enable_efer_bits(u64 mask) {
 int kvm_arch_hardware_enable(void) {
 	int ret;
 
+	// open the hardware feature
 	ret = kvm_x86_ops.hardware_enable();
 	if (ret != 0)
 		return ret;

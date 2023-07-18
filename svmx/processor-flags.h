@@ -5,6 +5,10 @@
 #define _AT(T,X)	((T)(X))
 #define _UL(x)		(_AC(x, UL))
 #define _BITUL(x)	(_UL(1) << (x))
+
+#define UL(x)		(_UL(x))
+#define BIT(nr)		(UL(1) << (nr))
+
 /*
  * EFLAGS bits
  */
