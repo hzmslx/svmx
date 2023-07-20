@@ -21,7 +21,7 @@ static int kvm_usage_count = 0;
 
 static bool largepages_enabled = TRUE;
 
-
+bool kvm_rebooting;
 
 
 int kvm_init(unsigned vcpu_size, unsigned vcpu_align){
@@ -84,6 +84,7 @@ static NTSTATUS hardware_enable_all(void) {
 	// we increment the count only here
 	kvm_usage_count++;
 	if (kvm_usage_count == 1) {
+		// 只有第一次才会调用
 		// for each cpu
 		KeIpiGenericCall(EnableHardware, 0);
 	}
@@ -121,10 +122,6 @@ static int kvm_offline_cpu(unsigned int cpu)
 	KeReleaseMutex(&kvm_lock, FALSE);
 }
 
-static void kvm_destroy_vm(struct kvm* kvm) {
-	UNREFERENCED_PARAMETER(kvm);
-	hardware_enable_all();
-}
 
 static int kvm_suspend(void) {
 	/*
@@ -141,7 +138,64 @@ static int kvm_suspend(void) {
 	return 0;
 }
 
+static ULONG_PTR DisableHardware(
+	_In_ ULONG_PTR Argument
+) {
+	UNREFERENCED_PARAMETER(Argument);
+	kvm_arch_hardware_disable();
+	return 0;
+}
+
+static void hardware_disable_all_nolock(void) {
+	// 当前虚拟机不再使用,所以减一
+	kvm_usage_count--;
+	// 系统中没有虚拟机时,关闭硬件虚拟化功能
+	if (!kvm_usage_count)
+		KeIpiGenericCall(DisableHardware, 0);
+}
+
+static void hardware_disable_all(void) {
+	KeWaitForSingleObject(&kvm_lock, Executive, KernelMode, FALSE, NULL);
+	hardware_disable_all_nolock();
+	KeReleaseMutex(&kvm_lock, FALSE);
+}
+
+static void kvm_destroy_vm(struct kvm* kvm) {
+	UNREFERENCED_PARAMETER(kvm);
+	hardware_disable_all();
+}
+
 void kvm_put_kvm(struct kvm* kvm) {
 	UNREFERENCED_PARAMETER(kvm);
 	
+}
+
+static void hardware_disable_nolock(void* junk) {
+	UNREFERENCED_PARAMETER(junk);
+	/*
+	* Note, hardware_disable_all_nolock() tells all online CPUs to disable
+	* hardware, not just CPUs that successfully enabled hardware!
+	*/
+	kvm_arch_hardware_disable();
+}
+
+static void kvm_shutdown(void) {
+	/*
+	* Disable hardware virtualization and set kvm_rebooting to indicate
+	* that KVM has asynchronously disabled hardware virtualization, i.e.
+	* that relevant errors and exceptions aren't entirely unexpected.
+	* Some flavors of hardware virtualization need to be disabled before
+	* transferring control to firmware (to perform shutdown/reboot), e.g.
+	* on x86, virtualization can block INIT interrupts, which are used by
+	* firmware to pull APs back under firmware control.  Note, this path
+	* is used for both shutdown and reboot scenarios, i.e. neither name is
+	* 100% comprehensive.
+	*/
+	kvm_rebooting = TRUE;
+	hardware_disable_nolock(NULL);
+}
+
+static void kvm_resume(void) {
+	if (kvm_usage_count)
+		__hardware_enable_nolock();
 }

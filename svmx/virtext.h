@@ -26,7 +26,7 @@ int cpu_has_svm(const char** msg);
 
 bool cpu_is_enabled_vmx();
 
-static ULONG_PTR DisableHardware(
+static ULONG_PTR ExecuteVmxOff(
 	_In_ ULONG_PTR Argument
 ) {
 	UNREFERENCED_PARAMETER(Argument);
@@ -46,7 +46,7 @@ static ULONG_PTR DisableHardware(
  * magically in RM, VM86, compat mode, or at CPL>0.
  */
 static int cpu_vmxoff(void) {
-	KeIpiGenericCall(DisableHardware, 0);
+	KeIpiGenericCall(ExecuteVmxOff, 0);
 
 	return 0;
 }

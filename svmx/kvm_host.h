@@ -435,7 +435,7 @@ struct kvm_vcpu_arch {
 	u64 apic_base;
 	struct kvm_lapic* apic;    /* kernel irqchip context */
 	bool load_eoi_exitmap_pending;
-	
+
 	unsigned long apic_attention;
 
 	int mp_state;
@@ -495,12 +495,12 @@ struct kvm_vcpu_arch {
 	 * "guest_fpstate" state here contains the guest FPU context, with the
 	 * host PRKU bits.
 	 */
-	
+
 
 	u64 xcr0;
 	u64 guest_supported_xcr0;
 
-	
+
 	void* pio_data;
 	void* sev_pio_data;
 	unsigned sev_pio_count;
@@ -510,9 +510,9 @@ struct kvm_vcpu_arch {
 	bool exception_from_userspace;
 
 	/* Exceptions to be injected to the guest. */
-	
+
 	/* Exception VM-Exits to be synthesized to L1. */
-	
+
 
 	struct kvm_queued_interrupt {
 		bool injected;
@@ -523,8 +523,8 @@ struct kvm_vcpu_arch {
 	int halt_request; /* real mode on Intel only */
 
 	int cpuid_nent;
-	
-	
+	struct kvm_cpuid_entry2* cpuid_entries;
+
 
 	u64 reserved_gpa_bits;
 	int maxphyaddr;
@@ -537,9 +537,9 @@ struct kvm_vcpu_arch {
 	int (*complete_userspace_io)(struct kvm_vcpu* vcpu);
 
 	gpa_t time;
-	
+
 	unsigned int hw_tsc_khz;
-	
+
 	/* set guest stopped flag in pvclock flags field */
 	bool pvclock_set_guest_stopped_request;
 
@@ -547,7 +547,7 @@ struct kvm_vcpu_arch {
 		u8 preempted;
 		u64 msr_val;
 		u64 last_steal;
-		
+
 	} st;
 
 	u64 l1_tsc_offset;
@@ -568,14 +568,14 @@ struct kvm_vcpu_arch {
 	u64 l1_tsc_scaling_ratio;
 	u64 tsc_scaling_ratio; /* current scaling ratio */
 
-	
+
 	/* Number of NMIs pending injection, not including hardware vNMIs. */
 	unsigned int nmi_pending;
 	bool nmi_injected;    /* Trying to inject an NMI this entry */
 	bool smi_pending;    /* SMI queued after currently running handler */
 	u8 handling_intr_from_guest;
 
-	
+
 	u64 pat;
 
 	unsigned switch_db_regs;
@@ -607,17 +607,16 @@ struct kvm_vcpu_arch {
 
 	bool hyperv_enabled;
 	struct kvm_vcpu_hv* hyperv;
-	
 
-	
+
+
 
 	unsigned long last_retry_eip;
 	unsigned long last_retry_addr;
 
 	struct {
 		bool halted;
-		
-		
+
 		u64 msr_en_val; /* MSR_KVM_ASYNC_PF_EN */
 		u64 msr_int_val; /* MSR_KVM_ASYNC_PF_INT */
 		u16 vec;
@@ -634,10 +633,7 @@ struct kvm_vcpu_arch {
 		u64 status;
 	} osvw;
 
-	struct {
-		u64 msr_val;
-		
-	} pv_eoi;
+
 
 	u64 msr_kvm_poll_control;
 
@@ -687,35 +683,77 @@ struct kvm_vcpu_arch {
 	 * reading the guest memory
 	 */
 	bool pdptrs_from_userspace;
-
 };
 
 struct kvm_vcpu {
 	struct kvm* kvm;
-
-	int vcpu_id;
-	//struct mutex mutex;
-	int   cpu;
-	struct kvm_run* run;
-	unsigned long requests;
+#ifdef CONFIG_PREEMPT_NOTIFIERS
+	struct preempt_notifier preempt_notifier;
+#endif
+	int cpu;
+	int vcpu_id; /* id given by userspace at creation */
+	int vcpu_idx; /* index into kvm->vcpu_array */
+	int ____srcu_idx; /* Don't use this directly.  You've been warned. */
+#ifdef CONFIG_PROVE_RCU
+	int srcu_depth;
+#endif
+	int mode;
+	u64 requests;
 	unsigned long guest_debug;
-	int fpu_active;
-	int guest_fpu_loaded;
-	//wait_queue_head_t wq;
+
+	struct kvm_run* run;
+
+#ifndef __KVM_HAVE_ARCH_WQP
+	
+#endif
+
 	int sigset_active;
-	//sigset_t sigset;
-	//struct kvm_vcpu_stat stat;
+
+	unsigned int halt_poll_ns;
+	bool valid_wakeup;
 
 #ifdef CONFIG_HAS_IOMEM
 	int mmio_needed;
 	int mmio_read_completed;
 	int mmio_is_write;
-	int mmio_size;
-	unsigned char mmio_data[8];
-	gpa_t mmio_phys_addr;
+	int mmio_cur_fragment;
+	int mmio_nr_fragments;
+	struct kvm_mmio_fragment mmio_fragments[KVM_MAX_MMIO_FRAGMENTS];
 #endif
 
+#ifdef CONFIG_KVM_ASYNC_PF
+	struct {
+		u32 queued;
+		struct list_head queue;
+		struct list_head done;
+		spinlock_t lock;
+	} async_pf;
+#endif
+
+#ifdef CONFIG_HAVE_KVM_CPU_RELAX_INTERCEPT
+	/*
+	 * Cpu relax intercept or pause loop exit optimization
+	 * in_spin_loop: set when a vcpu does a pause loop exit
+	 *  or cpu relax intercepted.
+	 * dy_eligible: indicates whether vcpu is eligible for directed yield.
+	 */
+	struct {
+		bool in_spin_loop;
+		bool dy_eligible;
+	} spin_loop;
+#endif
+	bool preempted;
+	bool ready;
 	struct kvm_vcpu_arch arch;
+
+	/*
+	 * The most recently used memslot by this vCPU and the slots generation
+	 * for which it is valid.
+	 * No wraparound protection is needed since generations won't overflow in
+	 * thousands of years, even assuming 1M memslot operations per second.
+	 */
+
+	u64 last_used_slot_gen;
 };
 
 
@@ -1267,3 +1305,4 @@ static struct kvm* kvm_arch_alloc_vm(void) {
 
 void kvm_arch_hardware_disable(void);
 void kvm_put_kvm(struct kvm* kvm);
+int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu* vcpu);

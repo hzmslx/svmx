@@ -1,7 +1,46 @@
 #pragma once
 #include "svmx.h"
 
+#pragma warning(disable:4201)
 
+#define KVM_EXIT_UNKNOWN          0
+#define KVM_EXIT_EXCEPTION        1
+#define KVM_EXIT_IO               2
+#define KVM_EXIT_HYPERCALL        3
+#define KVM_EXIT_DEBUG            4
+#define KVM_EXIT_HLT              5
+#define KVM_EXIT_MMIO             6
+#define KVM_EXIT_IRQ_WINDOW_OPEN  7
+#define KVM_EXIT_SHUTDOWN         8
+#define KVM_EXIT_FAIL_ENTRY       9
+#define KVM_EXIT_INTR             10
+#define KVM_EXIT_SET_TPR          11
+#define KVM_EXIT_TPR_ACCESS       12
+#define KVM_EXIT_S390_SIEIC       13
+#define KVM_EXIT_S390_RESET       14
+#define KVM_EXIT_DCR              15 /* deprecated */
+#define KVM_EXIT_NMI              16
+#define KVM_EXIT_INTERNAL_ERROR   17
+#define KVM_EXIT_OSI              18
+#define KVM_EXIT_PAPR_HCALL	  19
+#define KVM_EXIT_S390_UCONTROL	  20
+#define KVM_EXIT_WATCHDOG         21
+#define KVM_EXIT_S390_TSCH        22
+#define KVM_EXIT_EPR              23
+#define KVM_EXIT_SYSTEM_EVENT     24
+#define KVM_EXIT_S390_STSI        25
+#define KVM_EXIT_IOAPIC_EOI       26
+#define KVM_EXIT_HYPERV           27
+#define KVM_EXIT_ARM_NISV         28
+#define KVM_EXIT_X86_RDMSR        29
+#define KVM_EXIT_X86_WRMSR        30
+#define KVM_EXIT_DIRTY_RING_FULL  31
+#define KVM_EXIT_AP_RESET_HOLD    32
+#define KVM_EXIT_X86_BUS_LOCK     33
+#define KVM_EXIT_XEN              34
+#define KVM_EXIT_RISCV_SBI        35
+#define KVM_EXIT_RISCV_CSR        36
+#define KVM_EXIT_NOTIFY           37
 
 
 /* Device model IOC */
@@ -30,10 +69,24 @@ struct kvm_segment {
 	__u8  padding;
 };
 
+/* for KVM_RUN */
 struct kvm_run {
 	/* in */
 	__u8 request_interrupt_window;
+	__u8 immediate_exit;
+	__u8 padding1[6];
 
+	/* out */
+	__u32 exit_reason;
+
+
+
+	union {
+		struct {
+			__u64 hardware_entry_failure_reason;
+			__u32 cpu;
+		} fail_entry;
+	};
 };
 
 #define KVM_GUESTDBG_USE_SW_BP		0x00010000
@@ -57,6 +110,21 @@ struct kvm_msr_entry {
 	__u32 reserved;
 	__u64 data;
 };
+
+/* for KVM_SET_MP_STATE */
+
+/* not all states are valid on all architectures */
+#define KVM_MP_STATE_RUNNABLE          0
+#define KVM_MP_STATE_UNINITIALIZED     1
+#define KVM_MP_STATE_INIT_RECEIVED     2
+#define KVM_MP_STATE_HALTED            3
+#define KVM_MP_STATE_SIPI_RECEIVED     4
+#define KVM_MP_STATE_STOPPED           5
+#define KVM_MP_STATE_CHECK_STOP        6
+#define KVM_MP_STATE_OPERATING         7
+#define KVM_MP_STATE_LOAD              8
+#define KVM_MP_STATE_AP_RESET_HOLD     9
+#define KVM_MP_STATE_SUSPENDED         10
 
 NTSTATUS kvm_dev_ioctl_create_vm(unsigned long type);
 struct kvm* kvm_create_vm(unsigned long type);

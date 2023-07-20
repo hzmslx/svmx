@@ -6,6 +6,7 @@
 #include "desc.h"
 #include "capabilities.h"
 #include "processor.h"
+#include "vmcs12.h"
 
 
 static int bypass_guest_pf = 1;
@@ -28,19 +29,10 @@ static RTL_BITMAP vmx_vpid_bitmap;
 
 static unsigned long host_idt_base;
 
+/* Guest_tsc -> host_tsc conversion requires 64-bit division.  */
+static int cpu_preemption_timer_multi;
+static bool enable_preemption_timer = TRUE;
 
-
-
-struct vmcs_hdr {
-	u32 revision_id : 31;
-	u32 shadow_vmcs : 1;
-};
-
-struct vmcs {
-	struct vmcs_hdr hdr;
-	u32 abort;
-	char data[];
-};
 
 
 static struct vmcs_config {
@@ -64,7 +56,7 @@ static struct vmx_capability {
 
 struct vmx_capability vmx_capability;
 
-
+// vmxon 区域
 struct vmcs** vmxarea;
 
 static const struct trace_print_flags vmx_exit_reasons_str[] = {
@@ -207,13 +199,222 @@ NTSTATUS vmx_get_msr(struct kvm_vcpu* vcpu, u32 msr_index, u64* pdata);
  */
 NTSTATUS vmx_set_msr(struct kvm_vcpu* vcpu, u32 msr_index, u64 data);
 
+NTSTATUS adjust_vmx_controls(u32 ctl_min, u32 ctl_opt, u32 msr, u32* result) {
+	u32 vmx_msr_low, vmx_msr_high;
+	u32 ctl = ctl_min | ctl_opt;
 
+	u64 vmx_msr = __readmsr(msr);
+	// allowed 0-setting
+	vmx_msr_low = (u32)vmx_msr;
+	// allowed 1-setting
+	vmx_msr_high = vmx_msr >> 32;
+
+	ctl &= vmx_msr_high;/* bit == 0 in high word ==> must be zero */
+	ctl |= vmx_msr_low;/* bit == 1 in low word  ==> must be one  */
+
+	/* Ensure minimum (required) set of control bits are supported. */
+	if (ctl_min & ~ctl)
+		return STATUS_NOT_SUPPORTED;
+
+	*result = ctl;
+	return STATUS_SUCCESS;
+}
+
+static u64 adjust_vmx_controls64(u64 ctl_opt, u32 msr)
+{
+	u64 allowed;
+
+	allowed = __readmsr(msr);
+
+	return ctl_opt & allowed;
+}
+
+/*
+ * There is no X86_FEATURE for SGX yet, but anyway we need to query CPUID
+ * directly instead of going through cpu_has(), to ensure KVM is trapping
+ * ENCLS whenever it's supported in hardware.  It does not matter whether
+ * the host OS supports or has enabled SGX.
+ */
+static bool cpu_has_sgx(void) {
+	return cpuid_eax(0) >= 0x12 && (cpuid_eax(0x12) & BIT(0));
+}
+
+static bool cpu_has_broken_vmx_preemption_timer(void) {
+	u32 eax = cpuid_eax(0x00000001), i;
+
+	/* Clear the reserved bits */
+	eax &= ~(0x3U << 14 | 0xfU << 28);
+	for (i = 0; i < ARRAYSIZE(vmx_preemption_cpu_tfms); i++)
+		if (eax == vmx_preemption_cpu_tfms[i])
+			return TRUE;
+
+	return FALSE;
+}
+
+static bool cpu_has_vmx_preemption_timer(void) {
+	return vmcs_config.pin_based_exec_ctrl &
+		PIN_BASED_VMX_PREEMPTION_TIMER;
+}
+
+static NTSTATUS setup_vmcs_config(struct vmcs_config* vmcs_conf,
+	struct vmx_capability* vmx_cap) {
+	int i = 0;
+	NTSTATUS status = STATUS_SUCCESS;
+	u32 vmx_msr_low, vmx_msr_high;
+	u32 _pin_based_exec_control = 0;
+	u32 _cpu_based_exec_control = 0;
+	u32 _cpu_based_2nd_exec_control = 0;
+	u64 _cpu_based_3rd_exec_control = 0;
+	u32 _vmexit_control = 0;
+	u32 _vmentry_control = 0;
+	u64 misc_msr;
+
+	/*
+	 * LOAD/SAVE_DEBUG_CONTROLS are absent because both are mandatory.
+	 * SAVE_IA32_PAT and SAVE_IA32_EFER are absent because KVM always
+	 * intercepts writes to PAT and EFER, i.e. never enables those controls.
+	 */
+	struct {
+		u32 entry_control;
+		u32 exit_control;
+	}const vmcs_entry_exit_pairs[] = {
+		{ VM_ENTRY_LOAD_IA32_PERF_GLOBAL_CTRL,	VM_EXIT_LOAD_IA32_PERF_GLOBAL_CTRL },
+		{ VM_ENTRY_LOAD_IA32_PAT,		VM_EXIT_LOAD_IA32_PAT },
+		{ VM_ENTRY_LOAD_IA32_EFER,		VM_EXIT_LOAD_IA32_EFER },
+		{ VM_ENTRY_LOAD_BNDCFGS,		VM_EXIT_CLEAR_BNDCFGS },
+		{ VM_ENTRY_LOAD_IA32_RTIT_CTL,		VM_EXIT_CLEAR_IA32_RTIT_CTL },
+	};
+
+	memset(vmcs_conf, 0, sizeof(*vmcs_conf));
+
+	if (adjust_vmx_controls(KVM_REQUIRED_VMX_CPU_BASED_VM_EXEC_CONTROL,
+		KVM_OPTIONAL_VMX_CPU_BASED_VM_EXEC_CONTROL,
+		MSR_IA32_VMX_PROCBASED_CTLS,
+		&_cpu_based_exec_control))
+		return STATUS_UNSUCCESSFUL;
+
+	if (_cpu_based_exec_control & CPU_BASED_ACTIVATE_SECONDARY_CONTROLS) {
+		if (adjust_vmx_controls(KVM_REQUIRED_VMX_SECONDARY_VM_EXEC_CONTROL,
+			KVM_OPTIONAL_VMX_SECONDARY_VM_EXEC_CONTROL,
+			MSR_IA32_VMX_PROCBASED_CTLS2,
+			&_cpu_based_2nd_exec_control))
+			return STATUS_UNSUCCESSFUL;
+	}
+
+#ifndef _WIN64
+	if (!(_cpu_based_2nd_exec_control &
+		SECONDARY_EXEC_VIRTUALIZE_APIC_ACCESSES))
+		_cpu_based_exec_control &= ~CPU_BASED_TPR_SHADOW;
+#endif
+
+	if (!(_cpu_based_exec_control & CPU_BASED_TPR_SHADOW))
+		_cpu_based_2nd_exec_control &= ~(
+			SECONDARY_EXEC_APIC_REGISTER_VIRT |
+			SECONDARY_EXEC_VIRTUALIZE_X2APIC_MODE |
+			SECONDARY_EXEC_VIRTUAL_INTR_DELIVERY);
+
+	rdmsr(MSR_IA32_VMX_EPT_VPID_CAP, vmx_cap->ept, vmx_cap->vpid);
+
+	if (!(_cpu_based_2nd_exec_control & SECONDARY_EXEC_ENABLE_EPT) &&
+		vmx_cap->ept) {
+
+		vmx_cap->ept = 0;
+	}
+	if (!(_cpu_based_2nd_exec_control & SECONDARY_EXEC_ENABLE_VPID) &&
+		vmx_cap->vpid) {
+
+		vmx_cap->vpid = 0;
+	}
+
+	if (!cpu_has_sgx())
+		_cpu_based_2nd_exec_control &= ~SECONDARY_EXEC_ENCLS_EXITING;
+
+	if (_cpu_based_exec_control & CPU_BASED_ACTIVATE_TERTIARY_CONTROLS)
+		_cpu_based_3rd_exec_control =
+		adjust_vmx_controls64(KVM_OPTIONAL_VMX_TERTIARY_VM_EXEC_CONTROL,
+			MSR_IA32_VMX_PROCBASED_CTLS3);
+
+	if (adjust_vmx_controls(KVM_REQUIRED_VMX_VM_EXIT_CONTROLS,
+		KVM_OPTIONAL_VMX_VM_EXIT_CONTROLS,
+		MSR_IA32_VMX_EXIT_CTLS,
+		&_vmexit_control))
+		return STATUS_UNSUCCESSFUL;
+
+	if (adjust_vmx_controls(KVM_REQUIRED_VMX_PIN_BASED_VM_EXEC_CONTROL,
+		KVM_OPTIONAL_VMX_PIN_BASED_VM_EXEC_CONTROL,
+		MSR_IA32_VMX_PINBASED_CTLS,
+		&_pin_based_exec_control))
+		return STATUS_UNSUCCESSFUL;
+
+	if (cpu_has_broken_vmx_preemption_timer())
+		_pin_based_exec_control &= ~PIN_BASED_VMX_PREEMPTION_TIMER;
+	if (!(_cpu_based_2nd_exec_control &
+		SECONDARY_EXEC_VIRTUAL_INTR_DELIVERY))
+		_pin_based_exec_control &= ~PIN_BASED_POSTED_INTR;
+
+	if (adjust_vmx_controls(KVM_REQUIRED_VMX_VM_ENTRY_CONTROLS,
+		KVM_OPTIONAL_VMX_VM_ENTRY_CONTROLS,
+		MSR_IA32_VMX_ENTRY_CTLS,
+		&_vmentry_control))
+		return STATUS_UNSUCCESSFUL;
+
+	for (i = 0; i < ARRAYSIZE(vmcs_entry_exit_pairs); i++) {
+		u32 n_ctrl = vmcs_entry_exit_pairs[i].entry_control;
+		u32 x_ctrl = vmcs_entry_exit_pairs[i].exit_control;
+
+		if (!(_vmentry_control & n_ctrl) == !(_vmexit_control & x_ctrl))
+			continue;
+
+		_vmentry_control &= ~n_ctrl;
+		_vmexit_control &= ~x_ctrl;
+	}
+
+	rdmsr(MSR_IA32_VMX_BASIC, vmx_msr_low, vmx_msr_high);
+
+	/*IA-32 SDM Vol 3B: VMCS size is never greater than 4kb. */
+	// bits[44:32] (13bits)
+	if ((vmx_msr_high & 0x1fff) > PAGE_SIZE)
+		return STATUS_UNSUCCESSFUL;
+
+#ifdef _WIN64
+	/* IA-32 SDM Vol 3B: 64-bit CPUs always have VMX_BASIC_MSR[48]==0. */
+	if (vmx_msr_high & (1u << 16))
+		return STATUS_UNSUCCESSFUL;
+#endif
+
+	/* Require Write-Back (WB) memory type for VMCS accesses. */
+	// bits[53:50]
+	if (((vmx_msr_high >> 18) & 15) != 6)
+		return STATUS_UNSUCCESSFUL;
+
+	misc_msr = __readmsr(MSR_IA32_VMX_MISC);
+
+	vmcs_conf->size = vmx_msr_high & 0x1fff;
+	vmcs_conf->basic_cap = vmx_msr_high & ~0x1fff;
+
+	vmcs_conf->revision_id = vmx_msr_low;
+
+
+	vmcs_conf->misc = misc_msr;
+
+
+	return status;
+}
 
 static NTSTATUS vmx_check_processor_compat(void) {
+	struct vmcs_config vmcs_conf;
+	struct vmx_capability vmx_cap;
 	if (!kvm_is_vmx_supported())
 		return STATUS_UNSUCCESSFUL;
 
-	
+	if (setup_vmcs_config(&vmcs_conf, &vmx_cap) < 0) {
+		return STATUS_UNSUCCESSFUL;
+	}
+
+	if (memcmp(&vmcs_config, &vmcs_conf, sizeof(struct vmcs_config))) {
+		return STATUS_UNSUCCESSFUL;
+	}
+
 	return STATUS_SUCCESS;
 }
 
@@ -245,7 +446,10 @@ static int vmx_hardware_enable(void) {
 	u64 phys_addr = 0;
 	int r;
 
+	
+
 	struct vmcs* vmcs = vmxarea[KeGetCurrentProcessorNumber()];
+	// 获取物理地址
 	PHYSICAL_ADDRESS physical = MmGetPhysicalAddress(vmcs);
 	phys_addr = physical.QuadPart;
 	r = kvm_cpu_vmxon(phys_addr);
@@ -345,8 +549,21 @@ static fastpath_t vmx_vcpu_run(struct kvm_vcpu* vcpu) {
  */
 static int __vmx_handle_exit(struct kvm_vcpu* vcpu, fastpath_t exit_fastpath)
 {
-	UNREFERENCED_PARAMETER(vcpu);
 	UNREFERENCED_PARAMETER(exit_fastpath);
+	struct vcpu_vmx* vmx = to_vmx(vcpu);
+	//union vmx_exit_reason exit_reason = vmx->exit_reason;
+	//u32 vectoring_info = vmx->idt_vectoring_info;
+	//u16 exit_handler_index;
+
+	if (vmx->fail) {
+		
+		vcpu->run->exit_reason = KVM_EXIT_FAIL_ENTRY;
+		vcpu->run->fail_entry.hardware_entry_failure_reason
+			= vmcs_read32(VM_INSTRUCTION_ERROR);
+		vcpu->run->fail_entry.cpu = vcpu->arch.last_vmentry_cpu;
+		return 0;
+	}
+
 	return 0;
 }
 
@@ -356,33 +573,7 @@ static int vmx_handle_exit(struct kvm_vcpu* vcpu, fastpath_t exit_fastpath) {
 	return ret;
 }
 
-NTSTATUS adjust_vmx_controls(u32 ctl_min, u32 ctl_opt, u32 msr, u32* result) {
-	u32 vmx_msr_low, vmx_msr_high;
-	u32 ctl = ctl_min | ctl_opt;
 
-	u64 vmx_msr = __readmsr(msr);
-	vmx_msr_low = (u32)vmx_msr;
-	vmx_msr_high = vmx_msr >> 32;
-
-	ctl &= vmx_msr_high;/* bit == 0 in high word ==> must be zero */
-	ctl |= vmx_msr_low;/* bit == 1 in low word  ==> must be one  */
-
-	/* Ensure minimum (required) set of control bits are supported. */
-	if (ctl_min & ~ctl)
-		return STATUS_NOT_SUPPORTED;
-
-	*result = ctl;
-	return STATUS_SUCCESS;
-}
-
-static u64 adjust_vmx_controls64(u64 ctl_opt, u32 msr)
-{
-	u64 allowed;
-
-	allowed = __readmsr(msr);
-
-	return ctl_opt & allowed;
-}
 
 static struct kvm_x86_ops vmx_x86_ops = {
 	.check_processor_compatibility = vmx_check_processor_compat,
@@ -422,167 +613,9 @@ static struct kvm_x86_init_ops vmx_init_ops = {
 };
 
 
-/*
- * There is no X86_FEATURE for SGX yet, but anyway we need to query CPUID
- * directly instead of going through cpu_has(), to ensure KVM is trapping
- * ENCLS whenever it's supported in hardware.  It does not matter whether
- * the host OS supports or has enabled SGX.
- */
-static bool cpu_has_sgx(void) {
-	return cpuid_eax(0) >= 0x12 && (cpuid_eax(0x12) & BIT(0));
-}
-
-static bool cpu_has_broken_vmx_preemption_timer(void) {
-	u32 eax = cpuid_eax(0x00000001), i;
-
-	/* Clear the reserved bits */
-	eax &= ~(0x3U << 14 | 0xfU << 28);
-	for (i = 0; i < ARRAYSIZE(vmx_preemption_cpu_tfms); i++)
-		if (eax == vmx_preemption_cpu_tfms[i])
-			return TRUE;
-
-	return FALSE;
-}
-
-static NTSTATUS setup_vmcs_config(struct vmcs_config* vmcs_conf,
-	struct vmx_capability* vmx_cap) {
-	int i = 0;
-	NTSTATUS status = STATUS_SUCCESS;
-	u32 vmx_msr_low, vmx_msr_high;
-	u32 _pin_based_exec_control = 0;
-	u32 _cpu_based_exec_control = 0;
-	u32 _cpu_based_2nd_exec_control = 0;
-	u64 _cpu_based_3rd_exec_control = 0;
-	u32 _vmexit_control = 0;
-	u32 _vmentry_control = 0;
-	u64 misc_msr;
-
-	/*
-	 * LOAD/SAVE_DEBUG_CONTROLS are absent because both are mandatory.
-	 * SAVE_IA32_PAT and SAVE_IA32_EFER are absent because KVM always
-	 * intercepts writes to PAT and EFER, i.e. never enables those controls.
-	 */
-	struct {
-		u32 entry_control;
-		u32 exit_control;
-	}const vmcs_entry_exit_pairs[] = {
-		{ VM_ENTRY_LOAD_IA32_PERF_GLOBAL_CTRL,	VM_EXIT_LOAD_IA32_PERF_GLOBAL_CTRL },
-		{ VM_ENTRY_LOAD_IA32_PAT,		VM_EXIT_LOAD_IA32_PAT },
-		{ VM_ENTRY_LOAD_IA32_EFER,		VM_EXIT_LOAD_IA32_EFER },
-		{ VM_ENTRY_LOAD_BNDCFGS,		VM_EXIT_CLEAR_BNDCFGS },
-		{ VM_ENTRY_LOAD_IA32_RTIT_CTL,		VM_EXIT_CLEAR_IA32_RTIT_CTL },
-	};
-
-	memset(vmcs_conf, 0, sizeof(*vmcs_conf));
-
-	if (adjust_vmx_controls(KVM_REQUIRED_VMX_CPU_BASED_VM_EXEC_CONTROL,
-		KVM_OPTIONAL_VMX_CPU_BASED_VM_EXEC_CONTROL,
-		MSR_IA32_VMX_PROCBASED_CTLS,
-		&_cpu_based_exec_control))
-		return STATUS_UNSUCCESSFUL;
-
-	if (_cpu_based_exec_control & CPU_BASED_ACTIVATE_SECONDARY_CONTROLS) {
-		if (adjust_vmx_controls(KVM_REQUIRED_VMX_SECONDARY_VM_EXEC_CONTROL,
-			KVM_OPTIONAL_VMX_SECONDARY_VM_EXEC_CONTROL,
-			MSR_IA32_VMX_PROCBASED_CTLS2,
-			&_cpu_based_2nd_exec_control))
-			return STATUS_UNSUCCESSFUL;
-	}
-
-#ifndef _WIN64
-	if (!(_cpu_based_2nd_exec_control &
-		SECONDARY_EXEC_VIRTUALIZE_APIC_ACCESSES))
-		_cpu_based_exec_control &= ~CPU_BASED_TPR_SHADOW;
-#endif
-
-	if (!(_cpu_based_exec_control & CPU_BASED_TPR_SHADOW))
-		_cpu_based_2nd_exec_control &= ~(
-			SECONDARY_EXEC_APIC_REGISTER_VIRT |
-			SECONDARY_EXEC_VIRTUALIZE_X2APIC_MODE |
-			SECONDARY_EXEC_VIRTUAL_INTR_DELIVERY);
-
-	rdmsr(MSR_IA32_VMX_EPT_VPID_CAP, vmx_cap->ept, vmx_cap->vpid);
-
-	if (!(_cpu_based_2nd_exec_control & SECONDARY_EXEC_ENABLE_EPT) &&
-		vmx_cap->ept) {
-
-		vmx_cap->ept = 0;
-	}
-
-	if (!cpu_has_sgx())
-		_cpu_based_2nd_exec_control &= ~SECONDARY_EXEC_ENCLS_EXITING;
-
-	if (_cpu_based_exec_control & CPU_BASED_ACTIVATE_TERTIARY_CONTROLS)
-		_cpu_based_3rd_exec_control =
-		adjust_vmx_controls64(KVM_OPTIONAL_VMX_TERTIARY_VM_EXEC_CONTROL,
-			MSR_IA32_VMX_PROCBASED_CTLS3);
-
-	if (adjust_vmx_controls(KVM_REQUIRED_VMX_VM_EXIT_CONTROLS,
-		KVM_OPTIONAL_VMX_VM_EXIT_CONTROLS,
-		MSR_IA32_VMX_EXIT_CTLS,
-		&_vmexit_control))
-		return STATUS_UNSUCCESSFUL;
-
-	if (adjust_vmx_controls(KVM_REQUIRED_VMX_PIN_BASED_VM_EXEC_CONTROL,
-		KVM_OPTIONAL_VMX_PIN_BASED_VM_EXEC_CONTROL,
-		MSR_IA32_VMX_PINBASED_CTLS,
-		&_pin_based_exec_control))
-		return STATUS_UNSUCCESSFUL;
-
-	if (cpu_has_broken_vmx_preemption_timer())
-		_pin_based_exec_control &= ~PIN_BASED_VMX_PREEMPTION_TIMER;
-	if (!(_cpu_based_2nd_exec_control &
-		SECONDARY_EXEC_VIRTUAL_INTR_DELIVERY))
-		_pin_based_exec_control &= ~PIN_BASED_POSTED_INTR;
-	
-	if (adjust_vmx_controls(KVM_REQUIRED_VMX_VM_ENTRY_CONTROLS,
-		KVM_OPTIONAL_VMX_VM_ENTRY_CONTROLS,
-		MSR_IA32_VMX_ENTRY_CTLS,
-		&_vmentry_control))
-		return STATUS_UNSUCCESSFUL;
-
-	for (i = 0; i < ARRAYSIZE(vmcs_entry_exit_pairs); i++) {
-		u32 n_ctrl = vmcs_entry_exit_pairs[i].entry_control;
-		u32 x_ctrl = vmcs_entry_exit_pairs[i].exit_control;
-
-		if (!(_vmentry_control & n_ctrl) == !(_vmexit_control & x_ctrl))
-			continue;
-
-		_vmentry_control &= ~n_ctrl;
-		_vmexit_control &= ~x_ctrl;
-	}
-
-	rdmsr(MSR_IA32_VMX_BASIC, vmx_msr_low, vmx_msr_high);
-
-	/*IA-32 SDM Vol 3B: VMCS size is never greater than 4kb. */
-	// bits[44:32] (13bits)
-	if ((vmx_msr_high & 0x1fff) > PAGE_SIZE)
-		return STATUS_UNSUCCESSFUL;
-
-#ifdef _WIN64
-	/* IA-32 SDM Vol 3B: 64-bit CPUs always have VMX_BASIC_MSR[48]==0. */
-	if (vmx_msr_high & (1u << 16))
-		return STATUS_UNSUCCESSFUL;
-#endif
-
-	/* Require Write-Back (WB) memory type for VMCS accesses. */
-	// bits[53:50]
-	if (((vmx_msr_high >> 18) & 15) != 6)
-		return STATUS_UNSUCCESSFUL;
-
-	misc_msr = __readmsr(MSR_IA32_VMX_MISC);
-
-	vmcs_conf->size = vmx_msr_high & 0x1fff;
-	vmcs_conf->basic_cap = vmx_msr_high & ~0x1fff;
-
-	vmcs_conf->revision_id = vmx_msr_low;
 
 
-	vmcs_conf->misc = misc_msr;
 
-
-	return status;
-}
 
 void vmx_setup_fb_clear_ctrl() {
 
@@ -647,6 +680,7 @@ struct vmcs* alloc_vmcs_cpu(bool shadow,int node) {
 
 	lowAddress.QuadPart = 0ull;
 	highAddress.QuadPart = ~0ull;
+	// 4KB边界对齐
 	boundary.QuadPart = PAGE_SIZE;
 
 	vmcs = MmAllocateContiguousMemorySpecifyCacheNode(PAGE_SIZE,
@@ -657,7 +691,9 @@ struct vmcs* alloc_vmcs_cpu(bool shadow,int node) {
 	RtlZeroMemory(vmcs, vmcs_config.size);
 
 	/* KVM supports Enlightened VMCS v1 only */
-	
+
+
+	// revision id 等于 IA32_VMX_BASIC[31:0]
 	vmcs->hdr.revision_id = vmcs_config.revision_id;
 
 	if (shadow)
@@ -679,6 +715,7 @@ NTSTATUS alloc_kvm_area() {
 	// for each cpu
 	for (cpu; cpu < processors; cpu++) {
 		struct vmcs* vmcs;
+		// 分配 vmcs 结构体, 实际上就是 vmxon 域
 		vmcs = alloc_vmcs_cpu(FALSE, KeGetCurrentNodeNumber());
 		if (!vmcs) {
 			free_kvm_area();
@@ -705,6 +742,24 @@ NTSTATUS hardware_setup() {
 
 	if (ExIsProcessorFeaturePresent(PF_NX_ENABLED)) {
 		kvm_enable_efer_bits(EFER_NX);
+	}
+
+	if (!cpu_has_vmx_preemption_timer())
+		enable_preemption_timer = FALSE;
+
+	if (enable_preemption_timer) {
+		u64 use_timer_freq = 5000ULL * 1000 * 1000;
+
+		cpu_preemption_timer_multi =
+			vmcs_config.misc & VMX_MISC_PREEMPTION_TIMER_RATE_MASK;
+
+		/*
+		* KVM "disables" the preemption timer by setting it to its max
+		* value.  Don't use the timer if it might cause spurious exits
+		* at a rate faster than 0.1 Hz (of uninterrupted guest time).
+		*/
+		if (use_timer_freq > 0xffffffffu / 10)
+			enable_preemption_timer = FALSE;
 	}
 
 	status = alloc_kvm_area();
@@ -819,8 +874,9 @@ u64 vmx_get_segment_base(struct kvm_vcpu* vcpu, int seg) {
 }
 
 unsigned long vmcs_readl(unsigned long field) {
-	UNREFERENCED_PARAMETER(field);
-	return 0;
+	size_t value;
+	__vmx_vmread(field, &value);
+	return (unsigned long)value;
 }
 
 u16 vmcs_read16(unsigned long field) {

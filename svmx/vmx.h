@@ -484,6 +484,13 @@ enum vmx_l1d_flush_state {
 	 VM_ENTRY_PT_CONCEAL_PIP |					\
 	 VM_ENTRY_LOAD_IA32_RTIT_CTL)
 
+#define VMX_MISC_PREEMPTION_TIMER_RATE_MASK	0x0000001f
+#define VMX_MISC_SAVE_EFER_LMA			0x00000020
+#define VMX_MISC_ACTIVITY_HLT			0x00000040
+#define VMX_MISC_ACTIVITY_WAIT_SIPI		0x00000100
+#define VMX_MISC_ZERO_LEN_INS			0x40000000
+#define VMX_MISC_MSR_LIST_MULTIPLIER		512
+
 struct vmx_uret_msr {
 	bool load_into_hardware;
 	u64 data;
@@ -670,9 +677,6 @@ int vmx_disabled_by_bios();
 
 NTSTATUS hardware_setup();
 void hardware_unsetup();
-
-
-
 void hardware_enable();
 
 bool report_flexpriority();

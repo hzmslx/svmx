@@ -165,3 +165,66 @@ static void hardware_disable_nolock(void* junk) {
 
 	kvm_arch_hardware_disable();
 }
+
+static bool kvm_vcpu_running(struct kvm_vcpu* vcpu) {
+	return (vcpu->arch.mp_state == KVM_MP_STATE_RUNNABLE &&
+		!vcpu->arch.apf.halted);
+}
+
+/*
+ * Called within kvm->srcu read side.
+ * Returns 1 to let vcpu_run() continue the guest execution loop without
+ * exiting to the userspace.  Otherwise, the value will be returned to the
+ * userspace.
+ */
+static int vcpu_enter_guest(struct kvm_vcpu* vcpu)
+{
+	UNREFERENCED_PARAMETER(vcpu);
+	int r = 0;
+	
+	
+
+	return r;
+}
+
+/* Called within kvm->srcu read side.  */
+static int vcpu_block(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+
+	return 1;
+}
+
+static int vcpu_run(struct kvm_vcpu* vcpu) {
+	int r = 0;
+
+	vcpu->arch.l1tf_flush_l1d = TRUE;
+
+	for (;;) {
+		/*
+		* If another guest vCPU requests a PV TLB flush in the middle
+		* of instruction emulation, the rest of the emulation could
+		* use a stale page translation. Assume that any code after
+		* this point can start executing an instruction.
+		*/
+		vcpu->arch.at_instruction_boundary = FALSE;
+		if (kvm_vcpu_running(vcpu)) {
+			r = vcpu_enter_guest(vcpu);
+		}
+		else {
+			r = vcpu_block(vcpu);
+		}
+
+		if (r <= 0)
+			break;
+	}
+
+	return r;
+}
+
+int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu* vcpu) {
+	int r;
+
+	r = vcpu_run(vcpu);
+
+	return r;
+}

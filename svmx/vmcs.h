@@ -1,5 +1,16 @@
 #pragma once
 
+struct vmcs_hdr {
+	u32 revision_id : 31;
+	u32 shadow_vmcs : 1;
+};
+
+struct vmcs {
+	struct vmcs_hdr hdr;
+	u32 abort;
+	char data[];
+};
+
 /*
  * vmcs_host_state tracks registers that are loaded from the VMCS on VMEXIT
  * and whose values change infrequently, but are not constant.  I.e. this is
