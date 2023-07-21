@@ -214,6 +214,7 @@
     <ClInclude Include="posted_intr.h" />
     <ClInclude Include="processor-flags.h" />
     <ClInclude Include="processor.h" />
+    <ClInclude Include="run_flags.h" />
     <ClInclude Include="svm.h" />
     <ClInclude Include="svmx.h" />
     <ClInclude Include="tdp_mmu.h" />
@@ -223,6 +224,7 @@
     <ClInclude Include="vmcs12.h" />
     <ClInclude Include="vmx.h" />
     <ClInclude Include="vmxfeatures.h" />
+    <ClInclude Include="vmx_ops.h" />
     <ClInclude Include="x86.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

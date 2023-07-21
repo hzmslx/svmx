@@ -7,6 +7,8 @@
 #include "capabilities.h"
 #include "processor.h"
 #include "vmcs12.h"
+#include "run_flags.h"
+#include "vmx_ops.h"
 
 
 static int bypass_guest_pf = 1;
@@ -128,9 +130,7 @@ extern bool allow_smaller_maxphyaddr;
 void vmx_disable_intercept_for_msr(u32 msr, bool longmode_only);
 void __vmx_disable_intercept_for_msr(PRTL_BITMAP msr_bitmap, u32 msr);
 
-unsigned long vmcs_readl(unsigned long field);
-u16 vmcs_read16(unsigned long field);
-u32 vmcs_read32(unsigned long field);
+
 
 
 void vmcs_writel(unsigned long field, unsigned long val);
@@ -557,8 +557,46 @@ static int vmx_vcpu_pre_run(struct kvm_vcpu* vcpu) {
 	return 1;
 }
 
-static fastpath_t vmx_vcpu_run(struct kvm_vcpu* vcpu) {
+/*
+ * Check if MSR is intercepted for currently loaded MSR bitmap.
+ */
+static bool msr_write_intercepted(struct vcpu_vmx* vmx, u32 msr)
+{
+	UNREFERENCED_PARAMETER(msr);
+	if (!(exec_controls_get(vmx) & CPU_BASED_USE_MSR_BITMAPS))
+		return TRUE;
+
+	// return vmx_test_msr_bitmap_write(vmx->loaded_vmcs->msr_bitmap, msr);
+	return FALSE;
+}
+
+unsigned int __vmx_vcpu_run_flags(struct vcpu_vmx* vmx) {
+	unsigned int flags = 0;
+
+	if (vmx->loaded_vmcs->launched)
+		flags |= VMX_RUN_VMRESUME;
+
+	/*
+	* If writes to the SPEC_CTRL MSR aren't intercepted, the guest is free
+	* to change it directly without causing a vmexit.  In that case read
+	* it after vmexit and store it in vmx->spec_ctrl.
+	*/
+	if (!msr_write_intercepted(vmx, MSR_IA32_SPEC_CTRL))
+		flags |= VMX_RUN_SAVE_SPEC_CTRL;
+
+	return flags;
+}
+
+static void vmx_vcpu_enter_exit(struct kvm_vcpu* vcpu,
+	unsigned int flags) {
 	UNREFERENCED_PARAMETER(vcpu);
+	UNREFERENCED_PARAMETER(flags);
+}
+
+static fastpath_t vmx_vcpu_run(struct kvm_vcpu* vcpu) {
+	struct vcpu_vmx* vmx = to_vmx(vcpu);
+
+	vmx_vcpu_enter_exit(vcpu, __vmx_vcpu_run_flags(vmx));
 
 	return EXIT_FASTPATH_NONE;
 }
@@ -893,20 +931,6 @@ u64 vmx_get_segment_base(struct kvm_vcpu* vcpu, int seg) {
 	return 0;
 }
 
-unsigned long vmcs_readl(unsigned long field) {
-	size_t value;
-	__vmx_vmread(field, &value);
-	return (unsigned long)value;
-}
-
-u16 vmcs_read16(unsigned long field) {
-	return (u16)vmcs_readl(field);
-}
-
-u32 vmcs_read32(unsigned long field) {
-	return (u32)vmcs_readl(field);
-}
-
 void vmx_set_segment(struct kvm_vcpu* vcpu,
 	struct kvm_segment* var, int seg) {
 	UNREFERENCED_PARAMETER(vcpu);
@@ -962,19 +986,6 @@ void vmx_set_cr4(struct kvm_vcpu* vcpu, unsigned long cr4) {
 	}
 
 	
-}
-
-void vmcs_writel(unsigned long field, unsigned long val) {
-	UNREFERENCED_PARAMETER(field);
-	UNREFERENCED_PARAMETER(val);
-}
-
-void vmcs_write16(unsigned long field, u16 value) {
-	vmcs_writel(field, value);
-}
-
-void vmcs_write32(unsigned long field, u32 value) {
-	vmcs_writel(field, value);
 }
 
 void vmx_set_efer(struct kvm_vcpu* vcpu, u64 efer) {

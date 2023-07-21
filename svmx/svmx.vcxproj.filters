@@ -171,5 +171,11 @@
     <ClInclude Include="vmxfeatures.h">
       <Filter>asm</Filter>
     </ClInclude>
+    <ClInclude Include="run_flags.h">
+      <Filter>vmx</Filter>
+    </ClInclude>
+    <ClInclude Include="vmx_ops.h">
+      <Filter>vmx</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

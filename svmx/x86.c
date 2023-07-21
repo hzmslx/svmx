@@ -199,7 +199,20 @@ static int vcpu_enter_guest(struct kvm_vcpu* vcpu)
 	UNREFERENCED_PARAMETER(vcpu);
 	int r = 0;
 	
-	
+	fastpath_t exit_fastpath;
+
+	for (;;) {
+		/*
+		* Assert that vCPU vs. VM APICv state is consistent.  An APICv
+		* update must kick and wait for all vCPUs before toggling the
+		* per-VM state, and responsing vCPUs must wait for the update
+		* to complete before servicing KVM_REQ_APICV_UPDATE.
+		*/
+		exit_fastpath = kvm_x86_ops.vcpu_run(vcpu);
+		if (exit_fastpath != EXIT_FASTPATH_REENTER_GUEST)
+			break;
+		
+	}
 
 	return r;
 }
@@ -241,6 +254,7 @@ static int vcpu_run(struct kvm_vcpu* vcpu) {
 int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu* vcpu) {
 	int r;
 
+	// À¿—≠ª∑Ω¯»Îvcpu_enter_guest
 	r = vcpu_run(vcpu);
 
 	return r;
