@@ -91,6 +91,23 @@ static inline void kvm_ops_update(struct kvm_x86_init_ops* ops) {
 	memcpy(&kvm_x86_ops, ops->runtime_ops, sizeof(kvm_x86_ops));
 }
 
+static int kvm_x86_check_processor_compatibility(void) {
+	return kvm_x86_ops.check_processor_compatibility();
+}
+
+static void kvm_x86_check_cpu_compat(void* ret) {
+	*(int*)ret = kvm_x86_check_processor_compatibility();
+}
+
+static ULONG_PTR CheckCpuCompat(
+	_In_ ULONG_PTR Argument
+) {
+	UNREFERENCED_PARAMETER(Argument);
+	int ret = 0;
+	kvm_x86_check_cpu_compat(&ret);
+	return 0;
+}
+
 NTSTATUS __kvm_x86_vendor_init(struct kvm_x86_init_ops* ops) {
 	u64 host_pat;
 	NTSTATUS status = STATUS_SUCCESS;
@@ -122,7 +139,7 @@ NTSTATUS __kvm_x86_vendor_init(struct kvm_x86_init_ops* ops) {
 
 		kvm_ops_update(ops);
 
-
+		KeIpiGenericCall(CheckCpuCompat, 0);
 
 	} while (FALSE);
 	
@@ -228,3 +245,4 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu* vcpu) {
 
 	return r;
 }
+

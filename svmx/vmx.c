@@ -35,7 +35,7 @@ static bool enable_preemption_timer = TRUE;
 
 
 
-static struct vmcs_config {
+struct vmcs_config {
 	int size;
 	u32 basic_cap;
 	u32 revision_id;
@@ -47,13 +47,14 @@ static struct vmcs_config {
 	u32 vmentry_ctrl;
 	u64 misc;
 	struct nested_vmx_msrs nested;
-} vmcs_config;
+};
 
 static struct vmx_capability {
 	u32 ept;
 	u32 vpid;
 } vmx_capability;
 
+struct vmcs_config  vmcs_config;
 struct vmx_capability vmx_capability;
 
 // vmxon 区域
@@ -209,9 +210,12 @@ NTSTATUS adjust_vmx_controls(u32 ctl_min, u32 ctl_opt, u32 msr, u32* result) {
 	// allowed 1-setting
 	vmx_msr_high = vmx_msr >> 32;
 
+	// 高位：为1表明允许为1，所以为0，则不能为1
 	ctl &= vmx_msr_high;/* bit == 0 in high word ==> must be zero */
+	// 低位：为0表明允许为0，所以为1，则不能为0
 	ctl |= vmx_msr_low;/* bit == 1 in low word  ==> must be one  */
 
+	// 确保最小值
 	/* Ensure minimum (required) set of control bits are supported. */
 	if (ctl_min & ~ctl)
 		return STATUS_NOT_SUPPORTED;
@@ -287,6 +291,7 @@ static NTSTATUS setup_vmcs_config(struct vmcs_config* vmcs_conf,
 
 	memset(vmcs_conf, 0, sizeof(*vmcs_conf));
 
+	// 调整得到所有可用功能
 	if (adjust_vmx_controls(KVM_REQUIRED_VMX_CPU_BASED_VM_EXEC_CONTROL,
 		KVM_OPTIONAL_VMX_CPU_BASED_VM_EXEC_CONTROL,
 		MSR_IA32_VMX_PROCBASED_CTLS,
@@ -369,30 +374,43 @@ static NTSTATUS setup_vmcs_config(struct vmcs_config* vmcs_conf,
 		_vmexit_control &= ~x_ctrl;
 	}
 
+	// 获取基本能力
 	rdmsr(MSR_IA32_VMX_BASIC, vmx_msr_low, vmx_msr_high);
 
 	/*IA-32 SDM Vol 3B: VMCS size is never greater than 4kb. */
 	// bits[44:32] (13bits)
+	// VMCS的大小不会大于4KB
 	if ((vmx_msr_high & 0x1fff) > PAGE_SIZE)
 		return STATUS_UNSUCCESSFUL;
 
 #ifdef _WIN64
 	/* IA-32 SDM Vol 3B: 64-bit CPUs always have VMX_BASIC_MSR[48]==0. */
+	// 处理bit 48, 为64位的情况
+	// 64位cpu的VMX_BASIC_MSR[48]必须为0
 	if (vmx_msr_high & (1u << 16))
 		return STATUS_UNSUCCESSFUL;
 #endif
 
 	/* Require Write-Back (WB) memory type for VMCS accesses. */
 	// bits[53:50]
+	// 内存类型必须是WB
 	if (((vmx_msr_high >> 18) & 15) != 6)
 		return STATUS_UNSUCCESSFUL;
 
 	misc_msr = __readmsr(MSR_IA32_VMX_MISC);
 
+	// 得到vmcs区域和vmxon区域的大小
 	vmcs_conf->size = vmx_msr_high & 0x1fff;
 	vmcs_conf->basic_cap = vmx_msr_high & ~0x1fff;
 
 	vmcs_conf->revision_id = vmx_msr_low;
+
+	vmcs_conf->pin_based_exec_ctrl = _pin_based_exec_control;
+	vmcs_conf->cpu_based_exec_ctrl = _cpu_based_exec_control;
+	vmcs_conf->cpu_based_2nd_exec_ctrl = _cpu_based_2nd_exec_control;
+	vmcs_conf->cpu_based_3rd_exec_ctrl = _cpu_based_3rd_exec_control;
+	vmcs_conf->vmexit_ctrl = _vmexit_control;
+	vmcs_conf->vmentry_ctrl = _vmentry_control;
 
 
 	vmcs_conf->misc = misc_msr;
@@ -404,9 +422,11 @@ static NTSTATUS setup_vmcs_config(struct vmcs_config* vmcs_conf,
 static NTSTATUS vmx_check_processor_compat(void) {
 	struct vmcs_config vmcs_conf;
 	struct vmx_capability vmx_cap;
+	// 检测是否支持vmx
 	if (!kvm_is_vmx_supported())
 		return STATUS_UNSUCCESSFUL;
 
+	// 基本信息检测
 	if (setup_vmcs_config(&vmcs_conf, &vmx_cap) < 0) {
 		return STATUS_UNSUCCESSFUL;
 	}
