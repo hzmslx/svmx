@@ -128,3 +128,8 @@ struct kvm_msr_entry {
 
 NTSTATUS kvm_dev_ioctl_create_vm(unsigned long type);
 struct kvm* kvm_create_vm(unsigned long type);
+
+/*
+ * Creates some virtual cpus.  Good luck creating more than one.
+ */
+int kvm_vm_ioctl_create_vcpu(struct kvm* kvm, u32 id);

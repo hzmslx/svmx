@@ -214,6 +214,9 @@ static int vcpu_enter_guest(struct kvm_vcpu* vcpu)
 		
 	}
 
+	// vmexitµÄ´¦Àí
+	r = kvm_x86_ops.handle_exit(vcpu, exit_fastpath);
+
 	return r;
 }
 
@@ -260,3 +263,16 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu* vcpu) {
 	return r;
 }
 
+int kvm_arch_vcpu_create(struct kvm_vcpu* vcpu) {
+	int r;
+
+	r = kvm_x86_ops.vcpu_create(vcpu);
+
+	vcpu_load(vcpu);
+
+	return r;
+}
+
+void kvm_arch_vcpu_load(struct kvm_vcpu* vcpu, int cpu) {
+	kvm_x86_ops.vcpu_load(vcpu, cpu);
+}

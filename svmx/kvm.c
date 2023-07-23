@@ -199,3 +199,19 @@ static void kvm_resume(void) {
 	if (kvm_usage_count)
 		__hardware_enable_nolock();
 }
+
+int kvm_vm_ioctl_create_vcpu(struct kvm* kvm, u32 id) {
+	UNREFERENCED_PARAMETER(kvm);
+	UNREFERENCED_PARAMETER(id);
+	int r;
+	struct kvm_vcpu* vcpu = NULL;
+
+	r = kvm_arch_vcpu_create(vcpu);
+
+	return r;
+}
+
+void vcpu_load(struct kvm_vcpu* vcpu) {
+	int cpu = KeGetCurrentProcessorNumber();
+	kvm_arch_vcpu_load(vcpu, cpu);
+}

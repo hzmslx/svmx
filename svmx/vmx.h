@@ -921,3 +921,7 @@ NTSTATUS vmx_setup_l1d_flush(enum vmx_l1d_flush_state l1tf);
 
 void vmx_prepare_switch_to_guest(struct kvm_vcpu* vcpu);
 
+int alloc_loaded_vmcs(struct loaded_vmcs* loaded_vmcs);
+void vmx_vcpu_load_vmcs(struct kvm_vcpu* vcpu, int cpu,
+	struct loaded_vmcs* buddy);
+

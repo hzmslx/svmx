@@ -782,7 +782,7 @@ struct kvm_x86_ops {
 
 	void (*prepare_switch_to_guest)(struct kvm_vcpu* vcpu);
 	void (*vcpu_load)(struct kvm_vcpu* vcpu, int cpu);
-	void (*vcpu_put)(struct kvm_vcpu* vcpu);
+	void (*vcpu_put)(struct kvm_vcpu* vcpu,int cpu);
 
 	void (*update_exception_bitmap)(struct kvm_vcpu* vcpu);
 	int (*get_msr)(struct kvm_vcpu* vcpu, struct msr_data* msr);
@@ -1309,3 +1309,8 @@ static struct kvm* kvm_arch_alloc_vm(void) {
 void kvm_arch_hardware_disable(void);
 void kvm_put_kvm(struct kvm* kvm);
 int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu* vcpu);
+int kvm_arch_vcpu_create(struct kvm_vcpu* vcpu);
+
+void vcpu_load(struct kvm_vcpu* vcpu);
+void kvm_arch_vcpu_load(struct kvm_vcpu* vcpu, int cpu);
+

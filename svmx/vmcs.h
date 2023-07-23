@@ -53,7 +53,7 @@ struct loaded_vmcs {
 	/* Support for vnmi-less CPUs */
 	int soft_vnmi_blocked;
 	s64 vnmi_blocked_time;
-	unsigned long* msr_bitmap;
+	RTL_BITMAP msr_bitmap;
 	struct vmcs_host_state host_state;
 	struct vmcs_controls_shadow controls_shadow;
 };

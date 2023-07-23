@@ -61,6 +61,8 @@ struct vmx_capability vmx_capability;
 
 // vmxon 区域
 struct vmcs** vmxarea;
+// 每个物理逻辑 cpu 一个 current vmcs 指针
+struct vmcs** current_vmcs;
 
 static const struct trace_print_flags vmx_exit_reasons_str[] = {
 	{ EXIT_REASON_EXCEPTION_NMI,           "exception" },
@@ -522,6 +524,14 @@ static int vmx_vcpu_precreate(struct kvm* kvm) {
 
 static NTSTATUS vmx_vcpu_create(struct kvm_vcpu* vcpu) {
 	UNREFERENCED_PARAMETER(vcpu);
+	NTSTATUS status;
+	struct vcpu_vmx* vmx;
+
+	vmx = to_vmx(vcpu);
+	status = alloc_loaded_vmcs(&vmx->vmcs01);
+
+	vmx->loaded_vmcs = &vmx->vmcs01;
+
 
 	return STATUS_SUCCESS;
 }
@@ -544,12 +554,15 @@ void vmx_prepare_switch_to_guest(struct kvm_vcpu* vcpu) {
  * vcpu mutex is already taken.
  */
 static void vmx_vcpu_load(struct kvm_vcpu* vcpu, int cpu) {
-	UNREFERENCED_PARAMETER(vcpu);
-	UNREFERENCED_PARAMETER(cpu);
+
+	vmx_vcpu_load_vmcs(vcpu, cpu, NULL);
+
 }
 
-static void vmx_vcpu_put(struct kvm_vcpu* vcpu) {
-	UNREFERENCED_PARAMETER(vcpu);
+static void vmx_vcpu_put(struct kvm_vcpu* vcpu,int cpu) {
+	// struct vcpu_vmx* vmx = to_vmx(vcpu);
+
+	vmx_vcpu_load_vmcs(vcpu, cpu, NULL);
 }
 
 static int vmx_vcpu_pre_run(struct kvm_vcpu* vcpu) {
@@ -605,6 +618,7 @@ static fastpath_t vmx_vcpu_run(struct kvm_vcpu* vcpu) {
  * The guest has exited.  See if we can fix it or if we need userspace
  * assistance.
  */
+// __vmx_vcpu_run返回 0 表明是 VM-exit, 返回1表明是 VM-Fail
 static int __vmx_handle_exit(struct kvm_vcpu* vcpu, fastpath_t exit_fastpath)
 {
 	UNREFERENCED_PARAMETER(exit_fastpath);
@@ -760,7 +774,8 @@ struct vmcs* alloc_vmcs_cpu(bool shadow,int node) {
 	return vmcs;
 }
 
-struct vmcs* alloc_vmcs() {
+struct vmcs* alloc_vmcs(bool shadow) {
+	UNREFERENCED_PARAMETER(shadow);
 	return NULL;
 }
 
@@ -1344,4 +1359,60 @@ NTSTATUS vmx_init() {
 	}
 
 	return status;
+}
+
+int alloc_loaded_vmcs(struct loaded_vmcs* loaded_vmcs) {
+	loaded_vmcs->vmcs = alloc_vmcs(FALSE);
+	if (!loaded_vmcs->vmcs)
+		return STATUS_NO_MEMORY;
+
+	NTSTATUS status = STATUS_SUCCESS;
+	vmcs_clear(loaded_vmcs->vmcs);
+
+	loaded_vmcs->shadow_vmcs = NULL;
+	loaded_vmcs->hv_timer_soft_disabled = FALSE;
+	loaded_vmcs->cpu = -1;
+	loaded_vmcs->launched = 0;
+
+	do
+	{
+		if (cpu_has_vmx_msr_bitmap()) {
+			unsigned long* msr_bitmap_page = (unsigned long*)ExAllocatePoolWithTag(PagedPool, PAGE_SIZE, DRIVER_TAG);
+			if (!msr_bitmap_page) {
+				status = STATUS_NO_MEMORY;
+				break;
+			}
+			RtlInitializeBitMap(&loaded_vmcs->msr_bitmap, msr_bitmap_page, PAGE_SIZE * CHAR_BIT);
+		}
+	} while (FALSE);
+
+	memset(&loaded_vmcs->host_state, 0, 
+		sizeof(struct vmcs_host_state));
+	memset(&loaded_vmcs->controls_shadow, 0,
+		sizeof(struct vmcs_controls_shadow));
+
+	return status;
+}
+
+void vmx_vcpu_load_vmcs(struct kvm_vcpu* vcpu, int cpu,
+	struct loaded_vmcs* buddy) {
+	UNREFERENCED_PARAMETER(buddy);
+	struct vcpu_vmx* vmx = to_vmx(vcpu);
+	bool already_loaded = vmx->loaded_vmcs->cpu == cpu;
+	struct vmcs* prev;
+
+	// 判断是否以及加载
+	if (!already_loaded) {
+
+	}
+
+	prev = current_vmcs[cpu];
+	if (prev != vmx->loaded_vmcs->vmcs) {
+		current_vmcs[cpu] = vmx->loaded_vmcs->vmcs;
+		vmcs_load(vmx->loaded_vmcs->vmcs);
+	}
+
+	if (!already_loaded) {
+		vmx->loaded_vmcs->cpu = cpu;
+	}
 }

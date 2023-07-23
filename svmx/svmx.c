@@ -4,7 +4,8 @@
 #include "svm.h"
 
 extern KMUTEX vendor_module_lock;
-extern struct vmcs* vmxarea;
+extern struct vmcs** vmxarea;
+extern struct vmcs** current_vmcs;
 
 DRIVER_UNLOAD DriverUnload;
 DRIVER_DISPATCH DriverDeviceControl;
@@ -15,23 +16,27 @@ bool g_svm_init = FALSE;
 NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath);
 
 VOID DriverUnload(PDRIVER_OBJECT DriverObject) {
-	if (vmxarea != NULL) {
-		ExFreePool(vmxarea);
-	}
-	UNICODE_STRING linkName = RTL_CONSTANT_STRING(L"\\??\\KVM");
-	IoDeleteSymbolicLink(&linkName);
-	IoDeleteDevice(DriverObject->DeviceObject);
 	if (g_vmx_init) {
 		vmx_exit();
 	}
 	else if (g_svm_init) {
 		svm_exit();
 	}
+	if (vmxarea != NULL) {
+		ExFreePool(vmxarea);
+	}
+	if (current_vmcs != NULL) {
+		ExFreePool(current_vmcs);
+	}
+	UNICODE_STRING linkName = RTL_CONSTANT_STRING(L"\\??\\KVM");
+	IoDeleteSymbolicLink(&linkName);
+	IoDeleteDevice(DriverObject->DeviceObject);
+
 }
 
 NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) {
 	UNREFERENCED_PARAMETER(RegistryPath);
-	NTSTATUS status = STATUS_SUCCESS;
+	NTSTATUS status = STATUS_UNSUCCESSFUL;
 
 	DriverObject->DriverUnload = DriverUnload;
 	DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = DriverDeviceControl;
@@ -68,6 +73,17 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) 
 		vmxarea = ExAllocatePoolZero(NonPagedPool, count * sizeof(struct vmcs*),
 			DRIVER_TAG);
 		if (vmxarea == NULL) {
+			status = STATUS_NO_MEMORY;
+			IoDeleteSymbolicLink(&linkName);
+			IoDeleteDevice(DeviceObject);
+			return status;
+		}
+		current_vmcs = ExAllocatePoolZero(NonPagedPool, count * sizeof(struct vmcs*),
+			DRIVER_TAG);
+		if (current_vmcs == NULL) {
+			status = STATUS_NO_MEMORY;
+			ExFreePool(vmxarea);
+			vmxarea = NULL;
 			IoDeleteSymbolicLink(&linkName);
 			IoDeleteDevice(DeviceObject);
 			return status;
@@ -88,7 +104,9 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) 
 
 	if (!NT_SUCCESS(status)) {
 		ExFreePool(vmxarea);
+		ExFreePool(current_vmcs);
 		vmxarea = NULL;
+		current_vmcs = NULL;
 		IoDeleteSymbolicLink(&linkName);
 		IoDeleteDevice(DeviceObject);
 	}
@@ -124,6 +142,11 @@ NTSTATUS DriverDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
 	case KVM_TRACE_PAUSE:
 	case KVM_TRACE_DISABLE:
 		status = STATUS_NOT_SUPPORTED;
+		break;
+
+	// kvm_vm_ioctl
+	case KVM_CREATE_VCPU:
+		status = kvm_vm_ioctl_create_vcpu(NULL, 0);
 		break;
 	default:
 
