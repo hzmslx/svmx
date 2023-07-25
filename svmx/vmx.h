@@ -926,3 +926,4 @@ void vmx_vcpu_load_vmcs(struct kvm_vcpu* vcpu, int cpu,
 	struct loaded_vmcs* buddy);
 void loaded_vmcs_clear(struct loaded_vmcs* loaded_vmcs);
 
+void dump_vmcs(struct kvm_vcpu* vcpu);

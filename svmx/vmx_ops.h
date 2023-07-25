@@ -42,6 +42,12 @@ static u32 vmcs_read32(unsigned long field) {
 	return (u32)value;
 }
 
+static u64 vmcs_read64(unsigned long field) {
+	size_t value;
+	__vmx_vmread(field, &value);
+	return value;
+}
+
 static inline void vmcs_clear(struct vmcs* vmcs) {
 	PHYSICAL_ADDRESS physical = MmGetPhysicalAddress(vmcs);
 	u64 phys_addr = physical.QuadPart;

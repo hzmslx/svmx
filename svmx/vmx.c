@@ -17,6 +17,8 @@ static int enable_ept = 1;
 static int enable_unrestricted_guest = 1;
 static int flexpriority_enabled = 1;
 
+bool enable_pml = 1;
+
 static unsigned long* vmx_io_bitmap_a_page;
 static unsigned long* vmx_io_bitmap_b_page;
 static unsigned long* vmx_msr_bitmap_legacy_page;
@@ -35,22 +37,12 @@ static unsigned long host_idt_base;
 static int cpu_preemption_timer_multi;
 static bool enable_preemption_timer = TRUE;
 
+static bool dump_invalid_vmcs = 0;
+
 LIST_ENTRY* loaded_vmcss_on_cpu;
 
 
-struct vmcs_config {
-	int size;
-	u32 basic_cap;
-	u32 revision_id;
-	u32 pin_based_exec_ctrl;
-	u32 cpu_based_exec_ctrl;
-	u32 cpu_based_2nd_exec_ctrl;
-	u64 cpu_based_3rd_exec_ctrl;
-	u32 vmexit_ctrl;
-	u32 vmentry_ctrl;
-	u64 misc;
-	struct nested_vmx_msrs nested;
-};
+
 
 static struct vmx_capability {
 	u32 ept;
@@ -134,10 +126,9 @@ void vmx_disable_intercept_for_msr(u32 msr, bool longmode_only);
 void __vmx_disable_intercept_for_msr(PRTL_BITMAP msr_bitmap, u32 msr);
 
 
-
+static void vmx_vcpu_reset(struct kvm_vcpu* vcpu, bool init_event);
 
 void vmcs_writel(unsigned long field, unsigned long val);
-void vmcs_write16(unsigned long field, u16 value);
 void vmcs_write32(unsigned long field, u32 value);
 
 
@@ -572,10 +563,7 @@ static void vmx_vcpu_free(struct kvm_vcpu* vcpu) {
 	UNREFERENCED_PARAMETER(vcpu);
 }
 
-static void vmx_vcpu_reset(struct kvm_vcpu* vcpu, bool init_event) {
-	UNREFERENCED_PARAMETER(vcpu);
-	UNREFERENCED_PARAMETER(init_event);
-}
+
 
 void vmx_prepare_switch_to_guest(struct kvm_vcpu* vcpu) {
 	UNREFERENCED_PARAMETER(vcpu);
@@ -1415,12 +1403,12 @@ int alloc_loaded_vmcs(struct loaded_vmcs* loaded_vmcs) {
 	do
 	{
 		if (cpu_has_vmx_msr_bitmap()) {
-			unsigned long* msr_bitmap_page = (unsigned long*)ExAllocatePoolWithTag(PagedPool, PAGE_SIZE, DRIVER_TAG);
-			if (!msr_bitmap_page) {
+			unsigned long* msr_bitmap = (unsigned long*)ExAllocatePoolWithTag(PagedPool, PAGE_SIZE, DRIVER_TAG);
+			if (!msr_bitmap) {
 				status = STATUS_NO_MEMORY;
 				break;
 			}
-			RtlInitializeBitMap(&loaded_vmcs->msr_bitmap, msr_bitmap_page, PAGE_SIZE * CHAR_BIT);
+			loaded_vmcs->msr_bitmap = msr_bitmap;
 		}
 	} while (FALSE);
 
@@ -1442,9 +1430,11 @@ void vmx_vcpu_load_vmcs(struct kvm_vcpu* vcpu, int cpu,
 	bool already_loaded = vmx->loaded_vmcs->cpu == cpu;
 	struct vmcs* prev;
 
-	// 判断是否以及加载
+	// 判断是否已经加载
 	if (!already_loaded) {
+		// 清理当前vcpu使用的vmcs,强制初始化为inactive状态
 		loaded_vmcs_clear(vmx->loaded_vmcs);
+		// 添加到新cpu的loaded_vmcs链表
 		PLIST_ENTRY pEntry = &loaded_vmcss_on_cpu[KeGetCurrentProcessorNumber()];
 		InsertHeadList(&vmx->loaded_vmcs->loaded_vmcss_on_cpu_link,
 			pEntry);
@@ -1455,10 +1445,12 @@ void vmx_vcpu_load_vmcs(struct kvm_vcpu* vcpu, int cpu,
 	// 进行加载
 	if (prev != vmx->loaded_vmcs->vmcs) {
 		current_vmcs[cpu] = vmx->loaded_vmcs->vmcs;
+		// 调用vmptrld
 		vmcs_load(vmx->loaded_vmcs->vmcs);
 	}
 
 	if (!already_loaded) {
+		// 设置cpu
 		vmx->loaded_vmcs->cpu = cpu;
 	}
 }
@@ -1486,4 +1478,81 @@ void loaded_vmcs_clear(struct loaded_vmcs* loaded_vmcs) {
 	if (cpu != -1) {
 		KeIpiGenericCall(RunOnTargetCore, (ULONG_PTR)loaded_vmcs);
 	}
+}
+
+void dump_vmcs(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+	u32 vmentry_ctl, vmexit_ctl;
+	u32 cpu_based_exec_ctrl, pin_based_exec_ctrl, secondary_exec_control;
+	unsigned long cr4;
+	
+	if (!dump_invalid_vmcs) {
+		return;
+	}
+
+	vmentry_ctl = vmcs_read32(VM_ENTRY_CONTROLS);
+	vmexit_ctl = vmcs_read32(VM_EXIT_CONTROLS);
+	cpu_based_exec_ctrl = vmcs_read32(CPU_BASED_VM_EXEC_CONTROL);
+	pin_based_exec_ctrl = vmcs_read32(PIN_BASED_VM_EXEC_CONTROL);
+	cr4 = vmcs_readl(GUEST_CR4);
+
+	if (cpu_has_secondary_exec_ctrls())
+		secondary_exec_control = vmcs_read32(SECONDARY_VM_EXEC_CONTROL);
+	else
+		secondary_exec_control = 0;
+
+	if (secondary_exec_control & SECONDARY_EXEC_VIRTUAL_INTR_DELIVERY)
+		LogError("InterruptStatus = %04x\n",
+			vmcs_read16(GUEST_INTR_STATUS));
+
+	if (cpu_based_exec_ctrl & CPU_BASED_TPR_SHADOW) {
+		if (secondary_exec_control & SECONDARY_EXEC_VIRTUAL_INTR_DELIVERY) {
+			u16 status = vmcs_read16(GUEST_INTR_STATUS);
+			LogError("SVI|RVI = %02X|%02x ", status >> 8, status & 0xFF);
+		}
+		if (secondary_exec_control & SECONDARY_EXEC_VIRTUALIZE_APIC_ACCESSES)
+			LogError("APIC-access addr = 0x%016llx ",
+				vmcs_read64(APIC_ACCESS_ADDR));
+	}
+
+	if (pin_based_exec_ctrl & PIN_BASED_POSTED_INTR)
+		LogError("PostedIntrVec = 0x%02x\n", vmcs_read16(POSTED_INTR_NV));
+	if (secondary_exec_control & SECONDARY_EXEC_ENABLE_VPID)
+		LogError("Virtual processor ID = 0x%04x\n",
+			vmcs_read16(VIRTUAL_PROCESSOR_ID));
+}
+
+static void init_vmcs(struct vcpu_vmx* vmx) {
+
+	if (cpu_has_vmx_msr_bitmap()) {
+		PHYSICAL_ADDRESS physical = MmGetPhysicalAddress(vmx->vmcs01.msr_bitmap);
+		u64 phys_addr = physical.QuadPart;
+		vmcs_write64(MSR_BITMAP, phys_addr);
+	}
+
+	if (enable_pml) {
+		PHYSICAL_ADDRESS physical = MmGetPhysicalAddress(vmx->pml_pg);
+		u64 phys_addr = physical.QuadPart;
+		vmcs_write64(PML_ADDRESS, phys_addr);
+	}
+
+	if (cpu_has_vmx_vmfunc()) {
+		vmcs_write64(VM_FUNCTION_CONTROL, 0);
+	}
+
+}
+
+static void __vmx_vcpu_reset(struct kvm_vcpu* vcpu) {
+	struct vcpu_vmx* vmx = to_vmx(vcpu);
+
+	init_vmcs(vmx);
+}
+
+static void vmx_vcpu_reset(struct kvm_vcpu* vcpu, bool init_event) {
+	struct vcpu_vmx* vmx = to_vmx(vcpu);
+
+	if (!init_event)
+		__vmx_vcpu_reset(vcpu);
+
+	vmx->rmode.vm86_active = 0;
 }
