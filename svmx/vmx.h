@@ -924,4 +924,5 @@ void vmx_prepare_switch_to_guest(struct kvm_vcpu* vcpu);
 int alloc_loaded_vmcs(struct loaded_vmcs* loaded_vmcs);
 void vmx_vcpu_load_vmcs(struct kvm_vcpu* vcpu, int cpu,
 	struct loaded_vmcs* buddy);
+void loaded_vmcs_clear(struct loaded_vmcs* loaded_vmcs);
 

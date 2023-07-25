@@ -35,6 +35,7 @@ static unsigned long host_idt_base;
 static int cpu_preemption_timer_multi;
 static bool enable_preemption_timer = TRUE;
 
+LIST_ENTRY* loaded_vmcss_on_cpu;
 
 
 struct vmcs_config {
@@ -141,7 +142,6 @@ void vmcs_write32(unsigned long field, u32 value);
 
 
 
-struct kvm_vcpu* vmx_create_vcpu(struct kvm* kvm, unsigned int id);
 void vmx_free_vcpu(struct kvm_vcpu* vcpu);
 struct vcpu_vmx* to_vmx(struct kvm_vcpu* vcpu);
 
@@ -486,7 +486,37 @@ static int vmx_hardware_enable(void) {
 	return 0;
 }
 
+static void __loaded_vmcs_clear(void* arg) {
+	struct loaded_vmcs* loaded_vmcs = arg;
+	int cpu = KeGetCurrentProcessorNumber();
+	if (current_vmcs[cpu] == loaded_vmcs->vmcs) {
+		current_vmcs[cpu] = NULL;
+	}
+	vmcs_clear(loaded_vmcs->vmcs);
+
+	RemoveEntryList(&loaded_vmcs->loaded_vmcss_on_cpu_link);
+
+	loaded_vmcs->cpu = -1;
+	loaded_vmcs->launched = 0;
+
+
+}
+
+static void vmclear_local_loaded_vmcss(void) {
+	int cpu = KeGetCurrentProcessorNumber();
+	struct loaded_vmcs* v;
+
+	PLIST_ENTRY pListHead = &loaded_vmcss_on_cpu[cpu];
+	PLIST_ENTRY nextEntry = pListHead->Flink;
+
+	while (nextEntry != pListHead) {
+		v = CONTAINING_RECORD(nextEntry, struct loaded_vmcs, loaded_vmcss_on_cpu_link);
+		__loaded_vmcs_clear(v);
+	}
+}
+
 static void vmx_hardware_disable(void) {
+	vmclear_local_loaded_vmcss();
 
 	if (cpu_vmxoff())
 		NT_ASSERT(FALSE);
@@ -528,6 +558,8 @@ static NTSTATUS vmx_vcpu_create(struct kvm_vcpu* vcpu) {
 	struct vcpu_vmx* vmx;
 
 	vmx = to_vmx(vcpu);
+	// 分配并初始化这个vcpu对应的vmcs01
+	// 需要4K对齐
 	status = alloc_loaded_vmcs(&vmx->vmcs01);
 
 	vmx->loaded_vmcs = &vmx->vmcs01;
@@ -775,8 +807,7 @@ struct vmcs* alloc_vmcs_cpu(bool shadow,int node) {
 }
 
 struct vmcs* alloc_vmcs(bool shadow) {
-	UNREFERENCED_PARAMETER(shadow);
-	return NULL;
+	return alloc_vmcs_cpu(shadow, KeGetCurrentNodeNumber());
 }
 
 
@@ -881,21 +912,13 @@ bool report_flexpriority() {
 	return flexpriority_enabled;
 }
 
-struct kvm_vcpu* vmx_create_vcpu(struct kvm* kvm, unsigned int id) {
-	UNREFERENCED_PARAMETER(kvm);
-	UNREFERENCED_PARAMETER(id);
-	
-	return NULL;
-}
-
 
 void vmx_free_vcpu(struct kvm_vcpu* vcpu) {
 	UNREFERENCED_PARAMETER(vcpu);
 }
 
 struct vcpu_vmx* to_vmx(struct kvm_vcpu* vcpu) {
-	UNREFERENCED_PARAMETER(vcpu);
-	return NULL;
+	return CONTAINING_RECORD(vcpu, struct vcpu_vmx, vcpu);
 }
 
 
@@ -1329,6 +1352,17 @@ NTSTATUS vmx_init() {
 		vmx_setup_fb_clear_ctrl();
 
 
+		ULONG count = KeQueryActiveProcessorCount(0);
+		loaded_vmcss_on_cpu = ExAllocatePoolZero(NonPagedPool,
+			count * sizeof(LIST_ENTRY), DRIVER_TAG);
+		if (!loaded_vmcss_on_cpu) {
+			status = STATUS_NO_MEMORY;
+			break;
+		}
+		for (ULONG i = 0; i < count; i++) {
+			InitializeListHead(&loaded_vmcss_on_cpu[i]);
+		}
+
 		/*
 		* Shadow paging doesn't have a (further) performance penalty
 		* from GUEST_MAXPHYADDR < HOST_MAXPHYADDR so enable it
@@ -1356,6 +1390,10 @@ NTSTATUS vmx_init() {
 	}
 	if (err_l1d_flush) {
 		kvm_x86_vendor_exit();
+	}
+
+	if (loaded_vmcss_on_cpu) {
+		ExFreePool(loaded_vmcss_on_cpu);
 	}
 
 	return status;
@@ -1391,22 +1429,30 @@ int alloc_loaded_vmcs(struct loaded_vmcs* loaded_vmcs) {
 	memset(&loaded_vmcs->controls_shadow, 0,
 		sizeof(struct vmcs_controls_shadow));
 
+	InitializeListHead(&loaded_vmcs->loaded_vmcss_on_cpu_link);
+
 	return status;
 }
 
 void vmx_vcpu_load_vmcs(struct kvm_vcpu* vcpu, int cpu,
 	struct loaded_vmcs* buddy) {
 	UNREFERENCED_PARAMETER(buddy);
+	// vcpu_vmx 是vcpu的一个运行环境，这个和vcpu是一对一的
 	struct vcpu_vmx* vmx = to_vmx(vcpu);
 	bool already_loaded = vmx->loaded_vmcs->cpu == cpu;
 	struct vmcs* prev;
 
 	// 判断是否以及加载
 	if (!already_loaded) {
-
+		loaded_vmcs_clear(vmx->loaded_vmcs);
+		PLIST_ENTRY pEntry = &loaded_vmcss_on_cpu[KeGetCurrentProcessorNumber()];
+		InsertHeadList(&vmx->loaded_vmcs->loaded_vmcss_on_cpu_link,
+			pEntry);
 	}
 
 	prev = current_vmcs[cpu];
+	// 当前vcpu正在使用的vmcs和指定cpu的current_vmcs不相等时需要
+	// 进行加载
 	if (prev != vmx->loaded_vmcs->vmcs) {
 		current_vmcs[cpu] = vmx->loaded_vmcs->vmcs;
 		vmcs_load(vmx->loaded_vmcs->vmcs);
@@ -1414,5 +1460,30 @@ void vmx_vcpu_load_vmcs(struct kvm_vcpu* vcpu, int cpu,
 
 	if (!already_loaded) {
 		vmx->loaded_vmcs->cpu = cpu;
+	}
+}
+
+
+
+ULONG_PTR
+RunOnTargetCore(
+	_In_ ULONG_PTR Argument
+) {
+	struct loaded_vmcs* loaded_vmcs = (struct loaded_vmcs*)Argument;
+	int cpu = KeGetCurrentProcessorNumber();
+	if (cpu != loaded_vmcs->cpu) {
+		return 1;
+	}
+	__loaded_vmcs_clear(loaded_vmcs);
+	return 0;
+}
+
+
+
+void loaded_vmcs_clear(struct loaded_vmcs* loaded_vmcs) {
+	int cpu = loaded_vmcs->cpu;
+
+	if (cpu != -1) {
+		KeIpiGenericCall(RunOnTargetCore, (ULONG_PTR)loaded_vmcs);
 	}
 }

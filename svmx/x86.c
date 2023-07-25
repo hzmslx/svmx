@@ -266,8 +266,10 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu* vcpu) {
 int kvm_arch_vcpu_create(struct kvm_vcpu* vcpu) {
 	int r;
 
+	// ¥¥Ω®vcpu
 	r = kvm_x86_ops.vcpu_create(vcpu);
 
+	// º”‘ÿvcpu
 	vcpu_load(vcpu);
 
 	return r;
