@@ -113,7 +113,7 @@ NTSTATUS __kvm_x86_vendor_init(struct kvm_x86_init_ops* ops) {
 	NTSTATUS status = STATUS_SUCCESS;
 
 	if (kvm_x86_ops.hardware_enable) {
-		LogError("Already loaeded vendor module\n");
+		LogErr("Already loaeded vendor module\n");
 		return STATUS_UNSUCCESSFUL;
 	}
 

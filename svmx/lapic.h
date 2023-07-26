@@ -26,3 +26,9 @@ struct kvm_lapic {
 	unsigned int sipi_vector;
 	int nr_lvt_entries;
 };
+
+static inline bool lapic_in_kernel(struct kvm_vcpu* vcpu)
+{
+	UNREFERENCED_PARAMETER(vcpu);
+	return TRUE;
+}

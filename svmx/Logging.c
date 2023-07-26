@@ -16,7 +16,7 @@ ULONG Log(ULONG level, PCSTR format, ...) {
 	return vDbgPrintExWithPrefix(DRIVER_PREFIX, DPFLTR_IHVDRIVER_ID, level, format, list);
 }
 
-ULONG LogError(PCSTR format, ...) {
+ULONG LogErr(PCSTR format, ...) {
 	va_list list;
 	va_start(list, format);
 	return vDbgPrintExWithPrefix(DRIVER_PREFIX, DPFLTR_IHVDRIVER_ID, KERN_ERR, format, list);

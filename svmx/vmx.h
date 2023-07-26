@@ -9,6 +9,7 @@
 #include "desc_defs.h"
 #include "vmxfeatures.h"
 #include "vmx_ops.h"
+#include "intel_pt.h"
 
 #define VMCS_CONTROL_BIT(x)	BIT(VMX_FEATURE_##x & 0x1f)
 
@@ -592,6 +593,27 @@ struct vmx_msrs {
 	struct vmx_msr_entry	val[MAX_NR_LOADSTORE_MSRS];
 };
 
+
+#define RTIT_ADDR_RANGE		4
+
+struct pt_ctx {
+	u64 ctl;
+	u64 status;
+	u64 output_base;
+	u64 output_mask;
+	u64 cr3_match;
+	u64 addr_a[RTIT_ADDR_RANGE];
+	u64 addr_b[RTIT_ADDR_RANGE];
+};
+
+struct pt_desc {
+	u64 ctl_bitmask;
+	u32 num_address_ranges;
+	u32 caps[PT_CPUID_REGS_NUM * PT_CPUID_LEAVES];
+	struct pt_ctx host;
+	struct pt_ctx guest;
+};
+
 struct vcpu_vmx {
 	struct kvm_vcpu vcpu;
 	u8                    fail;
@@ -698,7 +720,7 @@ struct vcpu_vmx {
 	u64 msr_ia32_mcu_opt_ctrl;
 	bool disable_fb_clear;
 
-	//struct pt_desc pt_desc;
+	struct pt_desc pt_desc;
 	//struct lbr_desc lbr_desc;
 
 	/* Save desired MSR intercept (read: pass-through) state */

@@ -176,6 +176,7 @@
     <FilesToPackage Include="$(TargetPath)" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="cpuid.c" />
     <ClCompile Include="kvm.c" />
     <ClCompile Include="Logging.c" />
     <ClCompile Include="mmu.c" />
@@ -192,9 +193,11 @@
   <ItemGroup>
     <ClInclude Include="bitops.h" />
     <ClInclude Include="capabilities.h" />
+    <ClInclude Include="cpuid.h" />
     <ClInclude Include="desc.h" />
     <ClInclude Include="desc_defs.h" />
     <ClInclude Include="int-ll64.h" />
+    <ClInclude Include="intel_pt.h" />
     <ClInclude Include="kvm.h" />
     <ClInclude Include="kvm_emulate.h" />
     <ClInclude Include="kvm_host.h" />
@@ -215,6 +218,7 @@
     <ClInclude Include="processor-flags.h" />
     <ClInclude Include="processor.h" />
     <ClInclude Include="run_flags.h" />
+    <ClInclude Include="sgx.h" />
     <ClInclude Include="svm.h" />
     <ClInclude Include="svmx.h" />
     <ClInclude Include="tdp_mmu.h" />

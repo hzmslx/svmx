@@ -67,6 +67,9 @@
     <ClCompile Include="tdp_mmu.c">
       <Filter>kvm</Filter>
     </ClCompile>
+    <ClCompile Include="cpuid.c">
+      <Filter>kvm</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="pch.h">
@@ -176,6 +179,15 @@
     </ClInclude>
     <ClInclude Include="vmx_ops.h">
       <Filter>vmx</Filter>
+    </ClInclude>
+    <ClInclude Include="sgx.h">
+      <Filter>vmx</Filter>
+    </ClInclude>
+    <ClInclude Include="intel_pt.h">
+      <Filter>asm</Filter>
+    </ClInclude>
+    <ClInclude Include="cpuid.h">
+      <Filter>kvm</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

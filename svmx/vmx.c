@@ -9,7 +9,9 @@
 #include "vmcs12.h"
 #include "run_flags.h"
 #include "vmx_ops.h"
+#include "sgx.h"
 
+#define VMX_XSS_EXIT_BITMAP 0
 
 static int bypass_guest_pf = 1;
 static int enable_vpid = 1;
@@ -41,7 +43,8 @@ static bool dump_invalid_vmcs = 0;
 
 LIST_ENTRY* loaded_vmcss_on_cpu;
 
-
+/* Default is SYSTEM mode, 1 for host-guest mode */
+int pt_mode = PT_MODE_SYSTEM;
 
 
 static struct vmx_capability {
@@ -665,6 +668,34 @@ static int vmx_handle_exit(struct kvm_vcpu* vcpu, fastpath_t exit_fastpath) {
 	return ret;
 }
 
+static u32 vmx_secondary_exec_control(struct vcpu_vmx* vmx);
+static void vmcs_set_secondary_exec_control(struct vcpu_vmx* vmx, u32 new_ctl)
+{
+	/*
+	 * These bits in the secondary execution controls field
+	 * are dynamic, the others are mostly based on the hypervisor
+	 * architecture and the guest's CPUID.  Do not touch the
+	 * dynamic bits.
+	 */
+	u32 mask =
+		SECONDARY_EXEC_SHADOW_VMCS |
+		SECONDARY_EXEC_VIRTUALIZE_X2APIC_MODE |
+		SECONDARY_EXEC_VIRTUALIZE_APIC_ACCESSES |
+		SECONDARY_EXEC_DESC;
+
+	u32 cur_ctl = secondary_exec_controls_get(vmx);
+
+	secondary_exec_controls_set(vmx, (new_ctl & ~mask) | (cur_ctl & mask));
+}
+
+static void vmx_vcpu_after_set_cpuid(struct kvm_vcpu* vcpu) {
+	struct vcpu_vmx* vmx = to_vmx(vcpu);
+
+	if (cpu_has_secondary_exec_ctrls())
+		vmcs_set_secondary_exec_control(vmx,
+			vmx_secondary_exec_control(vmx));
+}
+
 
 
 static struct kvm_x86_ops vmx_x86_ops = {
@@ -684,6 +715,8 @@ static struct kvm_x86_ops vmx_x86_ops = {
 	.vcpu_create = vmx_vcpu_create,
 	.vcpu_free = vmx_vcpu_free,
 	.vcpu_reset = vmx_vcpu_reset,
+
+	.vcpu_after_set_cpuid = vmx_vcpu_after_set_cpuid,
 
 	.prepare_switch_to_guest = vmx_prepare_switch_to_guest,
 	.vcpu_load = vmx_vcpu_load,
@@ -745,9 +778,6 @@ int cpu_has_vmx_unrestricted_guest() {
 		SECONDARY_EXEC_UNRESTRICTED_GUEST;
 }
 
-int cpu_has_vmx_tpr_shadow() {
-	return vmcs_config.cpu_based_2nd_exec_ctrl & CPU_BASED_TPR_SHADOW;
-}
 
 bool cpu_has_vmx_virtualize_apic_accesses() {
 	return vmcs_config.cpu_based_2nd_exec_ctrl & 
@@ -1496,30 +1526,138 @@ void dump_vmcs(struct kvm_vcpu* vcpu) {
 	pin_based_exec_ctrl = vmcs_read32(PIN_BASED_VM_EXEC_CONTROL);
 	cr4 = vmcs_readl(GUEST_CR4);
 
+	if (cpu_has_vmx_ept()) {
+		LogErr("PDPTR0 = 0x%016llx PDPTR1 = 0x%016llx\n",
+			vmcs_read64(GUEST_PDPTR0), vmcs_read64(GUEST_PDPTR1));
+		LogErr("PDPTR2 = 0x%16llx PDPTR3 = 0x%016llx\n",
+			vmcs_read64(GUEST_PDPTR2), vmcs_read64(GUEST_PDPTR3));
+	}
+
+	if (vmentry_ctl & VM_ENTRY_LOAD_IA32_EFER)
+		LogErr("EFER= 0x%016llx\n", vmcs_read64(GUEST_IA32_EFER));
+	if (vmentry_ctl & VM_ENTRY_LOAD_IA32_PAT)
+		LogErr("PAT = 0x%016llx\n", vmcs_read64(GUEST_IA32_PAT));
+	if (cpu_has_load_perf_global_ctrl() &&
+		vmentry_ctl & VM_ENTRY_LOAD_IA32_PERF_GLOBAL_CTRL)
+		LogErr("PerfGlobCtl = 0x%016llx\n",
+			vmcs_read64(GUEST_IA32_PERF_GLOBAL_CTRL));
+	if (vmentry_ctl & VM_ENTRY_LOAD_BNDCFGS)
+		LogErr("BndCfgs = 0x%016llx\n", vmcs_read64(GUEST_BNDCFGS));
+
+
+
+
 	if (cpu_has_secondary_exec_ctrls())
 		secondary_exec_control = vmcs_read32(SECONDARY_VM_EXEC_CONTROL);
 	else
 		secondary_exec_control = 0;
 
+
+	LogErr("*** Host State ***\n");
+
+	if (vmexit_ctl & VM_EXIT_LOAD_IA32_EFER)
+		LogErr("EFER= 0x%016llx\n", vmcs_read64(HOST_IA32_EFER));
+	if (vmentry_ctl & VM_EXIT_LOAD_IA32_PAT)
+		LogErr("PAT = 0x%016llx\n", vmcs_read64(HOST_IA32_PAT));
+	if (cpu_has_load_perf_global_ctrl() &&
+		vmexit_ctl & VM_EXIT_LOAD_IA32_PERF_GLOBAL_CTRL)
+		LogErr("PerfGlobCtl = 0x%016llx\n",
+			vmcs_read64(HOST_IA32_PERF_GLOBAL_CTRL));
+
 	if (secondary_exec_control & SECONDARY_EXEC_VIRTUAL_INTR_DELIVERY)
-		LogError("InterruptStatus = %04x\n",
+		LogErr("InterruptStatus = %04x\n",
 			vmcs_read16(GUEST_INTR_STATUS));
 
+
+	if (secondary_exec_control & SECONDARY_EXEC_TSC_SCALING)
+		LogErr("TSC Multiplier = 0x%016llx\n",
+			vmcs_read64(TSC_MULTIPLIER));
 	if (cpu_based_exec_ctrl & CPU_BASED_TPR_SHADOW) {
 		if (secondary_exec_control & SECONDARY_EXEC_VIRTUAL_INTR_DELIVERY) {
 			u16 status = vmcs_read16(GUEST_INTR_STATUS);
-			LogError("SVI|RVI = %02X|%02x ", status >> 8, status & 0xFF);
+			LogErr("SVI|RVI = %02X|%02x ", status >> 8, status & 0xFF);
 		}
+		LogErr("TPM Threshold = 0x%02x\n", vmcs_read32(TPR_THRESHOLD));
 		if (secondary_exec_control & SECONDARY_EXEC_VIRTUALIZE_APIC_ACCESSES)
-			LogError("APIC-access addr = 0x%016llx ",
+			LogErr("APIC-access addr = 0x%016llx ",
 				vmcs_read64(APIC_ACCESS_ADDR));
 	}
 
 	if (pin_based_exec_ctrl & PIN_BASED_POSTED_INTR)
-		LogError("PostedIntrVec = 0x%02x\n", vmcs_read16(POSTED_INTR_NV));
+		LogErr("PostedIntrVec = 0x%02x\n", vmcs_read16(POSTED_INTR_NV));
+	if ((secondary_exec_control & SECONDARY_EXEC_ENABLE_EPT))
+		LogErr("EPT pointer = 0x%016llx\n", vmcs_read64(EPT_POINTER));
+	if (secondary_exec_control & SECONDARY_EXEC_PAUSE_LOOP_EXITING)
+		LogErr("PLE Gap=%08x Window=%08x\n",
+			vmcs_read32(PLE_GAP), vmcs_read32(PLE_WINDOW));
 	if (secondary_exec_control & SECONDARY_EXEC_ENABLE_VPID)
-		LogError("Virtual processor ID = 0x%04x\n",
+		LogErr("Virtual processor ID = 0x%04x\n",
 			vmcs_read16(VIRTUAL_PROCESSOR_ID));
+}
+
+static u32 vmx_pin_based_exec_ctrl(struct vcpu_vmx* vmx) {
+	UNREFERENCED_PARAMETER(vmx);
+	u32 pin_based_exec_ctrl = vmcs_config.pin_based_exec_ctrl;
+
+	// Çåµô¹¦ÄÜ
+	pin_based_exec_ctrl &= ~PIN_BASED_POSTED_INTR;
+
+	pin_based_exec_ctrl &= ~PIN_BASED_VIRTUAL_NMIS;
+
+	pin_based_exec_ctrl &= ~PIN_BASED_VMX_PREEMPTION_TIMER;
+	
+	return pin_based_exec_ctrl;
+}
+
+static u32 vmx_exec_control(struct vcpu_vmx* vmx)
+{
+	u32 exec_control = vmcs_config.cpu_based_exec_ctrl;
+
+	/*
+	 * Not used by KVM, but fully supported for nesting, i.e. are allowed in
+	 * vmcs12 and propagated to vmcs02 when set in vmcs12.
+	 */
+	exec_control &= ~(CPU_BASED_RDTSC_EXITING |
+		CPU_BASED_USE_IO_BITMAPS |
+		CPU_BASED_MONITOR_TRAP_FLAG |
+		CPU_BASED_PAUSE_EXITING);
+
+	/* INTR_WINDOW_EXITING and NMI_WINDOW_EXITING are toggled dynamically */
+	exec_control &= ~(CPU_BASED_INTR_WINDOW_EXITING |
+		CPU_BASED_NMI_WINDOW_EXITING);
+
+	if (vmx->vcpu.arch.switch_db_regs & KVM_DEBUGREG_WONT_EXIT)
+		exec_control &= ~CPU_BASED_MOV_DR_EXITING;
+
+	//if (!cpu_need_tpr_shadow(&vmx->vcpu))
+	exec_control &= ~CPU_BASED_TPR_SHADOW;
+
+#ifdef _WIN64
+	if (exec_control & CPU_BASED_TPR_SHADOW)
+		exec_control &= ~(CPU_BASED_CR8_LOAD_EXITING |
+			CPU_BASED_CR8_STORE_EXITING);
+	else
+		exec_control |= CPU_BASED_CR8_STORE_EXITING |
+		CPU_BASED_CR8_LOAD_EXITING;
+#endif
+	/* No need to intercept CR3 access or INVPLG when using EPT. */
+	if (enable_ept)
+		exec_control &= ~(CPU_BASED_CR3_LOAD_EXITING |
+			CPU_BASED_CR3_STORE_EXITING |
+			CPU_BASED_INVLPG_EXITING);
+	if (kvm_mwait_in_guest(vmx->vcpu.kvm))
+		exec_control &= ~(CPU_BASED_MWAIT_EXITING |
+			CPU_BASED_MONITOR_EXITING);
+	if (kvm_hlt_in_guest(vmx->vcpu.kvm))
+		exec_control &= ~CPU_BASED_HLT_EXITING;
+	return exec_control;
+}
+
+static u32 vmx_secondary_exec_control(struct vcpu_vmx* vmx) {
+	UNREFERENCED_PARAMETER(vmx);
+	u32 exec_control = vmcs_config.cpu_based_2nd_exec_ctrl;
+
+	return exec_control;
 }
 
 static void init_vmcs(struct vcpu_vmx* vmx) {
@@ -1530,16 +1668,39 @@ static void init_vmcs(struct vcpu_vmx* vmx) {
 		vmcs_write64(MSR_BITMAP, phys_addr);
 	}
 
+
+	/* Control */
+	pin_controls_set(vmx, vmx_pin_based_exec_ctrl(vmx));
+
+	exec_controls_set(vmx, vmx_exec_control(vmx));
+
+	if (cpu_has_secondary_exec_ctrls())
+		secondary_exec_controls_set(vmx, vmx_secondary_exec_control(vmx));
+
+	if (cpu_has_vmx_xsaves())
+		vmcs_write64(XSS_EXIT_BITMAP, VMX_XSS_EXIT_BITMAP);
+
 	if (enable_pml) {
 		PHYSICAL_ADDRESS physical = MmGetPhysicalAddress(vmx->pml_pg);
 		u64 phys_addr = physical.QuadPart;
 		vmcs_write64(PML_ADDRESS, phys_addr);
 	}
 
+	vmx_write_encls_bitmap(&vmx->vcpu, NULL);
+
 	if (cpu_has_vmx_vmfunc()) {
 		vmcs_write64(VM_FUNCTION_CONTROL, 0);
 	}
 
+	if (vmcs_config.vmentry_ctrl & VM_ENTRY_LOAD_IA32_PAT)
+		vmcs_write64(GUEST_IA32_PAT, vmx->vcpu.arch.pat);
+
+	if (vmx_pt_mode_is_host_guest()) {
+		memset(&vmx->pt_desc, 0, sizeof(vmx->pt_desc));
+		/* Bit[6~0] are forced to 1, writes are ignored. */
+		vmx->pt_desc.guest.output_mask = 0x7F;
+		vmcs_write64(GUEST_IA32_RTIT_CTL, 0);
+	}
 }
 
 static void __vmx_vcpu_reset(struct kvm_vcpu* vcpu) {
@@ -1555,4 +1716,19 @@ static void vmx_vcpu_reset(struct kvm_vcpu* vcpu, bool init_event) {
 		__vmx_vcpu_reset(vcpu);
 
 	vmx->rmode.vm86_active = 0;
+}
+
+void vmx_ept_load_pdptrs(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+	// struct kvm_mmu* mmu = vcpu->arch.walk_mmu;
+
+	
+	
+}
+
+static void vmx_refresh_apicv_exec_ctrl(struct kvm_vcpu* vcpu) {
+	struct vcpu_vmx* vmx = to_vmx(vcpu);
+
+	pin_controls_set(vmx, vmx_pin_based_exec_ctrl(vmx));
+
 }

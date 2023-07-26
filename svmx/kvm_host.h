@@ -759,7 +759,10 @@ struct kvm_vcpu {
 	u64 last_used_slot_gen;
 };
 
-
+enum {
+	KVM_DEBUGREG_BP_ENABLED = 1,
+	KVM_DEBUGREG_WONT_EXIT = 2,
+};
 
 struct kvm_x86_ops {
 	NTSTATUS (*check_processor_compatibility)(void);
