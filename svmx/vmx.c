@@ -10,6 +10,10 @@
 #include "run_flags.h"
 #include "vmx_ops.h"
 #include "sgx.h"
+#include "nested.h"
+#include "kvm_cache_regs.h"
+#include "cpuid.h"
+#include "smm.h"
 
 #define VMX_XSS_EXIT_BITMAP 0
 
@@ -45,6 +49,9 @@ LIST_ENTRY* loaded_vmcss_on_cpu;
 
 /* Default is SYSTEM mode, 1 for host-guest mode */
 int pt_mode = PT_MODE_SYSTEM;
+
+#define KVM_VM_CR0_ALWAYS_OFF (X86_CR0_NW | X86_CR0_CD)
+
 
 
 static struct vmx_capability {
@@ -137,7 +144,6 @@ void vmcs_write32(unsigned long field, u32 value);
 
 
 void vmx_free_vcpu(struct kvm_vcpu* vcpu);
-struct vcpu_vmx* to_vmx(struct kvm_vcpu* vcpu);
 
 void hardware_disable(void* garbage);
 void vmx_save_host_state(struct kvm_vcpu* vcpu);
@@ -696,7 +702,11 @@ static void vmx_vcpu_after_set_cpuid(struct kvm_vcpu* vcpu) {
 			vmx_secondary_exec_control(vmx));
 }
 
-
+static void vmx_write_tsc_offset(struct kvm_vcpu* vcpu, u64 offset)
+{
+	UNREFERENCED_PARAMETER(vcpu);
+	vmcs_write64(TSC_OFFSET, offset);
+}
 
 static struct kvm_x86_ops vmx_x86_ops = {
 	.check_processor_compatibility = vmx_check_processor_compat,
@@ -727,6 +737,7 @@ static struct kvm_x86_ops vmx_x86_ops = {
 	.vcpu_run = vmx_vcpu_run,
 	.handle_exit = vmx_handle_exit,
 
+	.write_tsc_offset = vmx_write_tsc_offset,
 };
 
 static struct kvm_x86_init_ops vmx_init_ops = {
@@ -1015,9 +1026,36 @@ void vmx_decache_cr4_guest_bits(struct kvm_vcpu* vcpu) {
 	UNREFERENCED_PARAMETER(vcpu);
 }
 
+
+
+static inline bool is_unrestricted_guest(struct kvm_vcpu* vcpu)
+{
+	return enable_unrestricted_guest && (!is_guest_mode(vcpu) ||
+		(secondary_exec_controls_get(to_vmx(vcpu)) &
+			SECONDARY_EXEC_UNRESTRICTED_GUEST));
+}
+
 void vmx_set_cr0(struct kvm_vcpu* vcpu, unsigned long cr0) {
-	UNREFERENCED_PARAMETER(vcpu);
-	UNREFERENCED_PARAMETER(cr0);
+	//struct vcpu_vmx* vmx = to_vmx(vcpu);
+	unsigned long hw_cr0, old_cr0_pg;
+	//u32 tmp;
+
+	old_cr0_pg = kvm_read_cr0_bits(vcpu, X86_CR0_PG);
+	hw_cr0 = (cr0 & ~KVM_VM_CR0_ALWAYS_OFF);
+	if (is_unrestricted_guest(vcpu)) {
+		hw_cr0 |= KVM_VM_CR0_ALWAYS_ON_UNRESTRICTED_GUEST;
+	}
+	else {
+		hw_cr0 |= KVM_VM_CR0_ALWAYS_ON;
+		if (!enable_ept)
+			hw_cr0 |= X86_CR0_WP;
+
+
+	}
+
+	vmcs_writel(CR0_READ_SHADOW, cr0);
+	vmcs_writel(GUEST_CR0, hw_cr0);
+	vcpu->arch.cr0 = cr0;
 
 
 }
@@ -1035,12 +1073,23 @@ void vmx_set_cr3(struct kvm_vcpu* vcpu, unsigned long cr3) {
 
 void vmx_set_cr4(struct kvm_vcpu* vcpu, unsigned long cr4) {
 	UNREFERENCED_PARAMETER(vcpu);
-	UNREFERENCED_PARAMETER(cr4);
-	
+	// unsigned long old_cr4 = vcpu->arch.cr4;
+
+	/*
+	* Pass through host's Machine Check Enable value to hw_cr4, which
+	* is in force while we are in guest mode.  Do not let guests control
+	* this bit, even if host CR4.MCE == 0.
+	*/
+	unsigned long hw_cr4;
+
+	hw_cr4 = (cr4 & ~X86_CR4_MCE);
+
 	if (enable_ept) {
 
 	}
 
+	vmcs_writel(CR4_READ_SHADOW, cr4);
+	vmcs_writel(GUEST_CR4, hw_cr4);
 	
 }
 
@@ -1686,6 +1735,8 @@ static void init_vmcs(struct vcpu_vmx* vmx) {
 		vmcs_write64(PML_ADDRESS, phys_addr);
 	}
 
+	vmcs_write32(CR3_TARGET_COUNT, 0); /* 22.2.1 */
+
 	vmx_write_encls_bitmap(&vmx->vcpu, NULL);
 
 	if (cpu_has_vmx_vmfunc()) {
@@ -1694,6 +1745,9 @@ static void init_vmcs(struct vcpu_vmx* vmx) {
 
 	if (vmcs_config.vmentry_ctrl & VM_ENTRY_LOAD_IA32_PAT)
 		vmcs_write64(GUEST_IA32_PAT, vmx->vcpu.arch.pat);
+
+	vmx->vcpu.arch.cr0_guest_owned_bits = vmx_l1_guest_owned_cr0_bits();
+	vmcs_writel(CR0_GUEST_HOST_MASK, ~vmx->vcpu.arch.cr0_guest_owned_bits);
 
 	if (vmx_pt_mode_is_host_guest()) {
 		memset(&vmx->pt_desc, 0, sizeof(vmx->pt_desc));
@@ -1731,4 +1785,186 @@ static void vmx_refresh_apicv_exec_ctrl(struct kvm_vcpu* vcpu) {
 
 	pin_controls_set(vmx, vmx_pin_based_exec_ctrl(vmx));
 
+}
+
+void vmx_update_exception_bitmap(struct kvm_vcpu* vcpu) {
+	u32 eb;
+
+	// PF,UD,MC,DB,AC异常
+	eb = (1u << PF_VECTOR) | (1u << UD_VECTOR) | (1u << MC_VECTOR) |
+		(1u << DB_VECTOR) | (1u << AC_VECTOR);
+
+	/*
+	* Guest access to VMware backdoor ports could legitimately
+	* trigger #GP because of TSS I/O permission bitmap.
+	* We intercept those #GP and allow access to them anyway
+	* as VMware does.
+	*/
+	if (enable_vmware_backdoor)
+		eb |= (1u << GP_VECTOR);
+	// guest debug 模式
+	if ((vcpu->guest_debug &
+		(KVM_GUESTDBG_ENABLE | KVM_GUESTDBG_USE_SW_BP)) ==
+		(KVM_GUESTDBG_ENABLE | KVM_GUESTDBG_USE_SW_BP)) {
+		eb |= 1u << BP_VECTOR;
+	}
+	// 实模式
+	if (to_vmx(vcpu)->rmode.vm86_active)
+		eb = (u32)~0;
+	// 如果不需要拦截pf异常，则清理pf
+	if (!vmx_need_pf_intercept(vcpu))
+		eb &= ~(1u << PF_VECTOR);
+
+	/* When we are running a nested L2 guest and L1 specified for it a
+	* certain exception bitmap, we must trap the same exceptions and pass
+	* them to L1. When running L2, we will only handle the exceptions
+	* specified above if L1 did not want them.
+	*/
+	// 嵌套
+	if (is_guest_mode(vcpu))
+		eb |= get_vmcs12(vcpu)->exception_bitmap;
+	else {
+		int mask = 0, match = 0;
+
+		if (enable_ept && (eb & (1u << PF_VECTOR))) {
+			/*
+			 * If EPT is enabled, #PF is currently only intercepted
+			 * if MAXPHYADDR is smaller on the guest than on the
+			 * host.  In that case we only care about present,
+			 * non-reserved faults.  For vmcs02, however, PFEC_MASK
+			 * and PFEC_MATCH are set in prepare_vmcs02_rare.
+			 */
+			mask = PFERR_PRESENT_MASK | PFERR_RSVD_MASK;
+			match = PFERR_PRESENT_MASK;
+		}
+		vmcs_write32(PAGE_FAULT_ERROR_CODE_MASK, mask);
+		vmcs_write32(PAGE_FAULT_ERROR_CODE_MATCH, match);
+	}
+
+	/*
+	 * Disabling xfd interception indicates that dynamic xfeatures
+	 * might be used in the guest. Always trap #NM in this case
+	 * to save guest xfd_err timely.
+	 */
+	if (vcpu->arch.xfd_no_write_intercept)
+		eb |= (1u << NM_VECTOR);
+
+	// 写入vmcs的VM-execution 控制字段
+	vmcs_write32(EXCEPTION_BITMAP, eb);
+}
+
+bool vmx_need_pf_intercept(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+	if (!enable_ept)
+		return TRUE;
+
+	return allow_smaller_maxphyaddr;
+}
+
+unsigned long vmx_l1_guest_owned_cr0_bits(void)
+{
+	unsigned long bits = KVM_POSSIBLE_CR0_GUEST_BITS;
+
+	/*
+	 * CR0.WP needs to be intercepted when KVM is shadowing legacy paging
+	 * in order to construct shadow PTEs with the correct protections.
+	 * Note!  CR0.WP technically can be passed through to the guest if
+	 * paging is disabled, but checking CR0.PG would generate a cyclical
+	 * dependency of sorts due to forcing the caller to ensure CR0 holds
+	 * the correct value prior to determining which CR0 bits can be owned
+	 * by L1.  Keep it simple and limit the optimization to EPT.
+	 */
+	if (!enable_ept)
+		bits &= ~X86_CR0_WP;
+	return bits;
+}
+
+void set_cr4_guest_host_mask(struct vcpu_vmx* vmx) {
+	struct kvm_vcpu* vcpu = &vmx->vcpu;
+
+	vcpu->arch.cr4_guest_owned_bits = KVM_POSSIBLE_CR4_GUEST_BITS &
+		~vcpu->arch.cr4_guest_rsvd_bits;
+
+	if (!enable_ept) {
+		vcpu->arch.cr4_guest_owned_bits &= ~X86_CR4_TLBFLUSH_BITS;
+		vcpu->arch.cr4_guest_owned_bits &= ~X86_CR4_PDPTR_BITS;
+	}
+	if (is_guest_mode(&vmx->vcpu))
+		vcpu->arch.cr4_guest_owned_bits &=
+		~get_vmcs12(vcpu)->cr4_guest_host_mask;
+
+	vmcs_writel(CR4_GUEST_HOST_MASK, ~vcpu->arch.cr4_guest_owned_bits);
+}
+
+/* called to set cr0 as appropriate for a mov-to-cr0 exit. */
+static int handle_set_cr0(struct kvm_vcpu* vcpu, unsigned long val) {
+	if (is_guest_mode(vcpu)) {
+
+	}
+	else {
+		if (to_vmx(vcpu)->nested.vmxon &&
+			!nested_host_cr0_valid(vcpu, val))
+			return 0;
+
+		return kvm_set_cr0(vcpu, val);
+	}
+}
+
+static int handle_cr(struct kvm_vcpu* vcpu) {
+	unsigned long exit_qualification, val;
+	int cr;
+	int reg;
+	int err;
+
+	exit_qualification = vmx_get_exit_qual(vcpu);
+	cr = exit_qualification & 15;
+	reg = (exit_qualification >> 8) & 15;
+	switch ((exit_qualification>>4)&3)
+	{
+	case 0:/* mov to cr*/
+		val = kvm_register_read(vcpu, reg);
+		switch (cr)
+		{
+		case 0:
+			err = handle_set_cr0(vcpu, val);
+			break;
+		default:
+			break;
+		}
+		break;
+	default:
+		break;
+	}
+
+	return 0;
+}
+
+static int handle_set_cr4(struct kvm_vcpu* vcpu, unsigned long val) {
+	if (is_guest_mode(vcpu)) {
+
+	}
+	else
+		return kvm_set_cr4(vcpu, val);
+}
+
+static void vmx_set_cpu_caps(void) {
+	kvm_set_cpu_caps();
+}
+
+static bool vmx_is_valid_cr4(struct kvm_vcpu* vcpu, unsigned long cr4)
+{
+	/*
+	 * We operate under the default treatment of SMM, so VMX cannot be
+	 * enabled under SMM.  Note, whether or not VMXE is allowed at all,
+	 * i.e. is a reserved bit, is handled by common x86 code.
+	 */
+	// SMM 下不能启用VMXE
+	if ((cr4 & X86_CR4_VMXE) && is_smm(vcpu))
+		return FALSE;
+
+	// 嵌套
+	if (to_vmx(vcpu)->nested.vmxon && !nested_cr4_valid(vcpu, cr4))
+		return FALSE;
+
+	return TRUE;
 }

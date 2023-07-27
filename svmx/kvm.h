@@ -95,6 +95,10 @@ struct kvm_run {
 #define KVM_GUESTDBG_INJECT_BP		0x00080000
 
 /* for KVM_SET_GUEST_DEBUG */
+
+#define KVM_GUESTDBG_ENABLE		0x00000001
+#define KVM_GUESTDBG_SINGLESTEP		0x00000002
+
 struct kvm_guest_debug_arch {
 	__u64 debugreg[8];
 };

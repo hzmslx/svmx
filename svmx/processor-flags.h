@@ -1,13 +1,6 @@
 #pragma once
 
-#define __AC(X,Y)	(X##Y)
-#define _AC(X,Y)	__AC(X,Y)
-#define _AT(T,X)	((T)(X))
-#define _UL(x)		(_AC(x, UL))
-#define _BITUL(x)	(_UL(1) << (x))
 
-#define UL(x)		(_UL(x))
-#define BIT(nr)		(UL(1) << (nr))
 
 /*
  * EFLAGS bits
@@ -44,6 +37,25 @@
 #define X86_CR0_NW	0x20000000 /* Not Write-through */
 #define X86_CR0_CD	0x40000000 /* Cache Disable */
 #define X86_CR0_PG	0x80000000 /* Paging */
+
+
+ /*
+  * Paging options in CR3
+  */
+#define X86_CR3_PWT_BIT		3 /* Page Write Through */
+#define X86_CR3_PWT		_BITUL(X86_CR3_PWT_BIT)
+#define X86_CR3_PCD_BIT		4 /* Page Cache Disable */
+#define X86_CR3_PCD		_BITUL(X86_CR3_PCD_BIT)
+
+#define X86_CR3_PCID_BITS	12
+#define X86_CR3_PCID_MASK	(_AC((1UL << X86_CR3_PCID_BITS) - 1, UL))
+
+#define X86_CR3_LAM_U57_BIT	61 /* Activate LAM for userspace, 62:57 bits masked */
+#define X86_CR3_LAM_U57		_BITULL(X86_CR3_LAM_U57_BIT)
+#define X86_CR3_LAM_U48_BIT	62 /* Activate LAM for userspace, 62:48 bits masked */
+#define X86_CR3_LAM_U48		_BITULL(X86_CR3_LAM_U48_BIT)
+#define X86_CR3_PCID_NOFLUSH_BIT 63 /* Preserve old PCID */
+#define X86_CR3_PCID_NOFLUSH    _BITULL(X86_CR3_PCID_NOFLUSH_BIT)
 
  /*
   * Intel CPU features in CR4

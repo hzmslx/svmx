@@ -3,6 +3,7 @@
 #include "kvm_host.h"
 #include "kvm_para.h"
 #include "mmu.h"
+#include "kvm_cache_regs.h"
 
 /* EFER defaults:
 * - enable syscall per default because its emulated by KVM
@@ -20,6 +21,11 @@ bool allow_smaller_maxphyaddr = 0;
 KMUTEX vendor_module_lock;
 
 u64 host_efer;
+
+bool enable_vmware_backdoor = FALSE;
+
+static u64 cr4_reserved_bits = CR4_RESERVED_BITS;
+
 
 
 /*
@@ -277,4 +283,126 @@ int kvm_arch_vcpu_create(struct kvm_vcpu* vcpu) {
 
 void kvm_arch_vcpu_load(struct kvm_vcpu* vcpu, int cpu) {
 	kvm_x86_ops.vcpu_load(vcpu, cpu);
+}
+
+static void kvm_vcpu_write_tsc_offset(struct kvm_vcpu* vcpu, u64 l1_offset)
+{
+	vcpu->arch.l1_tsc_offset = l1_offset;
+
+	kvm_x86_ops.write_tsc_offset(vcpu, vcpu->arch.l1_tsc_offset);
+}
+
+int kvm_set_cr0(struct kvm_vcpu* vcpu, unsigned long cr0) {
+	
+	cr0 |= X86_CR0_ET;
+
+#ifdef _WIN64
+	if (cr0 & 0xffffffff00000000UL)
+		return 1;
+#endif // _WIN64
+
+	cr0 &= ~CR0_RESERVED_BITS;
+
+	// NW 为 1，表明Not Write-through
+	// 则 CD (Cache Disable) 也必须为 1
+	// 否则出错 即不回写却有 memory cache(NW=1, CD=0), 显然有问题
+	if ((cr0 & X86_CR0_NW) && !(cr0 & X86_CR0_CD))
+		return 1;
+	// PG 为 1, 表明开启 分页
+	// 分页打开, 那就必须打开保护模式, 即 PE 必须为 1
+	// 否则出错
+	if ((cr0 & X86_CR0_PG) && !(cr0 & X86_CR0_PE))
+		return 1;
+
+	// 当 CR1.PCIDE = 1 时, 如果 guest 试图清位 CR0.PG, 则报错
+	if (!(cr0 & X86_CR0_PG) &&
+		(is_64_bit_mode(vcpu) || kvm_is_cr4_bit_set(vcpu, X86_CR4_PCIDE)))
+		return 1;
+
+	kvm_x86_ops.set_cr0(vcpu, cr0);
+
+	return 0;
+}
+
+bool __kvm_is_valid_cr4(struct kvm_vcpu* vcpu, unsigned long cr4)
+{
+	// 如果guest尝试设置cr4值中任何一个保留位，则cr4值无效
+	if (cr4 & cr4_reserved_bits)
+		return FALSE;
+	// guest 保留位，不能为1，否则无效
+	if (cr4 & vcpu->arch.cr4_guest_rsvd_bits)
+		return FALSE;
+
+	return TRUE;
+}
+
+static bool kvm_is_valid_cr4(struct kvm_vcpu* vcpu, unsigned long cr4)
+{
+	return __kvm_is_valid_cr4(vcpu, cr4) &&
+		kvm_x86_ops.is_valid_cr4(vcpu, cr4);
+}
+
+/*
+ * Load the pae pdptrs.  Return 1 if they are all valid, 0 otherwise.
+ */
+int load_pdptrs(struct kvm_vcpu* vcpu, unsigned long cr3)
+{
+	UNREFERENCED_PARAMETER(vcpu);
+	UNREFERENCED_PARAMETER(cr3);
+
+	/*
+	 * If the MMU is nested, CR3 holds an L2 GPA and needs to be translated
+	 * to an L1 GPA.
+	 */
+
+
+	/* Note the offset, PDPTRs are 32 byte aligned when using PAE paging. */
+
+
+
+
+	/*
+	 * Marking VCPU_EXREG_PDPTR dirty doesn't work for !tdp_enabled.
+	 * Shadow page roots need to be reconstructed instead.
+	 */
+
+
+
+	return 1;
+}
+
+int kvm_set_cr4(struct kvm_vcpu* vcpu, unsigned long cr4) {
+	unsigned long old_cr4 = kvm_read_cr4(vcpu);
+
+	// 判断cr4是否有效，无效则报错
+	if (!kvm_is_valid_cr4(vcpu, cr4))
+		return 1;
+
+	// vcpu属于长模式
+	if (is_long_mode(vcpu)) {
+		// 虚拟机在长模式，但是CR4的PAE没有打开
+		if (!(cr4 & X86_CR4_PAE))
+			return 1;
+		if ((cr4 ^ old_cr4) & X86_CR4_LA57)
+			return 1;
+	}// 非长模式，vcpu打开了分页模式，并且打开了PAE模式
+	else if (is_paging(vcpu) && (cr4 & X86_CR4_PAE)
+		&& ((cr4 ^ old_cr4) & X86_CR4_PDPTR_BITS)
+		&& !load_pdptrs(vcpu, kvm_read_cr3(vcpu)))
+		return 1;
+	// PCIDE开启但是原值没有开启
+	if ((cr4 & X86_CR4_PCIDE) && !(old_cr4 & X86_CR4_PCIDE)) {
+		/* PCID can not be enabled when cr3[11:0]!=000H or EFER.LMA=0 */
+		if ((kvm_read_cr3(vcpu) & X86_CR3_PCID_MASK) || !is_long_mode(vcpu))
+			return 1;
+	}
+
+	kvm_x86_ops.set_cr4(vcpu, cr4);
+
+	return 0;
+}
+
+void kvm_lmsw(struct kvm_vcpu* vcpu, unsigned long msw)
+{
+	(void)kvm_set_cr0(vcpu, kvm_read_cr0_bits(vcpu, ~0x0eul) | (msw & 0x0f));
 }

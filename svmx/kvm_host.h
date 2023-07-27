@@ -9,6 +9,7 @@
 #include "lapic.h"
 #include "types.h"
 
+
 #define KVM_GUEST_CR0_MASK_UNRESTRICTED_GUEST				\
 	(X86_CR0_WP | X86_CR0_NE | X86_CR0_NW | X86_CR0_CD)
 #define KVM_GUEST_CR0_MASK						\
@@ -43,7 +44,10 @@
 #define GP_VECTOR 13
 #define PF_VECTOR 14
 #define MF_VECTOR 16
+#define AC_VECTOR 17
 #define MC_VECTOR 18
+#define XM_VECTOR 19
+#define VE_VECTOR 20
 
 /*Deliver mode, defined for ioapic.c*/
 #define dest_Fixed IOSAPIC_FIXED
@@ -86,11 +90,16 @@ enum kvm_reg {
 	VCPU_REGS_R15 = 15,
 #endif
 	VCPU_REGS_RIP,
-	NR_VCPU_REGS
-};
+	NR_VCPU_REGS,
 
-enum kvm_reg_ex {
 	VCPU_EXREG_PDPTR = NR_VCPU_REGS,
+	VCPU_EXREG_CR0,
+	VCPU_EXREG_CR3,
+	VCPU_EXREG_CR4,
+	VCPU_EXREG_RFLAGS,
+	VCPU_EXREG_SEGMENTS,
+	VCPU_EXREG_EXIT_INFO_1,
+	VCPU_EXREG_EXIT_INFO_2,
 };
 
 enum {
@@ -113,6 +122,15 @@ enum exit_fastpath_completion {
 };
 typedef enum exit_fastpath_completion fastpath_t;
 
+
+#define CR4_RESERVED_BITS                                               \
+	(~(unsigned long)(X86_CR4_VME | X86_CR4_PVI | X86_CR4_TSD | X86_CR4_DE\
+			  | X86_CR4_PSE | X86_CR4_PAE | X86_CR4_MCE     \
+			  | X86_CR4_PGE | X86_CR4_PCE | X86_CR4_OSFXSR | X86_CR4_PCIDE \
+			  | X86_CR4_OSXSAVE | X86_CR4_SMEP | X86_CR4_FSGSBASE \
+			  | X86_CR4_OSXMMEXCPT | X86_CR4_LA57 | X86_CR4_VMXE \
+			  | X86_CR4_SMAP | X86_CR4_PKE | X86_CR4_UMIP))
+
 #define KVM_NR_DB_REGS	4
 
 #define DR6_BD		(1 << 13)
@@ -132,7 +150,10 @@ typedef enum exit_fastpath_completion fastpath_t;
 #define HF_NMI_MASK		(1 << 3)
 #define HF_IRET_MASK		(1 << 4)
 
-
+#define CR0_RESERVED_BITS                                               \
+	(~(unsigned long)(X86_CR0_PE | X86_CR0_MP | X86_CR0_EM | X86_CR0_TS \
+			  | X86_CR0_ET | X86_CR0_NE | X86_CR0_WP | X86_CR0_AM \
+			  | X86_CR0_NW | X86_CR0_CD | X86_CR0_PG))
 
 
 enum vcpu_sysreg {
@@ -269,6 +290,33 @@ struct descriptor_table {
 #include <poppack.h>
 
 
+#define PFERR_PRESENT_BIT 0
+#define PFERR_WRITE_BIT 1
+#define PFERR_USER_BIT 2
+#define PFERR_RSVD_BIT 3
+#define PFERR_FETCH_BIT 4
+#define PFERR_PK_BIT 5
+#define PFERR_SGX_BIT 15
+#define PFERR_GUEST_FINAL_BIT 32
+#define PFERR_GUEST_PAGE_BIT 33
+#define PFERR_IMPLICIT_ACCESS_BIT 48
+
+
+#define PFERR_PRESENT_MASK	BIT(PFERR_PRESENT_BIT)
+#define PFERR_WRITE_MASK	BIT(PFERR_WRITE_BIT)
+#define PFERR_USER_MASK		BIT(PFERR_USER_BIT)
+#define PFERR_RSVD_MASK		BIT(PFERR_RSVD_BIT)
+#define PFERR_FETCH_MASK	BIT(PFERR_FETCH_BIT)
+#define PFERR_PK_MASK		BIT(PFERR_PK_BIT)
+#define PFERR_SGX_MASK		BIT(PFERR_SGX_BIT)
+#define PFERR_GUEST_FINAL_MASK	BIT_ULL(PFERR_GUEST_FINAL_BIT)
+#define PFERR_GUEST_PAGE_MASK	BIT_ULL(PFERR_GUEST_PAGE_BIT)
+#define PFERR_IMPLICIT_ACCESS	BIT_ULL(PFERR_IMPLICIT_ACCESS_BIT)
+
+#define PFERR_NESTED_GUEST_PAGE (PFERR_GUEST_PAGE_MASK |	\
+				 PFERR_WRITE_MASK |		\
+				 PFERR_PRESENT_MASK)
+
 struct kvm_cpu_context {
 	
 
@@ -282,6 +330,21 @@ struct kvm_cpu_context {
 	u64 sys_regs[NR_SYS_REGS];
 
 	struct kvm_vcpu* __hyp_running_vcpu;
+};
+
+struct kvm_host_map {
+	/*
+	 * Only valid if the 'pfn' is managed by the host kernel (i.e. There is
+	 * a 'struct page' for it. When using mem= kernel parameter some memory
+	 * can be used as guest memory but they are not managed by host
+	 * kernel).
+	 * If 'pfn' is not managed by the host kernel, this field is
+	 * initialized to KVM_UNMAPPED_PAGE.
+	 */
+	struct page* page;
+	void* hva;
+	kvm_pfn_t pfn;
+	kvm_pfn_t gfn;
 };
 
 enum pmc_type {
@@ -1317,3 +1380,9 @@ int kvm_arch_vcpu_create(struct kvm_vcpu* vcpu);
 void vcpu_load(struct kvm_vcpu* vcpu);
 void kvm_arch_vcpu_load(struct kvm_vcpu* vcpu, int cpu);
 
+#define HF_GUEST_MASK		(1 << 0) /* VCPU is in guest-mode */
+
+int kvm_set_cr0(struct kvm_vcpu* vcpu, unsigned long cr0);
+int kvm_set_cr4(struct kvm_vcpu* vcpu, unsigned long cr4);
+
+void kvm_lmsw(struct kvm_vcpu* vcpu, unsigned long msw);

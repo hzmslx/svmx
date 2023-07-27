@@ -4,12 +4,17 @@
 * Copyright (c) 2004, Intel Corporation.
 * 
 */
+#include "kvm_host.h"
+#include "kvm.h"
+#include "intel_pt.h"
 #include "vmcs.h"
 #include "posted_intr.h"
 #include "desc_defs.h"
 #include "vmxfeatures.h"
 #include "vmx_ops.h"
-#include "intel_pt.h"
+#include "kvm_cache_regs.h"
+
+
 
 #define VMCS_CONTROL_BIT(x)	BIT(VMX_FEATURE_##x & 0x1f)
 
@@ -42,6 +47,36 @@
 #define CPU_BASED_MONITOR_EXITING               VMCS_CONTROL_BIT(MONITOR_EXITING)
 #define CPU_BASED_PAUSE_EXITING                 VMCS_CONTROL_BIT(PAUSE_EXITING)
 #define CPU_BASED_ACTIVATE_SECONDARY_CONTROLS   VMCS_CONTROL_BIT(SEC_CONTROLS)
+
+
+struct nested_vmx_msrs {
+	/*
+	 * We only store the "true" versions of the VMX capability MSRs. We
+	 * generate the "non-true" versions by setting the must-be-1 bits
+	 * according to the SDM.
+	 */
+	u32 procbased_ctls_low;
+	u32 procbased_ctls_high;
+	u32 secondary_ctls_low;
+	u32 secondary_ctls_high;
+	u32 pinbased_ctls_low;
+	u32 pinbased_ctls_high;
+	u32 exit_ctls_low;
+	u32 exit_ctls_high;
+	u32 entry_ctls_low;
+	u32 entry_ctls_high;
+	u32 misc_low;
+	u32 misc_high;
+	u32 ept_caps;
+	u32 vpid_caps;
+	u64 basic;
+	u64 cr0_fixed0;
+	u64 cr0_fixed1;
+	u64 cr4_fixed0;
+	u64 cr4_fixed1;
+	u64 vmcs_enum;
+	u64 vmfunc_controls;
+};
 
 /* VMCS Encodings */
 enum vmcs_field {
@@ -614,6 +649,143 @@ struct pt_desc {
 	struct pt_ctx guest;
 };
 
+
+/*
+ * The nested_vmx structure is part of vcpu_vmx, and holds information we need
+ * for correct emulation of VMX (i.e., nested VMX) on this vcpu.
+ */
+struct nested_vmx {
+	/* Has the level1 guest done vmxon? */
+	bool vmxon;
+	gpa_t vmxon_ptr;
+	bool pml_full;
+
+	/* The guest-physical address of the current VMCS L1 keeps for L2 */
+	gpa_t current_vmptr;
+	/*
+	 * Cache of the guest's VMCS, existing outside of guest memory.
+	 * Loaded from guest memory during VMPTRLD. Flushed to guest
+	 * memory during VMCLEAR and VMPTRLD.
+	 */
+	struct vmcs12* cached_vmcs12;
+	/*
+	 * Cache of the guest's shadow VMCS, existing outside of guest
+	 * memory. Loaded from guest memory during VM entry. Flushed
+	 * to guest memory during VM exit.
+	 */
+	struct vmcs12* cached_shadow_vmcs12;
+
+	/*
+	 * GPA to HVA cache for accessing vmcs12->vmcs_link_pointer
+	 */
+	struct gfn_to_hva_cache shadow_vmcs12_cache;
+
+	/*
+	 * GPA to HVA cache for VMCS12
+	 */
+	struct gfn_to_hva_cache vmcs12_cache;
+
+	/*
+	 * Indicates if the shadow vmcs or enlightened vmcs must be updated
+	 * with the data held by struct vmcs12.
+	 */
+	bool need_vmcs12_to_shadow_sync;
+	bool dirty_vmcs12;
+
+	/*
+	 * Indicates whether MSR bitmap for L2 needs to be rebuilt due to
+	 * changes in MSR bitmap for L1 or switching to a different L2. Note,
+	 * this flag can only be used reliably in conjunction with a paravirt L1
+	 * which informs L0 whether any changes to MSR bitmap for L2 were done
+	 * on its side.
+	 */
+	bool force_msr_bitmap_recalc;
+
+	/*
+	 * Indicates lazily loaded guest state has not yet been decached from
+	 * vmcs02.
+	 */
+	bool need_sync_vmcs02_to_vmcs12_rare;
+
+	/*
+	 * vmcs02 has been initialized, i.e. state that is constant for
+	 * vmcs02 has been written to the backing VMCS.  Initialization
+	 * is delayed until L1 actually attempts to run a nested VM.
+	 */
+	bool vmcs02_initialized;
+
+	bool change_vmcs01_virtual_apic_mode;
+	bool reload_vmcs01_apic_access_page;
+	bool update_vmcs01_cpu_dirty_logging;
+	bool update_vmcs01_apicv_status;
+
+	/*
+	 * Enlightened VMCS has been enabled. It does not mean that L1 has to
+	 * use it. However, VMX features available to L1 will be limited based
+	 * on what the enlightened VMCS supports.
+	 */
+	bool enlightened_vmcs_enabled;
+
+	/* L2 must run next, and mustn't decide to exit to L1. */
+	bool nested_run_pending;
+
+	/* Pending MTF VM-exit into L1.  */
+	bool mtf_pending;
+
+	struct loaded_vmcs vmcs02;
+
+	/*
+	 * Guest pages referred to in the vmcs02 with host-physical
+	 * pointers, so we must keep them pinned while L2 runs.
+	 */
+	struct kvm_host_map apic_access_page_map;
+	struct kvm_host_map virtual_apic_map;
+	struct kvm_host_map pi_desc_map;
+
+	struct kvm_host_map msr_bitmap_map;
+
+	struct pi_desc* pi_desc;
+	bool pi_pending;
+	u16 posted_intr_nv;
+
+	u64 preemption_timer_deadline;
+	bool has_preemption_timer_deadline;
+	bool preemption_timer_expired;
+
+	/*
+	 * Used to snapshot MSRs that are conditionally loaded on VM-Enter in
+	 * order to propagate the guest's pre-VM-Enter value into vmcs02.  For
+	 * emulation of VMLAUNCH/VMRESUME, the snapshot will be of L1's value.
+	 * For KVM_SET_NESTED_STATE, the snapshot is of L2's value, _if_
+	 * userspace restores MSRs before nested state.  If userspace restores
+	 * MSRs after nested state, the snapshot holds garbage, but KVM can't
+	 * detect that, and the garbage value in vmcs02 will be overwritten by
+	 * MSR restoration in any case.
+	 */
+	u64 pre_vmenter_debugctl;
+	u64 pre_vmenter_bndcfgs;
+
+	/* to migrate it to L1 if L2 writes to L1's CR8 directly */
+	int l1_tpr_threshold;
+
+	u16 vpid02;
+	u16 last_vpid;
+
+	struct nested_vmx_msrs msrs;
+
+	/* SMM related state */
+	struct {
+		/* in VMX operation on SMM entry? */
+		bool vmxon;
+		/* in guest mode on SMM entry? */
+		bool guest_mode;
+	} smm;
+
+	gpa_t hv_evmcs_vmptr;
+	struct kvm_host_map hv_evmcs_map;
+	struct hv_enlightened_vmcs* hv_evmcs;
+};
+
 struct vcpu_vmx {
 	struct kvm_vcpu vcpu;
 	u8                    fail;
@@ -691,7 +863,7 @@ struct vcpu_vmx {
 	/* Used if this vCPU is waiting for PI notification wakeup. */
 
 	/* Support for a guest hypervisor (nested VMX) */
-	// struct nested_vmx nested;
+	struct nested_vmx nested;
 
 	/* Dynamic PLE window. */
 	unsigned int ple_window;
@@ -949,3 +1121,18 @@ void vmx_vcpu_load_vmcs(struct kvm_vcpu* vcpu, int cpu,
 void loaded_vmcs_clear(struct loaded_vmcs* loaded_vmcs);
 
 void dump_vmcs(struct kvm_vcpu* vcpu);
+
+void vmx_update_exception_bitmap(struct kvm_vcpu* vcpu);
+
+bool vmx_need_pf_intercept(struct kvm_vcpu* vcpu);
+
+struct vcpu_vmx* to_vmx(struct kvm_vcpu* vcpu);
+
+unsigned long vmx_l1_guest_owned_cr0_bits(void);
+void set_cr4_guest_host_mask(struct vcpu_vmx* vmx);
+
+static unsigned long vmx_get_exit_qual(struct kvm_vcpu* vcpu) {
+	struct vcpu_vmx* vmx = to_vmx(vcpu);
+
+	return vmx->exit_qualification;
+}
