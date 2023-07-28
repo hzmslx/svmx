@@ -1386,3 +1386,10 @@ int kvm_set_cr0(struct kvm_vcpu* vcpu, unsigned long cr0);
 int kvm_set_cr4(struct kvm_vcpu* vcpu, unsigned long cr4);
 
 void kvm_lmsw(struct kvm_vcpu* vcpu, unsigned long msw);
+
+static inline bool kvm_request_pending(struct kvm_vcpu* vcpu)
+{
+	return vcpu->requests;
+}
+
+void kvm_vcpu_reset(struct kvm_vcpu* vcpu, bool init_event);

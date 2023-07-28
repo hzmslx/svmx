@@ -178,6 +178,7 @@
   <ItemGroup>
     <ClCompile Include="cpuid.c" />
     <ClCompile Include="kvm.c" />
+    <ClCompile Include="lapic.c" />
     <ClCompile Include="Logging.c" />
     <ClCompile Include="mmu.c" />
     <ClCompile Include="nested.c" />
@@ -192,6 +193,7 @@
     <ClCompile Include="x86.c" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="apicdef.h" />
     <ClInclude Include="bitops.h" />
     <ClInclude Include="capabilities.h" />
     <ClInclude Include="cpuid.h" />
@@ -199,6 +201,7 @@
     <ClInclude Include="desc_defs.h" />
     <ClInclude Include="int-ll64.h" />
     <ClInclude Include="intel_pt.h" />
+    <ClInclude Include="irq_vectors.h" />
     <ClInclude Include="kvm.h" />
     <ClInclude Include="kvm_cache_regs.h" />
     <ClInclude Include="kvm_emulate.h" />

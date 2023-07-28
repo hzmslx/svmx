@@ -19,6 +19,11 @@ static void __vmcs_writel(unsigned long field, unsigned long value){
 	__vmx_vmwrite(field, value);
 }
 
+static void vmcs_write16(unsigned long field, u16 value)
+{
+	__vmcs_writel(field, value);
+}
+
 static void vmcs_write32(unsigned long field, u32 value)
 {
 	__vmcs_writel(field, value);

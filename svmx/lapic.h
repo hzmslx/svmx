@@ -32,3 +32,16 @@ static inline bool lapic_in_kernel(struct kvm_vcpu* vcpu)
 	UNREFERENCED_PARAMETER(vcpu);
 	return TRUE;
 }
+
+static inline u32 __kvm_lapic_get_reg(char* regs, int reg_off)
+{
+	return *((u32*)(regs + reg_off));
+}
+
+static inline u32 kvm_lapic_get_reg(struct kvm_lapic* apic, int reg_off)
+{
+	return __kvm_lapic_get_reg(apic->regs, reg_off);
+}
+
+u64 kvm_lapic_get_cr8(struct kvm_vcpu* vcpu);
+int kvm_lapic_find_highest_irr(struct kvm_vcpu* vcpu);

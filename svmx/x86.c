@@ -26,7 +26,7 @@ bool enable_vmware_backdoor = FALSE;
 
 static u64 cr4_reserved_bits = CR4_RESERVED_BITS;
 
-
+bool enable_apicv = TRUE;
 
 /*
  * List of msr numbers which we expose to userspace through KVM_GET_MSRS
@@ -44,6 +44,8 @@ static u32 msrs_to_save[] = {
 	MSR_IA32_TSC, MSR_KVM_SYSTEM_TIME, MSR_KVM_WALL_CLOCK,
 	MSR_IA32_PERF_STATUS, MSR_IA32_CR_PAT, MSR_VM_HSAVE_PA
 };
+
+static void update_cr8_intercept(struct kvm_vcpu* vcpu);
 
 
 void kvm_init_msr_list() {
@@ -207,6 +209,11 @@ static int vcpu_enter_guest(struct kvm_vcpu* vcpu)
 	
 	fastpath_t exit_fastpath;
 
+	if (kvm_request_pending(vcpu)) {
+
+		
+	}
+
 	for (;;) {
 		/*
 		* Assert that vCPU vs. VM APICv state is consistent.  An APICv
@@ -277,6 +284,7 @@ int kvm_arch_vcpu_create(struct kvm_vcpu* vcpu) {
 
 	// ¼ÓÔØvcpu
 	vcpu_load(vcpu);
+	kvm_vcpu_reset(vcpu, FALSE);
 
 	return r;
 }
@@ -405,4 +413,54 @@ int kvm_set_cr4(struct kvm_vcpu* vcpu, unsigned long cr4) {
 void kvm_lmsw(struct kvm_vcpu* vcpu, unsigned long msw)
 {
 	(void)kvm_set_cr0(vcpu, kvm_read_cr0_bits(vcpu, ~0x0eul) | (msw & 0x0f));
+}
+
+static void update_cr8_intercept(struct kvm_vcpu* vcpu) {
+	int max_irr, tpr;
+
+	if (!kvm_x86_ops.update_cr8_intercept)
+		return;
+
+	if (!lapic_in_kernel(vcpu))
+		return;
+
+	if (vcpu->arch.apic->apicv_active)
+		return;
+
+	if (!vcpu->arch.apic->vapic_addr)
+		max_irr = kvm_lapic_find_highest_irr(vcpu);
+	else
+		max_irr = -1;
+
+	if (max_irr != -1)
+		max_irr >>= 4;
+
+	tpr = (int)kvm_lapic_get_cr8(vcpu);
+}
+
+static void vcpu_load_eoi_exitmap(struct kvm_vcpu* vcpu)
+{
+	UNREFERENCED_PARAMETER(vcpu);
+	
+}
+
+void kvm_vcpu_reset(struct kvm_vcpu* vcpu, bool init_event) {
+	unsigned long old_cr0 = kvm_read_cr0(vcpu);
+	unsigned long new_cr0;
+
+	/*
+	* CR0.CD/NW are set on RESET, preserved on INIT.  Note, some versions
+	* of Intel's SDM list CD/NW as being set on INIT, but they contradict
+	* (or qualify) that with a footnote stating that CD/NW are preserved.
+	*/
+	new_cr0 = X86_CR0_ET;
+	if (init_event)
+		new_cr0 |= (old_cr0 & (X86_CR0_NW | X86_CR0_CD));
+	else
+		new_cr0 |= X86_CR0_NW | X86_CR0_CD;
+	new_cr0 = X86_CR0_ET;
+	kvm_x86_ops.set_cr0(vcpu, new_cr0);
+	kvm_x86_ops.set_cr4(vcpu, 0);
+	kvm_x86_ops.set_efer(vcpu, 0);
+
 }

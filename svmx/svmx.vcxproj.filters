@@ -73,6 +73,9 @@
     <ClCompile Include="nested.c">
       <Filter>vmx</Filter>
     </ClCompile>
+    <ClCompile Include="lapic.c">
+      <Filter>kvm</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="pch.h">
@@ -200,6 +203,12 @@
     </ClInclude>
     <ClInclude Include="smm.h">
       <Filter>kvm</Filter>
+    </ClInclude>
+    <ClInclude Include="apicdef.h">
+      <Filter>asm</Filter>
+    </ClInclude>
+    <ClInclude Include="irq_vectors.h">
+      <Filter>asm</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

@@ -14,6 +14,7 @@
 #include "kvm_cache_regs.h"
 #include "cpuid.h"
 #include "smm.h"
+#include "irq_vectors.h"
 
 #define VMX_XSS_EXIT_BITMAP 0
 
@@ -46,6 +47,8 @@ static bool enable_preemption_timer = TRUE;
 static bool dump_invalid_vmcs = 0;
 
 LIST_ENTRY* loaded_vmcss_on_cpu;
+
+extern bool enable_apicv;
 
 /* Default is SYSTEM mode, 1 for host-guest mode */
 int pt_mode = PT_MODE_SYSTEM;
@@ -895,6 +898,17 @@ NTSTATUS hardware_setup() {
 			enable_preemption_timer = FALSE;
 	}
 
+	if (!cpu_has_vmx_flexpriority())
+		flexpriority_enabled = 0;
+
+	/*
+	* set_apic_access_page_addr() is used to reload apic access
+	* page upon invalidation.  No need to do anything if not
+	* using the APIC_ACCESS_ADDR VMCS field.
+	*/
+	if (!flexpriority_enabled)
+		vmx_x86_ops.set_apic_access_page_addr = NULL;
+
 	status = alloc_kvm_area();
 
 	return status;
@@ -1482,7 +1496,7 @@ int alloc_loaded_vmcs(struct loaded_vmcs* loaded_vmcs) {
 	do
 	{
 		if (cpu_has_vmx_msr_bitmap()) {
-			unsigned long* msr_bitmap = (unsigned long*)ExAllocatePoolWithTag(PagedPool, PAGE_SIZE, DRIVER_TAG);
+			unsigned long* msr_bitmap = (unsigned long*)ExAllocatePoolZero(PagedPool, PAGE_SIZE, DRIVER_TAG);
 			if (!msr_bitmap) {
 				status = STATUS_NO_MEMORY;
 				break;
@@ -1726,6 +1740,18 @@ static void init_vmcs(struct vcpu_vmx* vmx) {
 	if (cpu_has_secondary_exec_ctrls())
 		secondary_exec_controls_set(vmx, vmx_secondary_exec_control(vmx));
 
+	if (enable_apicv && lapic_in_kernel(&vmx->vcpu)) {
+		vmcs_write64(EOI_EXIT_BITMAP0, 0);
+		vmcs_write64(EOI_EXIT_BITMAP1, 0);
+		vmcs_write64(EOI_EXIT_BITMAP2, 0);
+		vmcs_write64(EOI_EXIT_BITMAP3, 0);
+
+		vmcs_write16(GUEST_INTR_STATUS, 0);
+		vmcs_write16(POSTED_INTR_NV, POSTED_INTR_VECTOR);
+
+	}
+
+
 	if (cpu_has_vmx_xsaves())
 		vmcs_write64(XSS_EXIT_BITMAP, VMX_XSS_EXIT_BITMAP);
 
@@ -1754,6 +1780,13 @@ static void init_vmcs(struct vcpu_vmx* vmx) {
 		/* Bit[6~0] are forced to 1, writes are ignored. */
 		vmx->pt_desc.guest.output_mask = 0x7F;
 		vmcs_write64(GUEST_IA32_RTIT_CTL, 0);
+	}
+
+	// use TPR shadow 开启
+	if (cpu_has_vmx_tpr_shadow()) {
+		vmcs_write64(VIRTUAL_APIC_PAGE_ADDR, 0);
+		
+		vmcs_write32(TPR_THRESHOLD, 0);
 	}
 }
 
@@ -1967,4 +2000,18 @@ static bool vmx_is_valid_cr4(struct kvm_vcpu* vcpu, unsigned long cr4)
 		return FALSE;
 
 	return TRUE;
+}
+
+static void vmx_set_apic_access_page_addr(struct kvm_vcpu* vcpu) {
+
+	/* Defer reload until vmcs01 is the current VMCS. */
+	if (is_guest_mode(vcpu)) {
+		to_vmx(vcpu)->nested.reload_vmcs01_apic_access_page = TRUE;
+		return;
+	}
+	
+	// 如果没有开启 virtual APIC accesses
+	if (!(secondary_exec_controls_get(to_vmx(vcpu)) &
+		SECONDARY_EXEC_VIRTUALIZE_APIC_ACCESSES))
+		return;
 }
