@@ -14,7 +14,72 @@
 #include "vmx_ops.h"
 #include "kvm_cache_regs.h"
 
+#define VMX_EXIT_REASONS_FAILED_VMENTRY         0x80000000
+#define VMX_EXIT_REASONS_SGX_ENCLAVE_MODE	0x08000000
 
+#define EXIT_REASON_EXCEPTION_NMI       0
+#define EXIT_REASON_EXTERNAL_INTERRUPT  1
+#define EXIT_REASON_TRIPLE_FAULT        2
+#define EXIT_REASON_INIT_SIGNAL			3
+#define EXIT_REASON_SIPI_SIGNAL         4
+
+#define EXIT_REASON_INTERRUPT_WINDOW    7
+#define EXIT_REASON_NMI_WINDOW          8
+#define EXIT_REASON_TASK_SWITCH         9
+#define EXIT_REASON_CPUID               10
+#define EXIT_REASON_HLT                 12
+#define EXIT_REASON_INVD                13
+#define EXIT_REASON_INVLPG              14
+#define EXIT_REASON_RDPMC               15
+#define EXIT_REASON_RDTSC               16
+#define EXIT_REASON_VMCALL              18
+#define EXIT_REASON_VMCLEAR             19
+#define EXIT_REASON_VMLAUNCH            20
+#define EXIT_REASON_VMPTRLD             21
+#define EXIT_REASON_VMPTRST             22
+#define EXIT_REASON_VMREAD              23
+#define EXIT_REASON_VMRESUME            24
+#define EXIT_REASON_VMWRITE             25
+#define EXIT_REASON_VMOFF               26
+#define EXIT_REASON_VMON                27
+#define EXIT_REASON_CR_ACCESS           28
+#define EXIT_REASON_DR_ACCESS           29
+#define EXIT_REASON_IO_INSTRUCTION      30
+#define EXIT_REASON_MSR_READ            31
+#define EXIT_REASON_MSR_WRITE           32
+#define EXIT_REASON_INVALID_STATE       33
+#define EXIT_REASON_MSR_LOAD_FAIL       34
+#define EXIT_REASON_MWAIT_INSTRUCTION   36
+#define EXIT_REASON_MONITOR_TRAP_FLAG   37
+#define EXIT_REASON_MONITOR_INSTRUCTION 39
+#define EXIT_REASON_PAUSE_INSTRUCTION   40
+#define EXIT_REASON_MCE_DURING_VMENTRY  41
+#define EXIT_REASON_TPR_BELOW_THRESHOLD 43
+#define EXIT_REASON_APIC_ACCESS         44
+#define EXIT_REASON_EOI_INDUCED         45
+#define EXIT_REASON_GDTR_IDTR           46
+#define EXIT_REASON_LDTR_TR             47
+#define EXIT_REASON_EPT_VIOLATION       48
+#define EXIT_REASON_EPT_MISCONFIG       49
+#define EXIT_REASON_INVEPT              50
+#define EXIT_REASON_RDTSCP              51
+#define EXIT_REASON_PREEMPTION_TIMER    52
+#define EXIT_REASON_INVVPID             53
+#define EXIT_REASON_WBINVD              54
+#define EXIT_REASON_XSETBV              55
+#define EXIT_REASON_APIC_WRITE          56
+#define EXIT_REASON_RDRAND              57
+#define EXIT_REASON_INVPCID             58
+#define EXIT_REASON_VMFUNC              59
+#define EXIT_REASON_ENCLS               60
+#define EXIT_REASON_RDSEED              61
+#define EXIT_REASON_PML_FULL            62
+#define EXIT_REASON_XSAVES              63
+#define EXIT_REASON_XRSTORS             64
+#define EXIT_REASON_UMWAIT              67
+#define EXIT_REASON_TPAUSE              68
+#define EXIT_REASON_BUS_LOCK            74
+#define EXIT_REASON_NOTIFY              75
 
 #define VMCS_CONTROL_BIT(x)	BIT(VMX_FEATURE_##x & 0x1f)
 
@@ -22,6 +87,10 @@
  * Definitions of Tertiary Processor-Based VM-Execution Controls.
  */
 #define TERTIARY_EXEC_IPI_VIRT			VMCS_CONTROL_BIT(IPI_VIRT)
+
+
+#define PIN_BASED_ALWAYSON_WITHOUT_TRUE_MSR	0x00000016
+
 /*
 * Definitions of Primary Processor-Based VM-Execution Controls.
 */
@@ -47,6 +116,8 @@
 #define CPU_BASED_MONITOR_EXITING               VMCS_CONTROL_BIT(MONITOR_EXITING)
 #define CPU_BASED_PAUSE_EXITING                 VMCS_CONTROL_BIT(PAUSE_EXITING)
 #define CPU_BASED_ACTIVATE_SECONDARY_CONTROLS   VMCS_CONTROL_BIT(SEC_CONTROLS)
+
+#define CPU_BASED_ALWAYSON_WITHOUT_TRUE_MSR	0x0401e172
 
 
 struct nested_vmx_msrs {
@@ -340,15 +411,27 @@ enum vmcs_field {
 #define PIN_BASED_VMX_PREEMPTION_TIMER          VMCS_CONTROL_BIT(PREEMPTION_TIMER)
 #define PIN_BASED_POSTED_INTR                   VMCS_CONTROL_BIT(POSTED_INTR)
 
+#define VM_EXIT_SAVE_DEBUG_CONTROLS             0x00000004
 #define VM_EXIT_HOST_ADDR_SPACE_SIZE            0x00000200
+#define VM_EXIT_LOAD_IA32_PERF_GLOBAL_CTRL      0x00001000
 #define VM_EXIT_ACK_INTR_ON_EXIT                0x00008000
 #define VM_EXIT_SAVE_IA32_PAT			0x00040000
 #define VM_EXIT_LOAD_IA32_PAT			0x00080000
+#define VM_EXIT_SAVE_IA32_EFER                  0x00100000
+#define VM_EXIT_LOAD_IA32_EFER                  0x00200000
+#define VM_EXIT_SAVE_VMX_PREEMPTION_TIMER       0x00400000
+#define VM_EXIT_CLEAR_BNDCFGS                   0x00800000
+#define VM_EXIT_PT_CONCEAL_PIP			0x01000000
+#define VM_EXIT_CLEAR_IA32_RTIT_CTL		0x02000000
+
+#define VM_EXIT_ALWAYSON_WITHOUT_TRUE_MSR	0x00036dff
 
 #define VM_ENTRY_IA32E_MODE                     0x00000200
 #define VM_ENTRY_SMM                            0x00000400
 #define VM_ENTRY_DEACT_DUAL_MONITOR             0x00000800
 #define VM_ENTRY_LOAD_IA32_PAT			0x00004000
+
+#define VM_ENTRY_ALWAYSON_WITHOUT_TRUE_MSR	0x000011ff
 
 #define VMX_EPT_EXTENT_INDIVIDUAL_ADDR		0
 #define VMX_EPT_EXTENT_CONTEXT			1
@@ -359,6 +442,7 @@ enum vmcs_field {
 #define VMX_EPTP_UC_BIT				(1ull << 8)
 #define VMX_EPTP_WB_BIT				(1ull << 14)
 #define VMX_EPT_2MB_PAGE_BIT			(1ull << 16)
+#define VMX_EPT_AD_BIT				    (1ull << 21)
 #define VMX_EPT_EXTENT_INDIVIDUAL_BIT		(1ull << 24)
 #define VMX_EPT_EXTENT_CONTEXT_BIT		(1ull << 25)
 #define VMX_EPT_EXTENT_GLOBAL_BIT		(1ull << 26)
@@ -377,42 +461,7 @@ enum vmcs_field {
 
 #define VMX_NR_VPIDS				(1 << 16)
 
-#define VMX_EXIT_REASONS_FAILED_VMENTRY         0x80000000
 
-#define EXIT_REASON_EXCEPTION_NMI       0
-#define EXIT_REASON_EXTERNAL_INTERRUPT  1
-#define EXIT_REASON_TRIPLE_FAULT        2
-
-#define EXIT_REASON_PENDING_INTERRUPT   7
-#define EXIT_REASON_NMI_WINDOW			8
-#define EXIT_REASON_TASK_SWITCH         9
-#define EXIT_REASON_CPUID               10
-#define EXIT_REASON_HLT                 12
-#define EXIT_REASON_INVLPG              14
-#define EXIT_REASON_RDPMC               15
-#define EXIT_REASON_RDTSC               16
-#define EXIT_REASON_VMCALL              18
-#define EXIT_REASON_VMCLEAR             19
-#define EXIT_REASON_VMLAUNCH            20
-#define EXIT_REASON_VMPTRLD             21
-#define EXIT_REASON_VMPTRST             22
-#define EXIT_REASON_VMREAD              23
-#define EXIT_REASON_VMRESUME            24
-#define EXIT_REASON_VMWRITE             25
-#define EXIT_REASON_VMOFF               26
-#define EXIT_REASON_VMON                27
-#define EXIT_REASON_CR_ACCESS           28
-#define EXIT_REASON_DR_ACCESS           29
-#define EXIT_REASON_IO_INSTRUCTION      30
-#define EXIT_REASON_MSR_READ            31
-#define EXIT_REASON_MSR_WRITE           32
-#define EXIT_REASON_MWAIT_INSTRUCTION   36
-#define EXIT_REASON_MCE_DURING_VMENTRY	41
-#define EXIT_REASON_TPR_BELOW_THRESHOLD 43
-#define EXIT_REASON_APIC_ACCESS         44
-#define EXIT_REASON_EPT_VIOLATION       48
-#define EXIT_REASON_EPT_MISCONFIG       49
-#define EXIT_REASON_WBINVD				54
 
 #define VM_EXIT_SAVE_DEBUG_CONTROLS             0x00000004
 #define VM_EXIT_HOST_ADDR_SPACE_SIZE            0x00000200
@@ -448,6 +497,12 @@ enum vmx_l1d_flush_state {
 	VMENTER_L1D_FLUSH_EPT_DISABLED,
 	VMENTER_L1D_FLUSH_NOT_REQUIRED,
 };
+
+#define VMX_VPID_INVVPID_BIT                    (1ull << 0) /* (32 - 32) */
+#define VMX_VPID_EXTENT_INDIVIDUAL_ADDR_BIT     (1ull << 8) /* (40 - 32) */
+#define VMX_VPID_EXTENT_SINGLE_CONTEXT_BIT      (1ull << 9) /* (41 - 32) */
+#define VMX_VPID_EXTENT_GLOBAL_CONTEXT_BIT      (1ull << 10) /* (42 - 32) */
+#define VMX_VPID_EXTENT_SINGLE_NON_GLOBAL_BIT   (1ull << 11) /* (43 - 32) */
 
 #define __KVM_REQUIRED_VMX_CPU_BASED_VM_EXEC_CONTROL			\
 	(CPU_BASED_HLT_EXITING |					\
@@ -1136,3 +1191,6 @@ static unsigned long vmx_get_exit_qual(struct kvm_vcpu* vcpu) {
 
 	return vmx->exit_qualification;
 }
+
+void vmx_prepare_switch_to_guest(struct kvm_vcpu* vcpu);
+void vmx_update_host_rsp(struct vcpu_vmx* vmx, unsigned long host_rsp);

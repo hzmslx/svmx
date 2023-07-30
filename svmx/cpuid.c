@@ -13,3 +13,9 @@ static void kvm_vcpu_after_set_cpuid(struct kvm_vcpu* vcpu) {
 void kvm_set_cpu_caps(void) {
 
 }
+
+int kvm_emulate_cpuid(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+
+	return 0;
+}

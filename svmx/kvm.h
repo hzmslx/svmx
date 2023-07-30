@@ -69,6 +69,15 @@ struct kvm_segment {
 	__u8  padding;
 };
 
+/* for KVM_SET_USER_MEMORY_REGION */
+struct kvm_userspace_memory_region {
+	__u32 slot;
+	__u32 flags;
+	__u64 guest_phys_addr;
+	__u64 memory_size; /* bytes */
+	__u64 userspace_addr; /* start of the userspace allocated memory */
+};
+
 /* for KVM_RUN */
 struct kvm_run {
 	/* in */

@@ -28,6 +28,8 @@ static u64 cr4_reserved_bits = CR4_RESERVED_BITS;
 
 bool enable_apicv = TRUE;
 
+u32 kvm_nr_uret_msrs;
+
 /*
  * List of msr numbers which we expose to userspace through KVM_GET_MSRS
  * and KVM_SET_MSRS, and KVM_GET_MSR_INDEX_LIST.
@@ -209,10 +211,21 @@ static int vcpu_enter_guest(struct kvm_vcpu* vcpu)
 	
 	fastpath_t exit_fastpath;
 
+	/* 进入guest 模式前先处理相关挂起的请求 */
 	if (kvm_request_pending(vcpu)) {
 
 		
 	}
+
+	
+
+	// 加载mmu
+	r = kvm_mmu_reload(vcpu);
+
+	// 准备陷入到guest
+	kvm_x86_ops.prepare_switch_to_guest(vcpu);
+
+
 
 	for (;;) {
 		/*
@@ -226,8 +239,8 @@ static int vcpu_enter_guest(struct kvm_vcpu* vcpu)
 			break;
 		
 	}
-
-	// vmexit的处理
+	
+	// vmexit的处理,处理虚拟机异常
 	r = kvm_x86_ops.handle_exit(vcpu, exit_fastpath);
 
 	return r;
@@ -253,7 +266,9 @@ static int vcpu_run(struct kvm_vcpu* vcpu) {
 		* this point can start executing an instruction.
 		*/
 		vcpu->arch.at_instruction_boundary = FALSE;
+		// 判断vcpu 状态
 		if (kvm_vcpu_running(vcpu)) {
+			// 进入guest模式
 			r = vcpu_enter_guest(vcpu);
 		}
 		else {
@@ -267,8 +282,16 @@ static int vcpu_run(struct kvm_vcpu* vcpu) {
 	return r;
 }
 
+// 运行 vcpu (即运行虚拟机）的入口函数
 int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu* vcpu) {
 	int r;
+
+	// KVM 虚拟机 vcpu 数据结构载入物理 cpu
+	vcpu_load(vcpu);
+
+	if (vcpu->arch.mp_state == KVM_MP_STATE_UNINITIALIZED) {
+
+	}
 
 	// 死循环进入vcpu_enter_guest
 	r = vcpu_run(vcpu);
@@ -463,4 +486,187 @@ void kvm_vcpu_reset(struct kvm_vcpu* vcpu, bool init_event) {
 	kvm_x86_ops.set_cr4(vcpu, 0);
 	kvm_x86_ops.set_efer(vcpu, 0);
 
+}
+
+static u64 kvm_get_arch_capabilities(void)
+{
+	u64 data = 0;
+
+	/*
+	 * If nx_huge_pages is enabled, KVM's shadow paging will ensure that
+	 * the nested hypervisor runs with NX huge pages.  If it is not,
+	 * L1 is anyway vulnerable to ITLB_MULTIHIT exploits from other
+	 * L1 guests, so it need not worry about its own (L2) guests.
+	 */
+	data |= ARCH_CAP_PSCHANGE_MC_NO;
+
+	/*
+	 * If we're doing cache flushes (either "always" or "cond")
+	 * we will do one whenever the guest does a vmlaunch/vmresume.
+	 * If an outer hypervisor is doing the cache flush for us
+	 * (VMENTER_L1D_FLUSH_NESTED_VM), we can safely pass that
+	 * capability to the guest too, and if EPT is disabled we're not
+	 * vulnerable.  Overall, only VMENTER_L1D_FLUSH_NEVER will
+	 * require a nested hypervisor to do a flush of its own.
+	 */
+
+
+
+
+	return data;
+}
+
+static int kvm_get_msr_feature(struct kvm_msr_entry* msr)
+{
+	switch (msr->index) {
+	case MSR_IA32_ARCH_CAPABILITIES:
+		msr->data = kvm_get_arch_capabilities();
+		break;
+	case MSR_IA32_PERF_CAPABILITIES:
+		
+		break;
+	case MSR_IA32_UCODE_REV:
+		msr->data = __readmsr(msr->index);
+		break;
+	default:
+		return kvm_x86_ops.get_msr_feature(msr);
+	}
+	return 0;
+}
+
+long kvm_arch_dev_ioctl(unsigned int ioctl, unsigned long arg) {
+	UNREFERENCED_PARAMETER(arg);
+	long r;
+	switch (ioctl)
+	{
+	case KVM_GET_MSR_FEATURE_INDEX_LIST:
+		r = 0;
+		break;
+	default:
+		r = STATUS_INVALID_PARAMETER;
+		break;
+	}
+
+	return r;
+}
+
+int kvm_emulate_rdmsr(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+	return 0;
+}
+
+int kvm_emulate_wrmsr(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+	return 0;
+}
+
+int kvm_emulate_halt(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+	return 0;
+}
+
+int kvm_emulate_invd(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+	return 0;
+}
+
+int kvm_emulate_rdpmc(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+	return 0;
+}
+
+int kvm_emulate_hypercall(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+	return 0;
+}
+
+int kvm_emulate_wbinvd(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+	return 0;
+}
+
+int kvm_emulate_xsetbv(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+	return 0;
+}
+
+int kvm_emulate_mwait(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+	return 0;
+}
+
+int kvm_emulate_monitor(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+	return 0;
+}
+
+int kvm_handle_invalid_op(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+	return 0;
+}
+
+static inline bool kvm_vcpu_exit_request(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+	return FALSE;
+}
+
+fastpath_t handle_fastpath_set_msr_irqoff(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+
+	return EXIT_FASTPATH_NONE;
+}
+
+void kvm_inject_page_fault(struct kvm_vcpu* vcpu, 
+	struct x86_exception* fault) {
+	UNREFERENCED_PARAMETER(vcpu);
+	UNREFERENCED_PARAMETER(fault);
+}
+
+gpa_t translate_nested_gpa(struct kvm_vcpu* vcpu, gpa_t gpa, u64 access,
+	struct x86_exception* exception)
+{
+	struct kvm_mmu* mmu = vcpu->arch.mmu;
+	gpa_t t_gpa;
+
+
+	/* NPT walks are always user-walks */
+	access |= PFERR_USER_MASK;
+	t_gpa = mmu->gva_to_gpa(vcpu, mmu, gpa, access, exception);
+
+	return t_gpa;
+}
+
+void kvm_arch_memslots_updated(struct kvm* kvm, u64 gen) {
+	UNREFERENCED_PARAMETER(kvm);
+	UNREFERENCED_PARAMETER(gen);
+}
+
+int kvm_arch_prepare_memory_region(struct kvm* kvm,
+	const struct kvm_memory_slot* old,
+	struct kvm_memory_slot* new,
+	enum kvm_mr_change change) {
+	UNREFERENCED_PARAMETER(kvm);
+	UNREFERENCED_PARAMETER(old);
+	UNREFERENCED_PARAMETER(new);
+	UNREFERENCED_PARAMETER(change);
+
+	return 0;
+}
+
+static int kvm_alloc_memslot_metadata(struct kvm* kvm,
+	struct kvm_memory_slot* slot) {
+	UNREFERENCED_PARAMETER(kvm);
+	UNREFERENCED_PARAMETER(slot);
+
+	return 0;
+}
+
+void kvm_arch_commit_memory_region(struct kvm* kvm,
+	struct kvm_memory_slot* old,
+	const struct kvm_memory_slot* new,
+	enum kvm_mr_change change) {
+	UNREFERENCED_PARAMETER(kvm);
+	UNREFERENCED_PARAMETER(old);
+	UNREFERENCED_PARAMETER(new);
+	UNREFERENCED_PARAMETER(change);
 }

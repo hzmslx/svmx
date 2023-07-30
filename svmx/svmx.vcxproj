@@ -185,6 +185,7 @@
     <ClCompile Include="pmu.c" />
     <ClCompile Include="pmu_intel.c" />
     <ClCompile Include="processor.c" />
+    <ClCompile Include="spte.c" />
     <ClCompile Include="svm.c" />
     <ClCompile Include="svmx.c" />
     <ClCompile Include="tdp_mmu.c" />
@@ -207,6 +208,7 @@
     <ClInclude Include="kvm_emulate.h" />
     <ClInclude Include="kvm_host.h" />
     <ClInclude Include="kvm_mm.h" />
+    <ClInclude Include="kvm_page_track.h" />
     <ClInclude Include="kvm_para.h" />
     <ClInclude Include="kvm_types.h" />
     <ClInclude Include="lapic.h" />
@@ -219,6 +221,7 @@
     <ClInclude Include="nested.h" />
     <ClInclude Include="ntexapi.h" />
     <ClInclude Include="pch.h" />
+    <ClInclude Include="pgtable_types.h" />
     <ClInclude Include="pmu.h" />
     <ClInclude Include="posted_intr.h" />
     <ClInclude Include="processor-flags.h" />
@@ -226,6 +229,7 @@
     <ClInclude Include="run_flags.h" />
     <ClInclude Include="sgx.h" />
     <ClInclude Include="smm.h" />
+    <ClInclude Include="spte.h" />
     <ClInclude Include="svm.h" />
     <ClInclude Include="svmx.h" />
     <ClInclude Include="tdp_mmu.h" />

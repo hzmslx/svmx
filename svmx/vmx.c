@@ -56,14 +56,13 @@ int pt_mode = PT_MODE_SYSTEM;
 #define KVM_VM_CR0_ALWAYS_OFF (X86_CR0_NW | X86_CR0_CD)
 
 
+extern u32 kvm_nr_uret_msrs;
 
-static struct vmx_capability {
-	u32 ept;
-	u32 vpid;
-} vmx_capability;
 
 struct vmcs_config  vmcs_config;
 struct vmx_capability vmx_capability;
+
+bool enable_ept_ad_bits = 1;
 
 // vmxon 区域
 struct vmcs** vmxarea;
@@ -81,7 +80,6 @@ static const struct trace_print_flags vmx_exit_reasons_str[] = {
 	{ EXIT_REASON_CPUID,                   "cpuid" },
 	{ EXIT_REASON_MSR_READ,                "rdmsr" },
 	{ EXIT_REASON_MSR_WRITE,               "wrmsr" },
-	{ EXIT_REASON_PENDING_INTERRUPT,       "interrupt_window" },
 	{ EXIT_REASON_HLT,                     "halt" },
 	{ EXIT_REASON_INVLPG,                  "invlpg" },
 	{ EXIT_REASON_VMCALL,                  "hypercall" },
@@ -127,6 +125,8 @@ static u32 vmx_preemption_cpu_tfms[] = {
    /* Xeon E3-1220 V2 */
   0x000306A8,
 };
+
+static bool nested = 1;
 
 /* Storage for pre module init parameter parsing */
 static enum vmx_l1d_flush_state vmentry_l1d_flush_param = VMENTER_L1D_FLUSH_AUTO;
@@ -265,6 +265,7 @@ static bool cpu_has_vmx_preemption_timer(void) {
 		PIN_BASED_VMX_PREEMPTION_TIMER;
 }
 
+// 建立全局变量vmcs_config和vmx_capability
 static NTSTATUS setup_vmcs_config(struct vmcs_config* vmcs_conf,
 	struct vmx_capability* vmx_cap) {
 	int i = 0;
@@ -468,15 +469,20 @@ static int kvm_cpu_vmxon(u64 vmxon_pointer) {
 }
 
 static int vmx_hardware_enable(void) {
+	int cpu = KeGetCurrentProcessorNumber();
 	u64 phys_addr = 0;
 	int r;
 
-	
 
-	struct vmcs* vmcs = vmxarea[KeGetCurrentProcessorNumber()];
+	u64 cr4 = __readcr4();
+	if (cr4 & X86_CR4_VMXE)
+		return -1;
+
+	struct vmcs* vmcs = vmxarea[cpu];
 	// 获取物理地址
 	PHYSICAL_ADDRESS physical = MmGetPhysicalAddress(vmcs);
 	phys_addr = physical.QuadPart;
+	// 打开VMX操作模式
 	r = kvm_cpu_vmxon(phys_addr);
 	if (r) {
 		return r;
@@ -563,6 +569,7 @@ static NTSTATUS vmx_vcpu_create(struct kvm_vcpu* vcpu) {
 	vmx = to_vmx(vcpu);
 	// 分配并初始化这个vcpu对应的vmcs01
 	// 需要4K对齐
+	/* vmcs 的分配 */
 	status = alloc_loaded_vmcs(&vmx->vmcs01);
 
 	vmx->loaded_vmcs = &vmx->vmcs01;
@@ -576,15 +583,50 @@ static void vmx_vcpu_free(struct kvm_vcpu* vcpu) {
 }
 
 
-
+// 保存host的当前状态
 void vmx_prepare_switch_to_guest(struct kvm_vcpu* vcpu) {
-	UNREFERENCED_PARAMETER(vcpu);
+	struct vcpu_vmx* vmx = to_vmx(vcpu);
+	struct vmcs_host_state* host_state;
+
+#ifdef _WIN64
+	
+#endif // _WIN64
+	u32 i;
+
+
+	vmx->req_immediate_exit = FALSE;
+
+	/*
+	 * Note that guest MSRs to be saved/restored can also be changed
+	 * when guest state is loaded. This happens when guest transitions
+	 * to/from long-mode by setting MSR_EFER.LMA.
+	 */
+	if (!vmx->guest_state_loaded) {
+		vmx->guest_uret_msrs_loaded = TRUE;
+		for (i = 0; i < kvm_nr_uret_msrs; ++i) {
+			if (!vmx->guest_uret_msrs[i].load_into_hardware)
+				continue;
+
+
+		}
+	}
+
+	host_state = &vmx->loaded_vmcs->host_state;
+
+	/*
+	 * Set host fs and gs selectors.  Unfortunately, 22.2.3 does not
+	 * allow segment selectors with cpl > 0 or ti == 1.
+	 */
+	
+
+	
 }
 
 /*
  * Switches to specified vcpu, until a matching vcpu_put(), but assumes
  * vcpu mutex is already taken.
  */
+// 加载vcpu的信息，切换到指定cpu，进入到vmx模式
 static void vmx_vcpu_load(struct kvm_vcpu* vcpu, int cpu) {
 
 	vmx_vcpu_load_vmcs(vcpu, cpu, NULL);
@@ -638,13 +680,271 @@ static void vmx_vcpu_enter_exit(struct kvm_vcpu* vcpu,
 	UNREFERENCED_PARAMETER(flags);
 }
 
+static fastpath_t handle_fastpath_preemption_timer(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+	return EXIT_FASTPATH_NONE;
+}
+
+static fastpath_t vmx_exit_handlers_fastpath(struct kvm_vcpu* vcpu) {
+	switch (to_vmx(vcpu)->exit_reason.basic) {
+	case EXIT_REASON_MSR_WRITE:
+		return handle_fastpath_set_msr_irqoff(vcpu);
+	case EXIT_REASON_PREEMPTION_TIMER:
+		return handle_fastpath_preemption_timer(vcpu);
+	default:
+		return EXIT_FASTPATH_NONE;
+	}
+}
+
+// 运行虚拟机，进入guest模式，即non root 模式
 static fastpath_t vmx_vcpu_run(struct kvm_vcpu* vcpu) {
 	struct vcpu_vmx* vmx = to_vmx(vcpu);
 
+	/* When single-stepping over STI and MOV SS, we must clear the
+	 * corresponding interruptibility bits in the guest state. Otherwise
+	 * vmentry fails as it then expects bit 14 (BS) in pending debug
+	 * exceptions being set, but that's not correct for the guest debugging
+	 * case. 
+	 */
+	// 单步调试时，需要禁用 guest 中断
+	if (vcpu->guest_debug & KVM_GUESTDBG_SINGLESTEP)
+		vmx_set_interrupt_shadow(vcpu, 0);
+
 	vmx_vcpu_enter_exit(vcpu, __vmx_vcpu_run_flags(vmx));
+
+	// 设置已经 vmlaunch
+	vmx->loaded_vmcs->launched = 1;
 
 	return EXIT_FASTPATH_NONE;
 }
+
+static int handle_exception_nmi(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+	return 0;
+}
+
+static int handle_external_interrupt(struct kvm_vcpu* vcpu)
+{
+	UNREFERENCED_PARAMETER(vcpu);
+	++vcpu->stat.irq_exits;
+	return 1;
+}
+
+static int handle_triple_fault(struct kvm_vcpu* vcpu)
+{
+	vcpu->run->exit_reason = KVM_EXIT_SHUTDOWN;
+	return 0;
+}
+
+static int handle_nmi_window(struct kvm_vcpu* vcpu)
+{
+	exec_controls_clearbit(to_vmx(vcpu), CPU_BASED_NMI_WINDOW_EXITING);
+	++vcpu->stat.nmi_window_exits;
+
+	return 1;
+}
+
+static int handle_io(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+
+	return 0;
+}
+
+static int handle_dr(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+
+	return 0;
+}
+
+static int handle_interrupt_window(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+
+	return 1;
+}
+
+static int handle_invlpg(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+	return 0;
+}
+
+/*
+ * When nested=0, all VMX instruction VM Exits filter here.  The handlers
+ * are overwritten by nested_vmx_setup() when nested=1.
+ */
+static int handle_vmx_instruction(struct kvm_vcpu* vcpu)
+{
+	UNREFERENCED_PARAMETER(vcpu);
+	return 1;
+}
+
+static int handle_tpr_below_threshold(struct kvm_vcpu* vcpu)
+{
+	UNREFERENCED_PARAMETER(vcpu);
+	return 1;
+}
+
+static int handle_apic_access(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+	return 0;
+}
+
+static int handle_apic_write(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+	return 0;
+}
+
+static int handle_apic_eoi_induced(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+	return 0;
+}
+
+static int handle_task_switch(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+	return 0;
+}
+
+static int handle_machine_check(struct kvm_vcpu* vcpu)
+{
+	UNREFERENCED_PARAMETER(vcpu);
+	/* handled by vmx_vcpu_run() */
+	return 1;
+}
+
+static int handle_desc(struct kvm_vcpu* vcpu)
+{
+	UNREFERENCED_PARAMETER(vcpu);
+	return 0;
+}
+
+static int handle_ept_violation(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+	return 0;
+}
+
+static int handle_ept_misconfig(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+	return 0;
+}
+
+static int handle_preemption_timer(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+	return 0;
+}
+
+/*
+ * Indicate a busy-waiting vcpu in spinlock. We do not enable the PAUSE
+ * exiting, so only get here on cpu with PAUSE-Loop-Exiting.
+ */
+static int handle_pause(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+	return 0;
+}
+
+static int handle_monitor_trap(struct kvm_vcpu* vcpu)
+{
+	UNREFERENCED_PARAMETER(vcpu);
+	return 1;
+}
+
+static int handle_pml_full(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+	return 1;
+}
+
+static int handle_invpcid(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+	return 1;
+}
+
+static int handle_encls(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+	return 1;
+}
+
+static int handle_bus_lock_vmexit(struct kvm_vcpu* vcpu)
+{
+	/*
+	 * Hardware may or may not set the BUS_LOCK_DETECTED flag on BUS_LOCK
+	 * VM-Exits. Unconditionally set the flag here and leave the handling to
+	 * vmx_handle_exit().
+	 */
+	to_vmx(vcpu)->exit_reason.bus_lock_detected = TRUE;
+	return 1;
+}
+
+
+static int handle_notify(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+	return 1;
+}
+
+static int handle_cr(struct kvm_vcpu* vcpu);
+/*
+ * The exit handlers return 1 if the exit was handled fully and guest execution
+ * may resume.  Otherwise they set the kvm_run parameter to indicate what needs
+ * to be done to userspace and return 0.
+ */
+static int (*kvm_vmx_exit_handlers[])(struct kvm_vcpu* vcpu) = {
+	[EXIT_REASON_EXCEPTION_NMI] = handle_exception_nmi,
+	[EXIT_REASON_EXTERNAL_INTERRUPT] = handle_external_interrupt,
+	[EXIT_REASON_TRIPLE_FAULT] = handle_triple_fault,
+	[EXIT_REASON_NMI_WINDOW] = handle_nmi_window,
+	// 访问了 IO 设备
+	[EXIT_REASON_IO_INSTRUCTION] = handle_io,
+	// 访问了 CR 寄存器，地址寄存器
+	[EXIT_REASON_CR_ACCESS] = handle_cr,
+	// 访问了调试寄存器
+	[EXIT_REASON_DR_ACCESS] = handle_dr,
+	[EXIT_REASON_CPUID] = kvm_emulate_cpuid,
+	[EXIT_REASON_MSR_READ] = kvm_emulate_rdmsr,
+	[EXIT_REASON_MSR_WRITE] = kvm_emulate_wrmsr,
+	[EXIT_REASON_INTERRUPT_WINDOW] = handle_interrupt_window,
+	// guest 执行了hlt指令
+	[EXIT_REASON_HLT] = kvm_emulate_halt,
+	[EXIT_REASON_INVD] = kvm_emulate_invd,
+	[EXIT_REASON_INVLPG] = handle_invlpg,
+	[EXIT_REASON_RDPMC] = kvm_emulate_rdpmc,
+	[EXIT_REASON_VMCALL] = kvm_emulate_hypercall,
+	[EXIT_REASON_VMCLEAR] = handle_vmx_instruction,
+	[EXIT_REASON_VMLAUNCH] = handle_vmx_instruction,
+	[EXIT_REASON_VMPTRLD] = handle_vmx_instruction,
+	[EXIT_REASON_VMPTRST] = handle_vmx_instruction,
+	[EXIT_REASON_VMREAD] = handle_vmx_instruction,
+	[EXIT_REASON_VMRESUME] = handle_vmx_instruction,
+	[EXIT_REASON_VMWRITE] = handle_vmx_instruction,
+	[EXIT_REASON_VMOFF] = handle_vmx_instruction,
+	[EXIT_REASON_VMON] = handle_vmx_instruction,
+	[EXIT_REASON_TPR_BELOW_THRESHOLD] = handle_tpr_below_threshold,
+	// 访问了 APIC
+	[EXIT_REASON_APIC_ACCESS] = handle_apic_access,
+	[EXIT_REASON_APIC_WRITE] = handle_apic_write,
+	[EXIT_REASON_EOI_INDUCED] = handle_apic_eoi_induced,
+	[EXIT_REASON_WBINVD] = kvm_emulate_wbinvd,
+	[EXIT_REASON_XSETBV] = kvm_emulate_xsetbv,
+	// 进程切换
+	[EXIT_REASON_TASK_SWITCH] = handle_task_switch,
+	[EXIT_REASON_MCE_DURING_VMENTRY] = handle_machine_check,
+	[EXIT_REASON_GDTR_IDTR] = handle_desc,
+	[EXIT_REASON_LDTR_TR] = handle_desc,
+	[EXIT_REASON_EPT_VIOLATION] = handle_ept_violation,
+	[EXIT_REASON_EPT_MISCONFIG] = handle_ept_misconfig,
+	// 执行了暂停指令
+	[EXIT_REASON_PAUSE_INSTRUCTION] = handle_pause,
+	[EXIT_REASON_MWAIT_INSTRUCTION] = kvm_emulate_mwait,
+	[EXIT_REASON_MONITOR_TRAP_FLAG] = handle_monitor_trap,
+	[EXIT_REASON_MONITOR_INSTRUCTION] = kvm_emulate_monitor,
+	[EXIT_REASON_INVEPT] = handle_vmx_instruction,
+	[EXIT_REASON_INVVPID] = handle_vmx_instruction,
+	[EXIT_REASON_RDRAND] = kvm_handle_invalid_op,
+	[EXIT_REASON_RDSEED] = kvm_handle_invalid_op,
+	[EXIT_REASON_PML_FULL] = handle_pml_full,
+	[EXIT_REASON_INVPCID] = handle_invpcid,
+	[EXIT_REASON_VMFUNC] = handle_vmx_instruction,
+	[EXIT_REASON_PREEMPTION_TIMER] = handle_preemption_timer,
+	[EXIT_REASON_ENCLS] = handle_encls,
+	[EXIT_REASON_BUS_LOCK] = handle_bus_lock_vmexit,
+	[EXIT_REASON_NOTIFY] = handle_notify,
+};
 
 /*
  * The guest has exited.  See if we can fix it or if we need userspace
@@ -655,6 +955,9 @@ static int __vmx_handle_exit(struct kvm_vcpu* vcpu, fastpath_t exit_fastpath)
 {
 	UNREFERENCED_PARAMETER(exit_fastpath);
 	struct vcpu_vmx* vmx = to_vmx(vcpu);
+
+
+
 	//union vmx_exit_reason exit_reason = vmx->exit_reason;
 	//u32 vectoring_info = vmx->idt_vectoring_info;
 	//u16 exit_handler_index;
@@ -667,6 +970,14 @@ static int __vmx_handle_exit(struct kvm_vcpu* vcpu, fastpath_t exit_fastpath)
 		vcpu->run->fail_entry.cpu = vcpu->arch.last_vmentry_cpu;
 		return 0;
 	}
+
+	do
+	{
+		
+		
+	} while (FALSE);
+	
+	
 
 	return 0;
 }
@@ -699,6 +1010,9 @@ static void vmcs_set_secondary_exec_control(struct vcpu_vmx* vmx, u32 new_ctl)
 
 static void vmx_vcpu_after_set_cpuid(struct kvm_vcpu* vcpu) {
 	struct vcpu_vmx* vmx = to_vmx(vcpu);
+
+	/* xsaves_enabled is recomputed in vmx_compute_secondary_exec_control(). */
+	vcpu->arch.xsaves_enabled = FALSE;
 
 	if (cpu_has_secondary_exec_ctrls())
 		vmcs_set_secondary_exec_control(vmx,
@@ -776,12 +1090,13 @@ int vmx_disabled_by_bios() {
 	/* locked but not enabled */
 }
 
+// cpu是否支持vpid
 static int cpu_has_vmx_vpid() {
 	return vmcs_config.cpu_based_2nd_exec_ctrl &
 		SECONDARY_EXEC_ENABLE_VPID;
 }
 
-
+// cpu是否支持ept
 int cpu_has_vmx_ept() {
 	return vmcs_config.cpu_based_2nd_exec_ctrl &
 		SECONDARY_EXEC_ENABLE_EPT;
@@ -844,7 +1159,7 @@ struct vmcs* alloc_vmcs(bool shadow) {
 
 
 
-
+// 为每个cpu分配一个struct vmcs
 NTSTATUS alloc_kvm_area() {
 	int cpu = 0;
 	int processors = KeQueryActiveProcessorCount(NULL);
@@ -879,6 +1194,23 @@ NTSTATUS hardware_setup() {
 	if (ExIsProcessorFeaturePresent(PF_NX_ENABLED)) {
 		kvm_enable_efer_bits(EFER_NX);
 	}
+
+	if (!cpu_has_vmx_ept() ||
+		!cpu_has_vmx_ept_4levels() ||
+		!cpu_has_vmx_ept_mt_wb() ||
+		!cpu_has_vmx_invept_global())
+		enable_ept = 0;
+
+	/* NX support is require for shadow paging. */
+	if (!enable_ept) {
+		return STATUS_NOT_SUPPORTED;
+	}
+
+	if (!cpu_has_vmx_ept_ad_bits() || !enable_ept)
+		enable_ept_ad_bits = 0;
+
+
+
 
 	if (!cpu_has_vmx_preemption_timer())
 		enable_preemption_timer = FALSE;
@@ -1049,8 +1381,23 @@ static inline bool is_unrestricted_guest(struct kvm_vcpu* vcpu)
 			SECONDARY_EXEC_UNRESTRICTED_GUEST));
 }
 
+static void enter_pmode(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+}
+
+static void enter_rmode(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+}
+
+#ifdef _WIN64
+static void enter_lmode(struct kvm_vcpu* vcpu)
+{
+	UNREFERENCED_PARAMETER(vcpu);
+}
+#endif
+
 void vmx_set_cr0(struct kvm_vcpu* vcpu, unsigned long cr0) {
-	//struct vcpu_vmx* vmx = to_vmx(vcpu);
+	struct vcpu_vmx* vmx = to_vmx(vcpu);
 	unsigned long hw_cr0, old_cr0_pg;
 	//u32 tmp;
 
@@ -1064,12 +1411,26 @@ void vmx_set_cr0(struct kvm_vcpu* vcpu, unsigned long cr0) {
 		if (!enable_ept)
 			hw_cr0 |= X86_CR0_WP;
 
+		if (vmx->rmode.vm86_active && (cr0 & X86_CR0_PE))
+			enter_pmode(vcpu);
 
+		if (!vmx->rmode.vm86_active && !(cr0 & X86_CR0_PE))
+			enter_rmode(vcpu);
 	}
 
 	vmcs_writel(CR0_READ_SHADOW, cr0);
 	vmcs_writel(GUEST_CR0, hw_cr0);
 	vcpu->arch.cr0 = cr0;
+
+
+#ifdef  _WIN64
+	if (vcpu->arch.efer & EFER_LME) {
+		if (!old_cr0_pg && (cr0 & X86_CR0_PG))
+			enter_lmode(vcpu);
+		else if (old_cr0_pg && !(cr0 & X86_CR0_PG))
+			enter_lmode(vcpu);
+	}
+#endif //  _WIN64
 
 
 }
@@ -1912,6 +2273,20 @@ unsigned long vmx_l1_guest_owned_cr0_bits(void)
 	return bits;
 }
 
+static int vmx_get_msr_feature(struct kvm_msr_entry* msr)
+{
+	if (msr->index >= KVM_FIRST_EMULATED_VMX_MSR
+		&& msr->index <= KVM_LAST_EMULATED_VMX_MSR) {
+		if (!nested)
+			return 1;
+	}
+	switch (msr->index) {
+		return vmx_get_vmx_msr(&vmcs_config.nested, msr->index, &msr->data);
+	default:
+		return KVM_MSR_RET_INVALID;
+	}
+}
+
 void set_cr4_guest_host_mask(struct vcpu_vmx* vmx) {
 	struct kvm_vcpu* vcpu = &vmx->vcpu;
 
@@ -1933,6 +2308,7 @@ void set_cr4_guest_host_mask(struct vcpu_vmx* vmx) {
 static int handle_set_cr0(struct kvm_vcpu* vcpu, unsigned long val) {
 	if (is_guest_mode(vcpu)) {
 
+		return 0;
 	}
 	else {
 		if (to_vmx(vcpu)->nested.vmxon &&
@@ -2014,4 +2390,18 @@ static void vmx_set_apic_access_page_addr(struct kvm_vcpu* vcpu) {
 	if (!(secondary_exec_controls_get(to_vmx(vcpu)) &
 		SECONDARY_EXEC_VIRTUALIZE_APIC_ACCESSES))
 		return;
+}
+
+void vmx_update_host_rsp(struct vcpu_vmx* vmx, unsigned long host_rsp) {
+	if (host_rsp != vmx->loaded_vmcs->host_state.rsp) {
+		vmx->loaded_vmcs->host_state.rsp = host_rsp;
+		vmcs_writel(HOST_RSP, host_rsp);
+	}
+}
+
+static void vmx_load_mmu_pgd(struct kvm_vcpu* vcpu, hpa_t root_hpa,
+	int root_level) {
+	UNREFERENCED_PARAMETER(vcpu);
+	UNREFERENCED_PARAMETER(root_hpa);
+	UNREFERENCED_PARAMETER(root_level);
 }

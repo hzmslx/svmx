@@ -3,7 +3,9 @@
 #include "virtext.h"
 #include "kvm_emulate.h"
 #include "mmu.h"
-
+#include "pmu.h"
+#include "nested.h"
+#include "cpuid.h"
 
 static const u32 host_save_user_msrs[] = {
 #ifdef _WIN64
@@ -36,24 +38,7 @@ struct nested_state {
 
 };
 
-struct vcpu_svm {
-	struct kvm_vcpu vcpu;
-	struct vmcb* vmcb;
-	unsigned long vmcb_pa;
-	struct svm_cpu_data* svm_data;
-	uint64_t asid_generation;
-	uint64_t sysenter_esp;
-	uint64_t sysenter_eip;
 
-	u64 next_rip;
-
-	u64 host_user_msrs[NR_HOST_SAVE_USER_MSRS];
-	u64 host_gs_base;
-
-	u32* msrpm;
-
-	struct nested_state nested;
-};
 
 #if defined _WIN64
 static bool npt_enabled = TRUE;
@@ -72,6 +57,10 @@ void cpu_svm_disable();
 struct vcpu_svm* to_svm(struct kvm_vcpu* vcpu);
 struct vmcb_seg* svm_seg(struct kvm_vcpu* vcpu, int seg);
 void force_new_asid(struct kvm_vcpu* vcpu);
+
+
+#define SEG_TYPE_LDT 2
+#define SEG_TYPE_BUSY_TSS16 3
 
 static const struct trace_print_flags svm_exit_reasons_str[] = {
 	{ SVM_EXIT_READ_CR0,           		"read_cr0" },
@@ -128,8 +117,8 @@ static const struct trace_print_flags svm_exit_reasons_str[] = {
 
 int has_svm();
 int is_disabled();
-NTSTATUS svm_hardware_setup();
-void svm_hardware_enable(void* garbage);
+static NTSTATUS svm_hardware_setup(void);
+int svm_hardware_enable(void);
 void svm_hardware_disable(void* garbage);
 bool svm_cpu_has_accelerated_tpr();
 struct kvm_vcpu* svm_create_vcpu(struct kvm* kvm, unsigned int id);
@@ -194,6 +183,9 @@ static NTSTATUS svm_check_processor_compat(void)
 
 static struct kvm_x86_ops svm_x86_ops = {
 	.check_processor_compatibility = svm_check_processor_compat,
+
+	.hardware_unsetup = svm_hardware_unsetup,
+	.hardware_enable = svm_hardware_enable,
 };
 
 int has_svm() {
@@ -207,8 +199,55 @@ int has_svm() {
 	return 1;
 }
 
+static bool kvm_is_svm_supported(void) {
+	int cpu = KeGetCurrentProcessorNumber();
+	const char* msg;
+	u64 vm_cr;
+	
+	if (!cpu_has_svm(&msg)) {
+		LogErr("SVM not supported by CPU %d, %s\n", cpu, msg);
+		return FALSE;
+	}
+
+	vm_cr = __readmsr(MSR_VM_CR);
+	if (vm_cr & (1 << SVM_VM_CR_SVM_DISABLE)) {
+		LogErr("SVM disabled (by BIOS) in MSR_VM_CR on cpu %d\n", cpu);
+		return FALSE;
+	}
+
+	return TRUE;
+}
+
+static struct kvm_x86_init_ops svm_init_ops = {
+	.hardware_setup = svm_hardware_setup,
+
+	.runtime_ops = &svm_x86_ops,
+	.pmu_ops = &amd_pmu_ops,
+};
+
 NTSTATUS svm_init() {
 	NTSTATUS status = STATUS_SUCCESS;
+
+	if (!kvm_is_svm_supported())
+		return STATUS_NOT_SUPPORTED;
+
+	status = kvm_x86_vendor_init(&svm_init_ops);
+	if (!NT_SUCCESS(status))
+		return status;
+
+	bool err_kvm_init = FALSE;
+	do
+	{
+		status = kvm_init(sizeof(struct vcpu_svm), __alignof(struct vcpu_svm));
+		if (!NT_SUCCESS(status)) {
+			err_kvm_init = TRUE;
+			status = STATUS_UNSUCCESSFUL;
+			break;
+		}
+	} while (FALSE);
+
+	if (err_kvm_init)
+		kvm_x86_vendor_exit();
 
 	return status;
 }
@@ -223,19 +262,27 @@ int is_disabled() {
 	return 0;
 }
 
-NTSTATUS svm_hardware_setup() {
-	NTSTATUS status = STATUS_SUCCESS;
-
-
-	return status;
-}
 
 
 
-void svm_hardware_enable(void* garbage) {
-	UNREFERENCED_PARAMETER(garbage);
+
+int svm_hardware_enable(void) {
+	struct svm_cpu_data* sd;
+	uint64_t efer;
+	int me = KeGetCurrentProcessorNumber();
+	efer = __readmsr(MSR_EFER);
+	if (efer & EFER_SVME)
+		return STATUS_UNSUCCESSFUL;
+
+	sd = &svm_data[me];
+	sd->asid_generation = 1;
 
 
+	__writemsr(MSR_EFER, efer | EFER_SVME);
+
+	__writemsr(MSR_VM_HSAVE_PA, sd->save_area_pa);
+
+	return STATUS_SUCCESS;
 }
 
 void svm_hardware_disable(void* garbage) {
@@ -267,13 +314,17 @@ void svm_free_vcpu(struct kvm_vcpu* vcpu) {
 }
 
 struct vcpu_svm* to_svm(struct kvm_vcpu* vcpu) {
-	UNREFERENCED_PARAMETER(vcpu);
-
-	return NULL;
+	return CONTAINING_RECORD(vcpu, struct vcpu_svm, vcpu);
 }
 
+static void init_vmcb(struct kvm_vcpu* vcpu);
 NTSTATUS svm_vcpu_reset(struct kvm_vcpu* vcpu) {
-	UNREFERENCED_PARAMETER(vcpu);
+	struct vcpu_svm* svm = to_svm(vcpu);
+
+	svm->spec_ctrl = 0;
+	svm->virt_spec_ctrl = 0;
+
+	init_vmcb(vcpu);
 
 	return 0;
 }
@@ -522,14 +573,6 @@ void svm_set_rflags(struct kvm_vcpu* vcpu, unsigned long rflags)
 	to_svm(vcpu)->vmcb->save.rflags = rflags;
 }
 
-void svm_flush_tlb(struct kvm_vcpu* vcpu)
-{
-	force_new_asid(vcpu);
-}
-
-void force_new_asid(struct kvm_vcpu* vcpu) {
-	to_svm(vcpu)->asid_generation--;
-}
 
 void svm_vcpu_run(struct kvm_vcpu* vcpu, struct kvm_run* kvm_run) {
 	UNREFERENCED_PARAMETER(vcpu);
@@ -560,6 +603,8 @@ void svm_set_interrupt_shadow(struct kvm_vcpu* vcpu, int mask)
 		svm->vmcb->control.int_state |= SVM_INTERRUPT_SHADOW_MASK;
 
 }
+
+
 
 u32 svm_get_interrupt_shadow(struct kvm_vcpu* vcpu, int mask)
 {
@@ -592,7 +637,7 @@ void svm_inject_nmi(struct kvm_vcpu* vcpu)
 
 	svm->vmcb->control.event_inj = (u32)(SVM_EVTINJ_VALID | SVM_EVTINJ_TYPE_NMI);
 	
-	svm->vmcb->control.intercept |= (1UL << INTERCEPT_IRET);
+
 	
 }
 
@@ -635,13 +680,13 @@ static void enable_irq_window(struct kvm_vcpu* vcpu) {
 
 static void update_cr8_intercept(struct kvm_vcpu* vcpu, int tpr, int irr)
 {
-	struct vcpu_svm* svm = to_svm(vcpu);
+	UNREFERENCED_PARAMETER(vcpu);
+	UNREFERENCED_PARAMETER(tpr);
+
 
 	if (irr == -1)
 		return;
 
-	if (tpr >= irr)
-		svm->vmcb->control.intercept_cr_write |= INTERCEPT_CR8_MASK;
 }
 
 int svm_set_tss_addr(struct kvm* kvm, unsigned int addr) {
@@ -677,4 +722,218 @@ void svm_hardware_unsetup(void) {
 
 void svm_exit() {
 	kvm_exit();
+	kvm_x86_vendor_exit();
+}
+
+
+static int svm_vcpu_create(struct kvm_vcpu* vcpu) {
+	struct vcpu_svm* svm;
+	void* vmcb01_page;
+	
+	int err;
+
+	svm = to_svm(vcpu);
+
+	err = STATUS_NO_MEMORY;
+	
+	do
+	{
+		LARGE_INTEGER lowAddress;
+		LARGE_INTEGER highAddress;
+		LARGE_INTEGER boundary;
+
+		lowAddress.QuadPart = 0ull;
+		highAddress.QuadPart = ~0ull;
+		// 4KB边界对齐
+		boundary.QuadPart = PAGE_SIZE;
+
+		vmcb01_page = MmAllocateContiguousMemorySpecifyCacheNode(PAGE_SIZE,
+			lowAddress, highAddress, boundary, MmCached, 
+			KeGetCurrentNodeNumber());
+		if (!vmcb01_page) {
+			break;
+		}
+		PHYSICAL_ADDRESS physical = MmGetPhysicalAddress(vmcb01_page);
+		svm->vmcb01.ptr = vmcb01_page;
+		svm->vmcb01.pa = physical.QuadPart; // 物理地址
+
+		
+		return STATUS_SUCCESS;
+	} while (FALSE);
+
+	return err;
+}
+
+
+static void svm_vcpu_enter_exit(struct kvm_vcpu* vcpu, bool spec_ctrl_intercepted) {
+	UNREFERENCED_PARAMETER(vcpu);
+	UNREFERENCED_PARAMETER(spec_ctrl_intercepted);
+
+
+	
+	
+}
+
+// 对于所有的物理cpu，进行svm相关初始化
+static int svm_cpu_init(int cpu) {
+	struct svm_cpu_data* sd = &svm_data[cpu];
+	int ret = STATUS_NO_MEMORY;
+
+	memset(sd, 0, sizeof(struct svm_cpu_data));
+	
+	return ret;
+}
+
+static ULONG_PTR InitSvmData(
+	_In_ ULONG_PTR Argument
+) {
+	UNREFERENCED_PARAMETER(Argument);
+	int cpu = KeGetCurrentProcessorNumber();
+	svm_cpu_init(cpu);
+	return 0;
+}
+
+static NTSTATUS svm_hardware_setup(void) {
+	KeIpiGenericCall(InitSvmData, 0);
+
+	return STATUS_SUCCESS;
+}
+
+static void init_seg(struct vmcb_seg* seg)
+{
+	seg->selector = 0;
+	seg->attrib = SVM_SELECTOR_P_MASK | SVM_SELECTOR_S_MASK |
+		SVM_SELECTOR_WRITE_MASK; /* Read/Write Data Segment */
+	seg->limit = 0xffff;
+	seg->base = 0;
+}
+
+static void init_sys_seg(struct vmcb_seg* seg, uint32_t type)
+{
+	seg->selector = 0;
+	seg->attrib = (u16)(SVM_SELECTOR_P_MASK | type);
+	seg->limit = 0xffff;
+	seg->base = 0;
+}
+
+static inline void vmcb_clr_intercept(struct vmcb_control_area* control,
+	u32 bit)
+{
+	UNREFERENCED_PARAMETER(control);
+	UNREFERENCED_PARAMETER(bit);
+}
+
+static inline void svm_clr_intercept(struct vcpu_svm* svm, int bit)
+{
+	struct vmcb* vmcb = svm->vmcb01.ptr;
+
+	vmcb_clr_intercept(&vmcb->control, bit);
+
+	recalc_intercepts(svm);
+}
+
+static void init_vmcb(struct kvm_vcpu* vcpu) {
+	struct vcpu_svm* svm = to_svm(vcpu);
+	struct vmcb* vmcb = svm->vmcb01.ptr;
+	struct vmcb_control_area* control = &vmcb->control;
+	struct vmcb_save_area* save = &vmcb->save;
+
+	svm_set_intercept(svm, INTERCEPT_CR0_READ);
+	svm_set_intercept(svm, INTERCEPT_CR3_READ);
+	svm_set_intercept(svm, INTERCEPT_CR4_READ);
+	svm_set_intercept(svm, INTERCEPT_CR0_WRITE);
+	svm_set_intercept(svm, INTERCEPT_CR3_WRITE);
+	svm_set_intercept(svm, INTERCEPT_CR4_WRITE);
+
+
+	control->int_ctl = V_INTR_MASKING_MASK;
+
+	init_seg(&save->es);
+	init_seg(&save->ss);
+	init_seg(&save->ds);
+	init_seg(&save->fs);
+	init_seg(&save->gs);
+
+	save->cs.selector = 0xf000;
+	save->cs.base = 0xffff0000;
+	save->cs.attrib = SVM_SELECTOR_READ_MASK | SVM_SELECTOR_P_MASK |
+		SVM_SELECTOR_S_MASK | SVM_SELECTOR_CODE_MASK;
+	save->cs.limit = 0xffff;
+
+	save->gdtr.base = 0;
+	save->gdtr.limit = 0xffff;
+	save->idtr.base = 0;
+	save->idtr.limit = 0xffff;
+
+	init_sys_seg(&save->ldtr, SEG_TYPE_LDT);
+	init_sys_seg(&save->tr, SEG_TYPE_BUSY_TSS16);
+
+	if (npt_enabled) {
+		/* Setup VMCB for Nested Paging */
+		control->nested_ctl |= SVM_NESTED_CTL_NP_ENABLE;
+		svm_clr_intercept(svm, INTERCEPT_INVLPG);
+		svm_clr_intercept(svm, INTERCEPT_CR3_READ);
+		svm_clr_intercept(svm, INTERCEPT_CR3_WRITE);
+		save->g_pat = vcpu->arch.pat;
+		save->cr3 = 0;
+	}
+}
+
+static inline void svm_set_intercept(struct vcpu_svm* svm, int bit) {
+	struct vmcb* vmcb = svm->vmcb01.ptr;
+
+	vmcb_set_intercept(&vmcb->control, bit);
+
+	recalc_intercepts(svm);
+}
+
+/*
+ * The default MMIO mask is a single bit (excluding the present bit),
+ * which could conflict with the memory encryption bit. Check for
+ * memory encryption support and override the default MMIO mask if
+ * memory encryption is enabled.
+ */
+static void svm_adjust_mmio_mask(void) {
+	unsigned int enc_bit;
+	u64 msr;
+
+	/* If there is no memory encryption support, use existing mask */
+	if (cpuid_eax(0x80000000) < 0x8000001f)
+		return;
+
+	/* If memory encryption is not enabled, use existing mask */
+	msr = __readmsr(MSR_AMD64_SYSCFG);
+	if (!(msr & MSR_AMD64_SYSCFG_MEM_ENCRYPT))
+		return;
+
+	enc_bit = cpuid_ebx(0x8000001f) & 0x3f;
+	/*
+	 * If the mask bit location is below 52, then some bits above the
+	 * physical addressing limit will always be reserved, so use the
+	 * rsvd_bits() function to generate the mask. This mask, along with
+	 * the present bit, will be used to generate a page fault with
+	 * PFER.RSV = 1.
+	 *
+	 * If the mask bit location is 52 (or above), then clear the mask.
+	 */
+
+}
+
+static void svm_set_cpu_caps(void) {
+	kvm_set_cpu_caps();
+
+	/* CPUID 0x80000001 and 0x8000000A (SVM features) */
+	if (nested) {
+
+	}
+
+	/* CPUID 0x80000008 */
+
+
+	/* AMD PMU PERFCTR_CORE CPUID */
+
+
+
+	/* CPUID 0x8000001F (SME/SEV features) */
+
 }

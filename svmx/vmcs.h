@@ -4,7 +4,7 @@ struct vmcs_hdr {
 	u32 revision_id : 31;
 	u32 shadow_vmcs : 1;
 };
-
+// vmcs 具体结构分配由硬件实现, 程序员只需要通过 VMWRITE 和 VMREAD 指令去访问.
 struct vmcs {
 	struct vmcs_hdr hdr;
 	u32 abort;
@@ -44,17 +44,17 @@ struct vmcs_controls_shadow {
  * loaded on this CPU (so we can clear them if the CPU goes down).
  */
 struct loaded_vmcs {
-	struct vmcs* vmcs;
+	struct vmcs* vmcs; // 本vcpu对应的VMCS
 	struct vmcs* shadow_vmcs;
-	int cpu;
-	bool launched;
+	int cpu; // 上一次运行的cpu编号
+	bool launched; // 是否被这个cpu加载
 	bool nmi_known_unmasked;
 	bool hv_timer_soft_disabled;
 	/* Support for vnmi-less CPUs */
 	int soft_vnmi_blocked;
 	s64 vnmi_blocked_time;
 	unsigned long* msr_bitmap;
-	LIST_ENTRY loaded_vmcss_on_cpu_link;
+	LIST_ENTRY loaded_vmcss_on_cpu_link;/* 这个cpu上的所有 vmcs链表 */
 	struct vmcs_host_state host_state;
 	struct vmcs_controls_shadow controls_shadow;
 };

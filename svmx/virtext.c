@@ -1,9 +1,10 @@
 #include "pch.h"
 #include "virtext.h"
-#include "processor.h"
+#include "cpuid.h"
 #include "bitops.h"
 #include "ntexapi.h"
 #include "svm.h"
+
 
 
 int cpu_has_vmx() {
@@ -17,22 +18,6 @@ bool cpu_is_enabled_vmx() {
 }
 
 int cpu_has_svm(const char** msg) {
-	SYSTEM_PROCESSOR_INFORMATION info;
-	NTSTATUS status = ZwQuerySystemInformation(SystemProcessorInformation,
-		&info, sizeof(info), NULL);
-	if (!NT_SUCCESS(status)) {
-		if (msg)
-			*msg = "can't get the processor information";
-		return 0;
-	}
-
-	if (info.ProcessorArchitecture != PROCESSOR_ARCHITECTURE_AMD64) {
-		if (msg)
-			*msg = "not amd";
-		return 0;
-	}
-
-
 	int eax = cpuid_eax(0x80000000);
 	if (eax < SVM_CPUID_FUNC) {
 		if (msg)

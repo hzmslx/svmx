@@ -23,3 +23,4 @@ struct kvm_pmu_ops {
 };
 
 extern struct kvm_pmu_ops intel_pmu_ops;
+extern struct kvm_pmu_ops amd_pmu_ops;

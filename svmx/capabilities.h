@@ -24,7 +24,13 @@ struct vmcs_config {
 	struct nested_vmx_msrs nested;
 };
 
+struct vmx_capability {
+	u32 ept;
+	u32 vpid;
+};
+
 extern struct vmcs_config vmcs_config;
+extern struct vmx_capability vmx_capability;
 
 static bool cpu_has_secondary_exec_ctrls(void) {
 	return vmcs_config.cpu_based_exec_ctrl &
@@ -66,4 +72,25 @@ static bool vmx_pt_mode_is_host_guest(void) {
 static inline bool cpu_need_tpr_shadow(struct kvm_vcpu* vcpu)
 {
 	return cpu_has_vmx_tpr_shadow() && lapic_in_kernel(vcpu);
+}
+
+// cpu «∑Ò÷ß≥÷invvpid
+static inline bool cpu_has_vmx_invvpid(void)
+{
+	return vmx_capability.vpid & VMX_VPID_INVVPID_BIT;
+}
+
+static inline bool cpu_has_vmx_ept_4levels(void)
+{
+	return vmx_capability.ept & VMX_EPT_PAGE_WALK_4_BIT;
+}
+
+static inline bool cpu_has_vmx_ept_mt_wb(void)
+{
+	return vmx_capability.ept & VMX_EPTP_WB_BIT;
+}
+
+static inline bool cpu_has_vmx_ept_ad_bits(void)
+{
+	return vmx_capability.ept & VMX_EPT_AD_BIT;
 }

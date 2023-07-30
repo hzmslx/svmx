@@ -3,6 +3,8 @@
 
 extern bool enable_vmware_backdoor;
 
+extern struct kvm_caps kvm_caps;
+
 void kvm_init_msr_list();
 
 
@@ -41,6 +43,22 @@ static inline bool is_long_mode(struct kvm_vcpu* vcpu)
 #endif
 }
 
+/*
+ * The first...last VMX feature MSRs that are emulated by KVM.  This may or may
+ * not cover all known VMX MSRs, as KVM doesn't emulate an MSR until there's an
+ * associated feature that KVM supports for nested virtualization.
+ */
+#define KVM_FIRST_EMULATED_VMX_MSR	MSR_IA32_VMX_BASIC
+#define KVM_LAST_EMULATED_VMX_MSR	MSR_IA32_VMX_VMFUNC
+
+ /*
+  * Internal error codes that are used to indicate that MSR emulation encountered
+  * an error that should result in #GP in the guest, unless userspace
+  * handles it.
+  */
+#define  KVM_MSR_RET_INVALID	2	/* in-kernel MSR emulation #GP condition */
+#define  KVM_MSR_RET_FILTERED	3	/* #GP due to userspace MSR filter */
+
 static inline bool is_64_bit_mode(struct kvm_vcpu* vcpu)
 {
 	int cs_db, cs_l;
@@ -58,3 +76,5 @@ static inline bool is_paging(struct kvm_vcpu* vcpu)
 }
 
 bool __kvm_is_valid_cr4(struct kvm_vcpu* vcpu, unsigned long cr4);
+
+fastpath_t handle_fastpath_set_msr_irqoff(struct kvm_vcpu* vcpu);

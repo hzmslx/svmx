@@ -45,8 +45,8 @@ static ULONG_PTR ExecuteVmxOff(
  * faults are guaranteed to be due to the !post-VMXON check unless the CPU is
  * magically in RM, VM86, compat mode, or at CPL>0.
  */
+// ÍË³övmxÄ£Ê½
 static int cpu_vmxoff(void) {
 	KeIpiGenericCall(ExecuteVmxOff, 0);
-
 	return 0;
 }

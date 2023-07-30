@@ -16,12 +16,15 @@ PMDL kvm_vcpu_cache_mdl;
 PVOID kvm_vcpu_cache;
 
 KMUTEX kvm_lock;
+LIST_ENTRY vm_list;
 
 static int kvm_usage_count = 0;
 
 static bool largepages_enabled = TRUE;
 
 bool kvm_rebooting;
+
+bool* hardware_enabled = NULL;
 
 
 int kvm_init(unsigned vcpu_size, unsigned vcpu_align){
@@ -56,11 +59,15 @@ NTSTATUS kvm_dev_ioctl_create_vm(unsigned long type) {
 }
 
 static int __hardware_enable_nolock(void) {
-	
+	int cpu = KeGetCurrentNodeNumber();
+	if (hardware_enabled[cpu])
+		return 0;
+
 	if (kvm_arch_hardware_enable()) {
 		return -1;
 	}
 
+	hardware_enabled[cpu] = TRUE;
 	return 0;
 }
 
@@ -73,10 +80,12 @@ ULONG_PTR EnableHardware(
 	_In_ ULONG_PTR Argument
 ) {
 	UNREFERENCED_PARAMETER(Argument);
+	// 开启硬件虚拟化功能
 	hardware_enable_nolock(NULL);
 	return 0;
 }
 
+// 针对每个cpu执行hardware_enable_nolock
 static NTSTATUS hardware_enable_all(void) {
 	NTSTATUS status = STATUS_SUCCESS;
 
@@ -96,19 +105,41 @@ static NTSTATUS hardware_enable_all(void) {
 
 struct kvm* kvm_create_vm(unsigned long type) {
 	UNREFERENCED_PARAMETER(type);
+	int i, j;
+	/*
+	 * 分配 kvm 结构体, 一个虚拟机对应一个 kvm 结构, 其中包括了虚拟机中的
+	 * 关键信息, 比如内存、中断、VCPU、总线等信息, 该结构体也是 kvm 的关键结
+	 * 构体之一
+	 */
 	struct kvm* kvm = kvm_arch_alloc_vm();
 
 	if (!kvm)
 		return NULL;
 
 
+
 	KVM_MMU_LOCK_INIT(kvm);
 	KeInitializeMutex(&kvm->lock, 0);
 	KeInitializeMutex(&kvm->irq_lock, 0);
+	KeInitializeMutex(&kvm->slots_loc, 0);
+	KeInitializeMutex(&kvm->slots_arch_lock, 0);
+
+
+	for (i = 0; i < KVM_ADDRESS_SPACE_NUM; i++) {
+		for (j = 0; j < 2; j++) {
+			
+		}
+	}
+
 
 	NTSTATUS status;
 	// enable the hardware
+	// 硬件使能, 最终调用架构相关的 kvm_x86_ops->hardware_enable()接口
 	status = hardware_enable_all();
+
+	KeWaitForSingleObject(&kvm_lock, Executive, KernelMode, FALSE, NULL);
+	InsertHeadList(&kvm->vm_list, &vm_list);
+	KeReleaseMutex(&kvm_lock, FALSE);
 
 	return kvm;
 }
@@ -206,7 +237,13 @@ int kvm_vm_ioctl_create_vcpu(struct kvm* kvm, u32 id) {
 	int r;
 	struct kvm_vcpu* vcpu = NULL;
 
+	
+
+	// 创建 vcpu 结构, 架构相关
 	r = kvm_arch_vcpu_create(vcpu);
+
+
+	
 
 	return r;
 }
@@ -214,4 +251,157 @@ int kvm_vm_ioctl_create_vcpu(struct kvm* kvm, u32 id) {
 void vcpu_load(struct kvm_vcpu* vcpu) {
 	int cpu = KeGetCurrentProcessorNumber();
 	kvm_arch_vcpu_load(vcpu, cpu);
+}
+
+static long kvm_vcpu_ioctl(unsigned int ioctl, unsigned long arg) {
+	UNREFERENCED_PARAMETER(arg);
+
+	switch (ioctl)
+	{
+	case KVM_RUN:
+
+		break;
+	default:
+		break;
+	}
+
+	return STATUS_INVALID_PARAMETER;
+}
+
+kvm_pfn_t __gfn_to_pfn_memslot(const struct kvm_memory_slot* slot, gfn_t gfn,
+	bool atomic, bool interruptible, bool* async,
+	bool write_fault, bool* writable, hva_t* hva) {
+	UNREFERENCED_PARAMETER(slot);
+	UNREFERENCED_PARAMETER(gfn);
+	UNREFERENCED_PARAMETER(atomic);
+	UNREFERENCED_PARAMETER(interruptible);
+	UNREFERENCED_PARAMETER(async);
+	UNREFERENCED_PARAMETER(write_fault);
+	UNREFERENCED_PARAMETER(writable);
+	UNREFERENCED_PARAMETER(hva);
+
+	return 0;
+}
+
+static int kvm_vm_ioctl_set_memory_region(struct kvm* kvm,
+	struct kvm_userspace_memory_region* mem)
+{
+	if ((u16)mem->slot >= KVM_USER_MEM_SLOTS)
+		return STATUS_INVALID_PARAMETER;
+
+	return kvm_set_memory_region(kvm, mem);
+}
+
+static long kvm_vm_ioctl(unsigned int ioctl, unsigned long arg) {
+	UNREFERENCED_PARAMETER(arg);
+	int r = 0;
+
+	switch (ioctl)
+	{
+
+	// 建立 guest 物理地址空间中的内存区域与 qemu-kvm 虚拟地址空间中的内存区域的映射
+	case KVM_SET_USER_MEMORY_REGION:
+	{
+
+
+		break;
+	}
+
+	default:
+		break;
+	}
+
+	return r;
+}
+
+int kvm_set_memory_region(struct kvm* kvm,
+	const struct kvm_userspace_memory_region* mem) {
+	UNREFERENCED_PARAMETER(kvm);
+	UNREFERENCED_PARAMETER(mem);
+	int r = 0;
+
+	return r;
+}
+
+/*
+ * Allocate some memory and give it an address in the guest physical address
+ * space.
+ *
+ * Discontiguous memory is allowed, mostly for framebuffers.
+ *
+ * Must be called holding kvm->slots_lock for write.
+ */
+int __kvm_set_memory_region(struct kvm* kvm,
+	const struct kvm_userspace_memory_region* mem) {
+	UNREFERENCED_PARAMETER(kvm);
+	UNREFERENCED_PARAMETER(mem);
+
+	return 0;
+}
+
+/*
+ * Replace @old with @new in the inactive memslots.
+ *
+ * With NULL @old this simply adds @new.
+ * With NULL @new this simply removes @old.
+ *
+ * If @new is non-NULL its hva_node[slots_idx] range has to be set
+ * appropriately.
+ */
+static void kvm_replace_memslot(struct kvm* kvm,
+	struct kvm_memory_slot* old,
+	struct kvm_memory_slot* new) {
+	UNREFERENCED_PARAMETER(kvm);
+	UNREFERENCED_PARAMETER(old);
+	UNREFERENCED_PARAMETER(new);
+}
+
+/*
+ * Activate @new, which must be installed in the inactive slots by the caller,
+ * by swapping the active slots and then propagating @new to @old once @old is
+ * unreachable and can be safely modified.
+ *
+ * With NULL @old this simply adds @new to @active (while swapping the sets).
+ * With NULL @new this simply removes @old from @active and frees it
+ * (while also swapping the sets).
+ */
+static void kvm_activate_memslot(struct kvm* kvm,
+	struct kvm_memory_slot* old,
+	struct kvm_memory_slot* new)
+{
+	UNREFERENCED_PARAMETER(kvm);
+	UNREFERENCED_PARAMETER(old);
+	UNREFERENCED_PARAMETER(new);
+}
+
+static void kvm_delete_memslot(struct kvm* kvm,
+	struct kvm_memory_slot* old,
+	struct kvm_memory_slot* invalid_slot)
+{
+	/*
+	 * Remove the old memslot (in the inactive memslots) by passing NULL as
+	 * the "new" slot, and for the invalid version in the active slots.
+	 */
+	kvm_replace_memslot(kvm, old, NULL);
+	kvm_activate_memslot(kvm, invalid_slot, NULL);
+}
+
+
+/* This does not remove the slot from struct kvm_memslots data structures */
+static void kvm_free_memslot(struct kvm* kvm, struct kvm_memory_slot* slot)
+{
+	UNREFERENCED_PARAMETER(kvm);
+	UNREFERENCED_PARAMETER(slot);
+}
+
+static int kvm_set_memslot(struct kvm* kvm,
+	struct kvm_memory_slot* old,
+	struct kvm_memory_slot* new,
+	enum kvm_mr_change change) {
+	UNREFERENCED_PARAMETER(kvm);
+	UNREFERENCED_PARAMETER(old);
+	UNREFERENCED_PARAMETER(new);
+	UNREFERENCED_PARAMETER(change);
+
+	return 0;
 }

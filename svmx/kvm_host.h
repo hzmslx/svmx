@@ -8,6 +8,7 @@
 #include "mmu_internal.h"
 #include "lapic.h"
 #include "types.h"
+#include "kvm_page_track.h"
 
 
 #define KVM_GUEST_CR0_MASK_UNRESTRICTED_GUEST				\
@@ -69,6 +70,10 @@ struct kvm_pte_chain {
 	u64* parent_ptes[NR_PTE_CHAIN_ENTRIES];
 	RTL_DYNAMIC_HASH_TABLE_ENTRY link;
 };
+
+#ifndef KVM_ADDRESS_SPACE_NUM
+#define KVM_ADDRESS_SPACE_NUM	1
+#endif
 
 enum kvm_reg {
 	VCPU_REGS_RAX = 0,
@@ -272,7 +277,15 @@ enum vcpu_sysreg {
 	NR_SYS_REGS	/* Nothing after this line! */
 };
 
-
+enum {
+	// host 模式
+	OUTSIDE_GUEST_MODE,
+	// 虚拟机模式
+	IN_GUEST_MODE,
+	// 表明 ipi 将很快发生
+	EXITING_GUEST_MODE,
+	READING_SHADOW_PAGE_TABLES,
+};
 
 
 
@@ -352,6 +365,115 @@ enum pmc_type {
 	KVM_PMC_FIXED,
 };
 
+
+
+/*
+ * kvm_mmu_extended_role complements kvm_mmu_page_role, tracking properties
+ * relevant to the current MMU configuration.   When loading CR0, CR4, or EFER,
+ * including on nested transitions, if nothing in the full role changes then
+ * MMU re-configuration can be skipped. @valid bit is set on first usage so we
+ * don't treat all-zero structure as valid data.
+ *
+ * The properties that are tracked in the extended role but not the page role
+ * are for things that either (a) do not affect the validity of the shadow page
+ * or (b) are indirectly reflected in the shadow page's role.  For example,
+ * CR4.PKE only affects permission checks for software walks of the guest page
+ * tables (because KVM doesn't support Protection Keys with shadow paging), and
+ * CR0.PG, CR4.PAE, and CR4.PSE are indirectly reflected in role.level.
+ *
+ * Note, SMEP and SMAP are not redundant with sm*p_andnot_wp in the page role.
+ * If CR0.WP=1, KVM can reuse shadow pages for the guest regardless of SMEP and
+ * SMAP, but the MMU's permission checks for software walks need to be SMEP and
+ * SMAP aware regardless of CR0.WP.
+ */
+union kvm_mmu_extended_role {
+	u32 word;
+	struct {
+		unsigned int valid : 1;
+		unsigned int execonly : 1;
+		unsigned int cr4_pse : 1;
+		unsigned int cr4_pke : 1;
+		unsigned int cr4_smap : 1;
+		unsigned int cr4_smep : 1;
+		unsigned int cr4_la57 : 1;
+		unsigned int efer_lma : 1;
+	};
+};
+
+/*
+ * kvm_mmu_page_role tracks the properties of a shadow page (where shadow page
+ * also includes TDP pages) to determine whether or not a page can be used in
+ * the given MMU context.  This is a subset of the overall kvm_cpu_role to
+ * minimize the size of kvm_memory_slot.arch.gfn_track, i.e. allows allocating
+ * 2 bytes per gfn instead of 4 bytes per gfn.
+ *
+ * Upper-level shadow pages having gptes are tracked for write-protection via
+ * gfn_track.  As above, gfn_track is a 16 bit counter, so KVM must not create
+ * more than 2^16-1 upper-level shadow pages at a single gfn, otherwise
+ * gfn_track will overflow and explosions will ensure.
+ *
+ * A unique shadow page (SP) for a gfn is created if and only if an existing SP
+ * cannot be reused.  The ability to reuse a SP is tracked by its role, which
+ * incorporates various mode bits and properties of the SP.  Roughly speaking,
+ * the number of unique SPs that can theoretically be created is 2^n, where n
+ * is the number of bits that are used to compute the role.
+ *
+ * But, even though there are 19 bits in the mask below, not all combinations
+ * of modes and flags are possible:
+ *
+ *   - invalid shadow pages are not accounted, so the bits are effectively 18
+ *
+ *   - quadrant will only be used if has_4_byte_gpte=1 (non-PAE paging);
+ *     execonly and ad_disabled are only used for nested EPT which has
+ *     has_4_byte_gpte=0.  Therefore, 2 bits are always unused.
+ *
+ *   - the 4 bits of level are effectively limited to the values 2/3/4/5,
+ *     as 4k SPs are not tracked (allowed to go unsync).  In addition non-PAE
+ *     paging has exactly one upper level, making level completely redundant
+ *     when has_4_byte_gpte=1.
+ *
+ *   - on top of this, smep_andnot_wp and smap_andnot_wp are only set if
+ *     cr0_wp=0, therefore these three bits only give rise to 5 possibilities.
+ *
+ * Therefore, the maximum number of possible upper-level shadow pages for a
+ * single gfn is a bit less than 2^13.
+ */
+union kvm_mmu_page_role {
+	u32 word;
+	struct {
+		unsigned level : 4;
+		unsigned has_4_byte_gpte : 1;
+		unsigned quadrant : 2;
+		unsigned direct : 1;
+		unsigned access : 3;
+		unsigned invalid : 1;
+		unsigned efer_nx : 1;
+		unsigned cr0_wp : 1;
+		unsigned smep_andnot_wp : 1;
+		unsigned smap_andnot_wp : 1;
+		unsigned ad_disabled : 1;
+		unsigned guest_mode : 1;
+		unsigned passthrough : 1;
+		unsigned : 5;
+
+		/*
+		 * This is left at the top of the word so that
+		 * kvm_memslots_for_spte_role can extract it with a
+		 * simple shift.  While there is room, give it a whole
+		 * byte so it is also faster to load it from memory.
+		 */
+		unsigned smm : 8;
+	};
+};
+
+union kvm_cpu_role {
+	u64 as_u64;
+	struct {
+		union kvm_mmu_page_role base;
+		union kvm_mmu_extended_role ext;
+	};
+};
+
 struct kvm_pmc {
 	enum pmc_type type;
 	u8 idx;
@@ -429,6 +551,12 @@ struct kvm_pmu {
 	u8 event_count;
 };
 
+struct kvm_mmu_root_info {
+	gpa_t pgd;
+	hpa_t hpa;
+};
+
+
 /*
  * x86 supports 4 paging modes (5-level 64-bit, 4-level 64-bit, 3-level 32-bit,
  * and 2-level 32-bit).  The kvm_mmu structure abstracts the details of the
@@ -445,7 +573,9 @@ struct kvm_mmu {
 		struct x86_exception* exception);
 	int (*sync_spte)(struct kvm_vcpu* vcpu,
 		struct kvm_mmu_page* sp, int i);
-
+	struct kvm_mmu_root_info root;
+	union kvm_cpu_role cpu_role;
+	union kvm_mmu_page_role root_role;
 
 	/*
 	* The pkru_mask indicates if protection key checks are needed.  It
@@ -477,6 +607,107 @@ struct kvm_mmu {
 	u64 pdptrs[4]; /* pae */
 };
 
+struct kvm_vcpu_stat {
+	struct kvm_vcpu_stat_generic generic;
+	u64 pf_taken;
+	u64 pf_fixed;
+	u64 pf_emulate;
+	u64 pf_spurious;
+	u64 pf_fast;
+	u64 pf_mmio_spte_created;
+	u64 pf_guest;
+	u64 tlb_flush;
+	u64 invlpg;
+
+	u64 exits;
+	u64 io_exits;
+	u64 mmio_exits;
+	u64 signal_exits;
+	u64 irq_window_exits;
+	u64 nmi_window_exits;
+	u64 l1d_flush;
+	u64 halt_exits;
+	u64 request_irq_exits;
+	u64 irq_exits;
+	u64 host_state_reload;
+	u64 fpu_reload;
+	u64 insn_emulation;
+	u64 insn_emulation_fail;
+	u64 hypercalls;
+	u64 irq_injections;
+	u64 nmi_injections;
+	u64 req_event;
+	u64 nested_run;
+	u64 directed_yield_attempted;
+	u64 directed_yield_successful;
+	u64 preemption_reported;
+	u64 preemption_other;
+	u64 guest_mode;
+	u64 notify_window_exits;
+};
+
+struct kvm_memslots {
+	u64 generation;
+
+
+	/*
+	 * The mapping table from slot id to memslot.
+	 *
+	 * 7-bit bucket count matches the size of the old id to index array for
+	 * 512 slots, while giving good performance with this slot count.
+	 * Higher bucket counts bring only small performance improvements but
+	 * always result in higher memory usage (even for lower memslot counts).
+	 */
+
+	int node_idx;
+};
+
+struct kvm_rmap_head {
+	unsigned long val;
+};
+
+struct kvm_lpage_info {
+	int disallow_lpage;
+};
+
+struct kvm_arch_memory_slot {
+	struct kvm_rmap_head* rmap[KVM_NR_PAGE_SIZES];
+	struct kvm_lpage_info* lpage_info[KVM_NR_PAGE_SIZES - 1];
+	unsigned short* gfn_track[KVM_PAGE_TRACK_MAX];
+};
+
+#ifndef KVM_INTERNAL_MEM_SLOTS
+#define KVM_INTERNAL_MEM_SLOTS 0
+#endif
+#define KVM_MEM_SLOTS_NUM SHRT_MAX
+#define KVM_USER_MEM_SLOTS (KVM_MEM_SLOTS_NUM - KVM_INTERNAL_MEM_SLOTS)
+/*
+ * Since at idle each memslot belongs to two memslot sets it has to contain
+ * two embedded nodes for each data structure that it forms a part of.
+ *
+ * Two memslot sets (one active and one inactive) are necessary so the VM
+ * continues to run on one memslot set while the other is being modified.
+ *
+ * These two memslot sets normally point to the same set of memslots.
+ * They can, however, be desynchronized when performing a memslot management
+ * operation by replacing the memslot to be modified by its copy.
+ * After the operation is complete, both memslot sets once again point to
+ * the same, common set of memslot data.
+ *
+ * The memslots themselves are independent of each other so they can be
+ * individually added or deleted.
+ */
+struct kvm_memory_slot {
+	gfn_t base_gfn;
+	unsigned long npages;
+	unsigned long* dirty_bitmap;
+	struct kvm_arch_memory_slot arch;
+	unsigned long userspace_addr;
+	u32 flags;
+	short id;
+	u16 as_id;
+};
+
 struct kvm_vcpu_arch {
 	/*
 	 * rip and regs accesses must go through
@@ -485,7 +716,7 @@ struct kvm_vcpu_arch {
 	unsigned long regs[NR_VCPU_REGS];
 	u32 regs_avail;
 	u32 regs_dirty;
-
+	// 类似这些寄存器就是用来缓存真正的cpu值的
 	unsigned long cr0;
 	unsigned long cr0_guest_owned_bits;
 	unsigned long cr2;
@@ -524,12 +755,15 @@ struct kvm_vcpu_arch {
 	 * the paging mode of the l1 guest. This context is always used to
 	 * handle faults.
 	 */
+	// 直接操作函数
 	struct kvm_mmu* mmu;
 
 	/* Non-nested MMU for L1 */
+	// 非嵌套情况下的虚拟机mmu
 	struct kvm_mmu root_mmu;
 
 	/* L1 MMU when running nested */
+	// 嵌套情况下的L1的mmu
 	struct kvm_mmu guest_mmu;
 
 	/*
@@ -546,6 +780,7 @@ struct kvm_vcpu_arch {
 	 * Pointer to the mmu context currently used for
 	 * gva_to_gpa translations.
 	 */
+	// 用于GVA转换成GPA
 	struct kvm_mmu* walk_mmu;
 
 
@@ -596,7 +831,7 @@ struct kvm_vcpu_arch {
 	int maxphyaddr;
 
 	/* emulate context */
-
+	// KVM的软件模拟模式，也就是没有vmx的情况
 	struct x86_emulate_ctxt* emulate_ctxt;
 	bool emulate_regs_need_sync_to_vcpu;
 	bool emulate_regs_need_sync_from_vcpu;
@@ -707,6 +942,7 @@ struct kvm_vcpu_arch {
 	unsigned long exit_qualification;
 
 	/* pv related host specific info */
+	// 不支持vmx下的模拟虚拟化
 	struct {
 		bool pv_unhalted;
 	} pv;
@@ -751,66 +987,47 @@ struct kvm_vcpu_arch {
 	bool pdptrs_from_userspace;
 };
 
+static inline
+struct kvm_memory_slot* id_to_memslot(struct kvm_memslots* slots, int id)
+{
+	UNREFERENCED_PARAMETER(slots);
+	UNREFERENCED_PARAMETER(id);
+
+
+	return NULL;
+}
+
 struct kvm_vcpu {
+	// 指向vcpu所属的虚拟机对应的kvm结构
 	struct kvm* kvm;
-#ifdef CONFIG_PREEMPT_NOTIFIERS
-	struct preempt_notifier preempt_notifier;
-#endif
+
 	int cpu;
+	// 用于唯一标识该vcpu
 	int vcpu_id; /* id given by userspace at creation */
 	int vcpu_idx; /* index into kvm->vcpu_array */
 	int ____srcu_idx; /* Don't use this directly.  You've been warned. */
-#ifdef CONFIG_PROVE_RCU
-	int srcu_depth;
-#endif
+
 	int mode;
 	u64 requests;
 	unsigned long guest_debug;
 
+	// 执行虚拟机对应的kvm_run结构，运行时的状态
 	struct kvm_run* run;
 
-#ifndef __KVM_HAVE_ARCH_WQP
-	
-#endif
+
 
 	int sigset_active;
 
 	unsigned int halt_poll_ns;
 	bool valid_wakeup;
 
-#ifdef CONFIG_HAS_IOMEM
-	int mmio_needed;
-	int mmio_read_completed;
-	int mmio_is_write;
-	int mmio_cur_fragment;
-	int mmio_nr_fragments;
-	struct kvm_mmio_fragment mmio_fragments[KVM_MAX_MMIO_FRAGMENTS];
-#endif
 
-#ifdef CONFIG_KVM_ASYNC_PF
-	struct {
-		u32 queued;
-		struct list_head queue;
-		struct list_head done;
-		spinlock_t lock;
-	} async_pf;
-#endif
-
-#ifdef CONFIG_HAVE_KVM_CPU_RELAX_INTERCEPT
-	/*
-	 * Cpu relax intercept or pause loop exit optimization
-	 * in_spin_loop: set when a vcpu does a pause loop exit
-	 *  or cpu relax intercepted.
-	 * dy_eligible: indicates whether vcpu is eligible for directed yield.
-	 */
-	struct {
-		bool in_spin_loop;
-		bool dy_eligible;
-	} spin_loop;
-#endif
 	bool preempted;
 	bool ready;
+	// 架构相关部分
 	struct kvm_vcpu_arch arch;
+	// vcpu状态信息
+	struct kvm_vcpu_stat stat;
 
 	/*
 	 * The most recently used memslot by this vCPU and the slots generation
@@ -1026,6 +1243,27 @@ struct kvm_x86_ops {
 	unsigned long (*vcpu_get_apicv_inhibit_reasons)(struct kvm_vcpu* vcpu);
 };
 
+enum kvm_mr_change {
+	KVM_MR_CREATE,
+	KVM_MR_DELETE,
+	KVM_MR_MOVE,
+	KVM_MR_FLAGS_ONLY,
+};
+
+void kvm_arch_memslots_updated(struct kvm* kvm, u64 gen);
+int kvm_arch_prepare_memory_region(struct kvm* kvm,
+	const struct kvm_memory_slot* old,
+	struct kvm_memory_slot* new,
+	enum kvm_mr_change change);
+void kvm_arch_commit_memory_region(struct kvm* kvm,
+	struct kvm_memory_slot* old,
+	const struct kvm_memory_slot* new,
+	enum kvm_mr_change change);
+
+int kvm_set_memory_region(struct kvm* kvm,
+	const struct kvm_userspace_memory_region* mem);
+int __kvm_set_memory_region(struct kvm* kvm,
+	const struct kvm_userspace_memory_region* mem);
 struct kvm_arch {
 	unsigned long n_used_mmu_pages;
 	unsigned long n_requested_mmu_pages;
@@ -1232,6 +1470,8 @@ struct kvm_arch {
 struct kvm {
 	ERESOURCE mmu_lock;
 
+	// 内存槽操作锁
+	KMUTEX slots_loc;
 	/*
 	 * Protects the arch-specific fields of struct kvm_memory_slots in
 	 * use by the VM. To be used under the slots_lock (above) or in a
@@ -1239,13 +1479,13 @@ struct kvm {
 	 * lead to deadlock with the synchronize_srcu in
 	 * kvm_swap_active_memslots().
 	 */
-
+	KMUTEX slots_arch_lock;
 
 	unsigned long nr_memslot_pages;
 	/* The two memslot sets - active and inactive (per address space) */
-
+	struct kvm_memslots __memslots[KVM_ADDRESS_SPACE_NUM][2];
 	/* The current active memslot set for each address space */
-
+	struct kvm_memslots* memslots[KVM_ADDRESS_SPACE_NUM];
 	/*
 	 * Protected by slots_lock, but can be read outside if an
 	 * incorrect answer is acceptable.
@@ -1267,48 +1507,25 @@ struct kvm {
 	 * and is accessed atomically.
 	 */
 
+	// host上vm管理链表
+	LIST_ENTRY vm_list;
+
 	int max_vcpus;
 	int created_vcpus;
 	int last_boosted_vcpu;
 
 	KMUTEX lock;
 
-#ifdef CONFIG_HAVE_KVM_EVENTFD
-	struct {
-		spinlock_t        lock;
-		struct list_head  items;
-		/* resampler_list update side is protected by resampler_lock. */
-		struct list_head  resampler_list;
-		struct mutex      resampler_lock;
-	} irqfds;
-	struct list_head ioeventfds;
-#endif
+	// host 上 arch 的一些参数
 	struct kvm_arch arch;
 
-#ifdef CONFIG_KVM_MMIO
-	struct kvm_coalesced_mmio_ring* coalesced_mmio_ring;
-	spinlock_t ring_lock;
-	struct list_head coalesced_zones;
-#endif
+
 
 	KMUTEX irq_lock;
-#ifdef CONFIG_HAVE_KVM_IRQCHIP
-	/*
-	 * Update side is protected by irq_lock.
-	 */
-	struct kvm_irq_routing_table __rcu* irq_routing;
-#endif
-#ifdef CONFIG_HAVE_KVM_IRQFD
-	struct hlist_head irq_ack_notifier_list;
-#endif
 
-#if defined(CONFIG_MMU_NOTIFIER) && defined(KVM_ARCH_WANT_MMU_NOTIFIER)
-	struct mmu_notifier mmu_notifier;
-	unsigned long mmu_invalidate_seq;
-	long mmu_invalidate_in_progress;
-	unsigned long mmu_invalidate_range_start;
-	unsigned long mmu_invalidate_range_end;
-#endif
+
+
+
 
 	u64 manual_dirty_log_protect;
 	struct dentry* debugfs_dentry;
@@ -1322,9 +1539,6 @@ struct kvm {
 	bool vm_bugged;
 	bool vm_dead;
 
-#ifdef CONFIG_HAVE_KVM_PM_NOTIFIER
-	struct notifier_block pm_notifier;
-#endif
 
 };
 
@@ -1393,3 +1607,45 @@ static inline bool kvm_request_pending(struct kvm_vcpu* vcpu)
 }
 
 void kvm_vcpu_reset(struct kvm_vcpu* vcpu, bool init_event);
+
+// mmu 相关硬件判断和全局变量
+void kvm_configure_mmu(bool enable_tdp, int tdp_forced_root_level,
+	int tdp_max_root_level, int tdp_huge_page_level);
+long kvm_arch_dev_ioctl(unsigned int ioctl, unsigned long arg);
+
+int kvm_emulate_cpuid(struct kvm_vcpu* vcpu);
+int kvm_emulate_rdmsr(struct kvm_vcpu* vcpu);
+int kvm_emulate_wrmsr(struct kvm_vcpu* vcpu);
+int kvm_emulate_halt(struct kvm_vcpu* vcpu);
+int kvm_emulate_invd(struct kvm_vcpu* vcpu);
+int kvm_emulate_rdpmc(struct kvm_vcpu* vcpu);
+int kvm_emulate_hypercall(struct kvm_vcpu* vcpu);
+int kvm_emulate_wbinvd(struct kvm_vcpu* vcpu);
+int kvm_emulate_xsetbv(struct kvm_vcpu* vcpu);
+int kvm_emulate_mwait(struct kvm_vcpu* vcpu);
+int kvm_emulate_monitor(struct kvm_vcpu* vcpu);
+int kvm_handle_invalid_op(struct kvm_vcpu* vcpu);
+
+void kvm_inject_page_fault(struct kvm_vcpu* vcpu, struct x86_exception* fault);
+kvm_pfn_t __gfn_to_pfn_memslot(const struct kvm_memory_slot* slot, gfn_t gfn,
+	bool atomic, bool interruptible, bool* async,
+	bool write_fault, bool* writable, hva_t* hva);
+
+static inline unsigned long
+__gfn_to_hva_memslot(const struct kvm_memory_slot* slot, gfn_t gfn)
+{
+	/*
+	 * The index was checked originally in search_memslots.  To avoid
+	 * that a malicious guest builds a Spectre gadget out of e.g. page
+	 * table walks, do not let the processor speculate loads outside
+	 * the guest's registered memslots.
+	 */
+	unsigned long offset = gfn - slot->base_gfn;
+	
+	return slot->userspace_addr + offset * PAGE_SIZE;
+}
+
+int kvm_mmu_create(struct kvm_vcpu* vcpu);
+
+int kvm_mmu_page_fault(struct kvm_vcpu* vcpu, gpa_t cr2_or_gpa, u64 error_code,
+	void* insn, int insn_len);

@@ -29,6 +29,12 @@
     <Filter Include="svm">
       <UniqueIdentifier>{e6a833c5-c6cf-48b6-8dcb-a8c9ff3eaed6}</UniqueIdentifier>
     </Filter>
+    <Filter Include="common">
+      <UniqueIdentifier>{7aafcc92-ce4e-4d1a-b20e-51fcad0ce561}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="mmu">
+      <UniqueIdentifier>{8ecb2201-4dfc-4ee8-b83f-81ad8c9c052e}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="svmx.c">
@@ -45,9 +51,6 @@
     </ClCompile>
     <ClCompile Include="Logging.c">
       <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="mmu.c">
-      <Filter>kvm</Filter>
     </ClCompile>
     <ClCompile Include="virtext.c">
       <Filter>asm</Filter>
@@ -70,11 +73,17 @@
     <ClCompile Include="cpuid.c">
       <Filter>kvm</Filter>
     </ClCompile>
-    <ClCompile Include="nested.c">
-      <Filter>vmx</Filter>
-    </ClCompile>
     <ClCompile Include="lapic.c">
       <Filter>kvm</Filter>
+    </ClCompile>
+    <ClCompile Include="nested.c">
+      <Filter>common</Filter>
+    </ClCompile>
+    <ClCompile Include="mmu.c">
+      <Filter>mmu</Filter>
+    </ClCompile>
+    <ClCompile Include="spte.c">
+      <Filter>mmu</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -104,9 +113,6 @@
     </ClInclude>
     <ClInclude Include="Logging.h">
       <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="mmu.h">
-      <Filter>kvm</Filter>
     </ClInclude>
     <ClInclude Include="msr-index.h">
       <Filter>asm</Filter>
@@ -159,9 +165,6 @@
     <ClInclude Include="capabilities.h">
       <Filter>vmx</Filter>
     </ClInclude>
-    <ClInclude Include="mmu_internal.h">
-      <Filter>kvm</Filter>
-    </ClInclude>
     <ClInclude Include="lapic.h">
       <Filter>kvm</Filter>
     </ClInclude>
@@ -195,9 +198,6 @@
     <ClInclude Include="cpuid.h">
       <Filter>kvm</Filter>
     </ClInclude>
-    <ClInclude Include="nested.h">
-      <Filter>vmx</Filter>
-    </ClInclude>
     <ClInclude Include="kvm_cache_regs.h">
       <Filter>kvm</Filter>
     </ClInclude>
@@ -209,6 +209,24 @@
     </ClInclude>
     <ClInclude Include="irq_vectors.h">
       <Filter>asm</Filter>
+    </ClInclude>
+    <ClInclude Include="nested.h">
+      <Filter>common</Filter>
+    </ClInclude>
+    <ClInclude Include="pgtable_types.h">
+      <Filter>asm</Filter>
+    </ClInclude>
+    <ClInclude Include="kvm_page_track.h">
+      <Filter>asm</Filter>
+    </ClInclude>
+    <ClInclude Include="mmu.h">
+      <Filter>mmu</Filter>
+    </ClInclude>
+    <ClInclude Include="spte.h">
+      <Filter>mmu</Filter>
+    </ClInclude>
+    <ClInclude Include="mmu_internal.h">
+      <Filter>mmu</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

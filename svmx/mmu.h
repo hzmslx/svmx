@@ -26,3 +26,25 @@
 #define KVM_MMU_CR0_ROLE_BITS (X86_CR0_PG | X86_CR0_WP)
 
 void kvm_init_mmu(struct kvm_vcpu* vcpu);
+
+int kvm_mmu_load(struct kvm_vcpu* vcpu);
+
+static inline int kvm_mmu_reload(struct kvm_vcpu* vcpu)
+{
+	return kvm_mmu_load(vcpu);
+}
+
+gpa_t translate_nested_gpa(struct kvm_vcpu* vcpu, gpa_t gpa, u64 access,
+	struct x86_exception* exception);
+
+static inline gpa_t kvm_translate_gpa(struct kvm_vcpu* vcpu,
+	struct kvm_mmu* mmu,
+	gpa_t gpa, u64 access,
+	struct x86_exception* exception)
+{
+	if (mmu != &vcpu->arch.nested_mmu)
+		return gpa;
+	return translate_nested_gpa(vcpu, gpa, access, exception);
+}
+
+int kvm_tdp_page_fault(struct kvm_vcpu* vcpu, struct kvm_page_fault* fault);

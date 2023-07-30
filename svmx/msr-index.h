@@ -3,7 +3,13 @@
 
 /* CPU model specific register (MSR) numbers */
 
-
+/* K8 MSRs */
+#define MSR_K8_TOP_MEM1			0xc001001a
+#define MSR_K8_TOP_MEM2			0xc001001d
+#define MSR_AMD64_SYSCFG		0xc0010010
+#define MSR_AMD64_SYSCFG_MEM_ENCRYPT_BIT	23
+#define MSR_AMD64_SYSCFG_MEM_ENCRYPT	BIT_ULL(MSR_AMD64_SYSCFG_MEM_ENCRYPT_BIT)
+#define MSR_K8_INT_PENDING_MSG		0xc0010055
 
 /* x86-64 specific MSRs */
 #define MSR_EFER		0xc0000080 /* extended feature register */
@@ -161,6 +167,74 @@
 #define MSR_IA32_VMX_TRUE_ENTRY_CTLS     0x00000490
 #define MSR_IA32_VMX_VMFUNC             0x00000491
 #define MSR_IA32_VMX_PROCBASED_CTLS3	0x00000492
+
+#define MSR_IA32_ARCH_CAPABILITIES	0x0000010a
+#define ARCH_CAP_RDCL_NO		BIT(0)	/* Not susceptible to Meltdown */
+#define ARCH_CAP_IBRS_ALL		BIT(1)	/* Enhanced IBRS support */
+#define ARCH_CAP_RSBA			BIT(2)	/* RET may use alternative branch predictors */
+#define ARCH_CAP_SKIP_VMENTRY_L1DFLUSH	BIT(3)	/* Skip L1D flush on vmentry */
+#define ARCH_CAP_SSB_NO			BIT(4)	/*
+						 * Not susceptible to Speculative Store Bypass
+						 * attack, so no Speculative Store Bypass
+						 * control required.
+						 */
+#define ARCH_CAP_MDS_NO			BIT(5)   /*
+						  * Not susceptible to
+						  * Microarchitectural Data
+						  * Sampling (MDS) vulnerabilities.
+						  */
+#define ARCH_CAP_PSCHANGE_MC_NO		BIT(6)	 /*
+						  * The processor is not susceptible to a
+						  * machine check error due to modifying the
+						  * code page size along with either the
+						  * physical address or cache type
+						  * without TLB invalidation.
+						  */
+#define ARCH_CAP_TSX_CTRL_MSR		BIT(7)	/* MSR for TSX control is available. */
+#define ARCH_CAP_TAA_NO			BIT(8)	/*
+						 * Not susceptible to
+						 * TSX Async Abort (TAA) vulnerabilities.
+						 */
+#define ARCH_CAP_SBDR_SSDP_NO		BIT(13)	/*
+						 * Not susceptible to SBDR and SSDP
+						 * variants of Processor MMIO stale data
+						 * vulnerabilities.
+						 */
+#define ARCH_CAP_FBSDP_NO		BIT(14)	/*
+						 * Not susceptible to FBSDP variant of
+						 * Processor MMIO stale data
+						 * vulnerabilities.
+						 */
+#define ARCH_CAP_PSDP_NO		BIT(15)	/*
+						 * Not susceptible to PSDP variant of
+						 * Processor MMIO stale data
+						 * vulnerabilities.
+						 */
+#define ARCH_CAP_FB_CLEAR		BIT(17)	/*
+						 * VERW clears CPU fill buffer
+						 * even on MDS_NO CPUs.
+						 */
+#define ARCH_CAP_FB_CLEAR_CTRL		BIT(18)	/*
+						 * MSR_IA32_MCU_OPT_CTRL[FB_CLEAR_DIS]
+						 * bit available to control VERW
+						 * behavior.
+						 */
+#define ARCH_CAP_RRSBA			BIT(19)	/*
+						 * Indicates RET may use predictors
+						 * other than the RSB. With eIBRS
+						 * enabled predictions in kernel mode
+						 * are restricted to targets in
+						 * kernel.
+						 */
+#define ARCH_CAP_PBRSB_NO		BIT(24)	/*
+						 * Not susceptible to Post-Barrier
+						 * Return Stack Buffer Predictions.
+						 */
+
+#define ARCH_CAP_XAPIC_DISABLE		BIT(21)	/*
+						 * IA32_XAPIC_DISABLE_STATUS MSR
+						 * supported
+						 */
 
 /* AMD-V MSRs */
 

@@ -1,6 +1,7 @@
 #pragma once
 #include "vmcs12.h"
 #include "vmx.h"
+#include "svm.h"
 
 static inline struct vmcs12* get_vmcs12(struct kvm_vcpu* vcpu)
 {
@@ -32,3 +33,6 @@ static inline bool nested_cr4_valid(struct kvm_vcpu* vcpu, unsigned long val)
 	return fixed_bits_valid(val, fixed0, fixed1) &&
 		__kvm_is_valid_cr4(vcpu, val);
 }
+
+void recalc_intercepts(struct vcpu_svm* svm);
+int vmx_get_vmx_msr(struct nested_vmx_msrs* msrs, u32 msr_index, u64* pdata);

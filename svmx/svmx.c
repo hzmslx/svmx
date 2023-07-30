@@ -6,6 +6,7 @@
 extern KMUTEX vendor_module_lock;
 extern struct vmcs** vmxarea;
 extern struct vmcs** current_vmcs;
+extern bool* hardware_enabled;
 
 DRIVER_UNLOAD DriverUnload;
 DRIVER_DISPATCH DriverDeviceControl;
@@ -61,6 +62,15 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) 
 		return status;
 	}
 
+	ULONG count = KeQueryActiveProcessorCount(0);
+	hardware_enabled = ExAllocatePoolZero(NonPagedPool, count * sizeof(bool),
+		DRIVER_TAG);
+	if (hardware_enabled == NULL) {
+		status = STATUS_NO_MEMORY;
+		IoDeleteSymbolicLink(&linkName);
+		IoDeleteDevice(DeviceObject);
+		return status;
+	}
 	
 	int cpuInfo[4];
 	CpuIdEx(cpuInfo, 0, 0);
@@ -69,7 +79,7 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) 
 	memcpy_s(brand + 4, 4,&cpuInfo[3], 4);
 	memcpy_s(brand + 8, 4, &cpuInfo[2], 4);
 	if (strcmp(brand,"GenuineIntel") == 0) {
-		ULONG count = KeQueryActiveProcessorCount(0);
+		
 		vmxarea = ExAllocatePoolZero(NonPagedPool, count * sizeof(struct vmcs*),
 			DRIVER_TAG);
 		if (vmxarea == NULL) {

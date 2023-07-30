@@ -76,3 +76,13 @@ static inline ulong kvm_read_cr3(struct kvm_vcpu* vcpu)
 		kvm_x86_ops.cache_reg(vcpu, VCPU_EXREG_CR3);
 	return vcpu->arch.cr3;
 }
+
+static inline u64 kvm_pdptr_read(struct kvm_vcpu* vcpu, int index)
+{
+	
+
+	if (!kvm_register_is_available(vcpu, VCPU_EXREG_PDPTR))
+		kvm_x86_ops.cache_reg(vcpu, VCPU_EXREG_PDPTR);
+
+	return vcpu->arch.walk_mmu->pdptrs[index];
+}
