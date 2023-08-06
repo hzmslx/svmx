@@ -231,19 +231,70 @@ static void kvm_resume(void) {
 		__hardware_enable_nolock();
 }
 
+static void kvm_vcpu_init(struct kvm_vcpu* vcpu, struct kvm* kvm, unsigned id) {
+	KeInitializeMutex(&vcpu->mutex, 0);
+	vcpu->cpu = -1;
+	vcpu->kvm = kvm;
+	vcpu->vcpu_id = id;
+	vcpu->pid = 0;
+	vcpu->preempted = FALSE;
+	vcpu->ready = FALSE;
+	vcpu->last_used_slot = NULL;
+	
+	sprintf_s(vcpu->stats_id, sizeof(vcpu->stats_id), "kvm-%d/vcpu-%d",
+		HandleToUlong(PsGetCurrentProcessId()), id);
+}
+
 int kvm_vm_ioctl_create_vcpu(struct kvm* kvm, u32 id) {
-	UNREFERENCED_PARAMETER(kvm);
-	UNREFERENCED_PARAMETER(id);
 	int r;
 	struct kvm_vcpu* vcpu = NULL;
+	PMDL mdl;
+	void* page = NULL;
 
+	do
+	{
+		mdl = IoAllocateMdl(NULL, sizeof(struct kvm_vcpu), FALSE, FALSE, NULL);
+		if (!mdl) {
+			r = STATUS_NO_MEMORY;
+			break;
+		}
+		vcpu = MmMapLockedPagesSpecifyCache(mdl, KernelMode,
+			MmNonCached, NULL, FALSE, NormalPagePriority);
+		if (!vcpu) {
+			r = STATUS_NO_MEMORY;
+			break;
+		}
+
+		page = ExAllocatePoolZero(NonPagedPool, PAGE_SIZE, DRIVER_TAG);
+		if (!page) {
+			r = STATUS_NO_MEMORY;
+			break;
+		}
+		vcpu->run = page;
+
+		kvm_vcpu_init(vcpu, kvm, id);
+
+
+		// 创建 vcpu 结构, 架构相关
+		r = kvm_arch_vcpu_create(vcpu);
+		if (r)
+			break;
+
+		return r;
+	} while (FALSE);
 	
 
-	// 创建 vcpu 结构, 架构相关
-	r = kvm_arch_vcpu_create(vcpu);
-
-
-	
+	if (!NT_SUCCESS(r)) {
+		if (mdl != NULL) {
+			if (vcpu != NULL) {
+				MmUnmapLockedPages(vcpu, mdl);
+			}
+			IoFreeMdl(mdl);
+		}
+		if (page != NULL) {
+			ExFreePool(page);
+		}
+	}
 
 	return r;
 }

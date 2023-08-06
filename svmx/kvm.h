@@ -1,6 +1,8 @@
 #pragma once
 #include "svmx.h"
 
+#define KVM_API_VERSION 12
+
 #pragma warning(disable:4201)
 
 #define KVM_EXIT_UNKNOWN          0
@@ -46,12 +48,7 @@
 /* Device model IOC */
 #define KVM_CREATE_IRQCHIP	CTL_CODE(KVM_DEVICE,0x807,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
-/*
-* ioctls for vcpu
-*/
 
-#define KVM_CREATE_VCPU		CTL_CODE(KVM_DEVICE,0x808,METHOD_BUFFERED,FILE_ANY_ACCESS)
-#define KVM_RUN				CTL_CODE(KVM_DEVICE,0x807,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 
 struct trace_print_flags {
@@ -146,3 +143,5 @@ struct kvm* kvm_create_vm(unsigned long type);
  * Creates some virtual cpus.  Good luck creating more than one.
  */
 int kvm_vm_ioctl_create_vcpu(struct kvm* kvm, u32 id);
+
+

@@ -22,6 +22,9 @@
     <Filter Include="util">
       <UniqueIdentifier>{ab51c76f-50a3-47fd-b91f-3cb84a800580}</UniqueIdentifier>
     </Filter>
+    <Filter Include="qom">
+      <UniqueIdentifier>{2a96fdfd-0074-4c0d-a6b5-6e258ae2ae4f}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="virt.c">
@@ -35,6 +38,9 @@
     </ClCompile>
     <ClCompile Include="module.c">
       <Filter>util</Filter>
+    </ClCompile>
+    <ClCompile Include="kvm.c">
+      <Filter>源文件</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -51,6 +57,12 @@
       <Filter>头文件</Filter>
     </ClInclude>
     <ClInclude Include="pch.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="accel.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="kvm.h">
       <Filter>头文件</Filter>
     </ClInclude>
   </ItemGroup>

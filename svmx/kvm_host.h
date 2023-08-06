@@ -128,6 +128,9 @@ enum exit_fastpath_completion {
 typedef enum exit_fastpath_completion fastpath_t;
 
 
+#define INVALID_PAGE (~(hpa_t)0)
+#define VALID_PAGE(x) ((x) != INVALID_PAGE)
+
 #define CR4_RESERVED_BITS                                               \
 	(~(unsigned long)(X86_CR4_VME | X86_CR4_PVI | X86_CR4_TSD | X86_CR4_DE\
 			  | X86_CR4_PSE | X86_CR4_PAE | X86_CR4_MCE     \
@@ -400,6 +403,10 @@ union kvm_mmu_extended_role {
 	};
 };
 
+#define KVM_MMU_NUM_PREV_ROOTS 3
+#define KVM_MMU_ROOT_INFO_INVALID \
+	((struct kvm_mmu_root_info) { .pgd = INVALID_PAGE, .hpa = INVALID_PAGE })
+
 /*
  * kvm_mmu_page_role tracks the properties of a shadow page (where shadow page
  * also includes TDP pages) to determine whether or not a page can be used in
@@ -585,6 +592,7 @@ struct kvm_mmu {
 	*/
 	u32 pkru_mask;
 
+	struct kvm_mmu_root_info prev_roots[KVM_MMU_NUM_PREV_ROOTS];
 
 	/*
 	 * Bitmap; bit set = permission fault
@@ -1011,10 +1019,12 @@ struct kvm_vcpu {
 	u64 requests;
 	unsigned long guest_debug;
 
+	KMUTEX mutex;
+
 	// 执行虚拟机对应的kvm_run结构，运行时的状态
 	struct kvm_run* run;
 
-
+	ULONG pid;
 
 	int sigset_active;
 
@@ -1028,6 +1038,7 @@ struct kvm_vcpu {
 	struct kvm_vcpu_arch arch;
 	// vcpu状态信息
 	struct kvm_vcpu_stat stat;
+	char stats_id[KVM_STATS_NAME_SIZE];
 
 	/*
 	 * The most recently used memslot by this vCPU and the slots generation
@@ -1035,7 +1046,7 @@ struct kvm_vcpu {
 	 * No wraparound protection is needed since generations won't overflow in
 	 * thousands of years, even assuming 1M memslot operations per second.
 	 */
-
+	struct kvm_memory_slot* last_used_slot;
 	u64 last_used_slot_gen;
 };
 

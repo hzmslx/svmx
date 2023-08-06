@@ -45,3 +45,5 @@ struct kvm_vcpu_stat_generic {
 	u64 halt_wait_hist[HALT_POLL_HIST_COUNT];
 	u64 blocking;
 };
+
+#define KVM_STATS_NAME_SIZE	48

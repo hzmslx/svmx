@@ -128,12 +128,24 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) 
 NTSTATUS DriverDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
 	UNREFERENCED_PARAMETER(DeviceObject);
 	NTSTATUS status = STATUS_SUCCESS;
+	ULONG len = 0;
 
-	ULONG ioctl = IoGetCurrentIrpStackLocation(Irp)->Parameters.DeviceIoControl.IoControlCode;
+	PIO_STACK_LOCATION irpStack = IoGetCurrentIrpStackLocation(Irp);
+	ULONG ioctl = irpStack->Parameters.DeviceIoControl.IoControlCode;
 	switch (ioctl)
 	{
 	case KVM_GET_API_VERSION:
-
+		if (Irp->AssociatedIrp.SystemBuffer == NULL) {
+			status = STATUS_INVALID_PARAMETER;
+			break;
+		}
+		if (irpStack->Parameters.DeviceIoControl.OutputBufferLength 
+			< sizeof(USHORT)) {
+			status = STATUS_BUFFER_TOO_SMALL;
+			break;
+		}
+		*(USHORT*)Irp->AssociatedIrp.SystemBuffer = KVM_API_VERSION;
+		len = sizeof(USHORT);
 		break;
 
 	case KVM_CREATE_VM:
@@ -163,7 +175,7 @@ NTSTATUS DriverDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
 		break;
 	}
 	Irp->IoStatus.Status = status;
-	Irp->IoStatus.Information = 0;
+	Irp->IoStatus.Information = len;
 	IoCompleteRequest(Irp, IO_NO_INCREMENT);
 	return status;
 }

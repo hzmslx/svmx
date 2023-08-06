@@ -63,6 +63,16 @@ struct kvm_page_fault {
 	bool write_fault_to_shadow_pgtable;
 };
 
+/*
+ * Unlike regular MMU roots, PAE "roots", a.k.a. PDPTEs/PDPTRs, have a PRESENT
+ * bit, and thus are guaranteed to be non-zero when valid.  And, when a guest
+ * PDPTR is !PRESENT, its corresponding PAE root cannot be set to INVALID_PAGE,
+ * as the CPU would treat that as PRESENT PDPTR with reserved bits set.  Use
+ * '0' instead of INVALID_PAGE to indicate an invalid PAE root.
+ */
+#define INVALID_PAE_ROOT	0
+#define IS_VALID_PAE_ROOT(x)	(!!(x))
+
 struct kvm_mmu_page {
 	/*
 	 * Note, "link" through "spt" fit in a single 64 byte cache line on

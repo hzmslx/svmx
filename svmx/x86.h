@@ -7,13 +7,6 @@ extern struct kvm_caps kvm_caps;
 
 void kvm_init_msr_list();
 
-
-
-static bool mmu_is_nested(struct kvm_vcpu* vcpu) {
-	UNREFERENCED_PARAMETER(vcpu);
-	return FALSE;
-}
-
 static inline bool kvm_mwait_in_guest(struct kvm* kvm)
 {
 	return kvm->arch.mwait_in_guest;
@@ -78,3 +71,11 @@ static inline bool is_paging(struct kvm_vcpu* vcpu)
 bool __kvm_is_valid_cr4(struct kvm_vcpu* vcpu, unsigned long cr4);
 
 fastpath_t handle_fastpath_set_msr_irqoff(struct kvm_vcpu* vcpu);
+
+#define MSR_IA32_CR_PAT_DEFAULT  0x0007040600070406ULL
+
+
+static inline bool mmu_is_nested(struct kvm_vcpu* vcpu)
+{
+	return vcpu->arch.walk_mmu == &vcpu->arch.nested_mmu;
+}

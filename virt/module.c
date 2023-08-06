@@ -57,3 +57,4 @@ void module_call_init(module_init_type type) {
 
 	modules_init_done[type] = true;
 }
+

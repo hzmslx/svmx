@@ -89,6 +89,8 @@ void kvm_get_segment(struct kvm_vcpu* vcpu,
 	kvm_x86_ops.get_segment(vcpu, var, seg);
 }
 
+#define KVM_MAX_MCE_BANKS 32
+
 void kvm_get_cs_db_l_bits(struct kvm_vcpu* vcpu, int* db, int* l)
 {
 	struct kvm_segment cs;
@@ -303,12 +305,25 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu* vcpu) {
 int kvm_arch_vcpu_create(struct kvm_vcpu* vcpu) {
 	int r;
 
+	vcpu->arch.last_vmentry_cpu = -1;
+	vcpu->arch.regs_avail = ~0ul;
+	vcpu->arch.regs_dirty = ~0ul;
+
+	r = kvm_mmu_create(vcpu);
+	if (r < 0)
+		return r;
+
+	vcpu->arch.mcg_cap = KVM_MAX_MCE_BANKS;
+
+	vcpu->arch.pat = MSR_IA32_CR_PAT_DEFAULT;
+
 	// ¥¥Ω®vcpu
 	r = kvm_x86_ops.vcpu_create(vcpu);
 
 	// º”‘ÿvcpu
 	vcpu_load(vcpu);
 	kvm_vcpu_reset(vcpu, FALSE);
+	kvm_init_mmu(vcpu);
 
 	return r;
 }

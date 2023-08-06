@@ -143,12 +143,15 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="kvm.c" />
     <ClCompile Include="module.c" />
     <ClCompile Include="runstate.c" />
     <ClCompile Include="virt.c" />
     <ClCompile Include="vl.c" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="accel.h" />
+    <ClInclude Include="kvm.h" />
     <ClInclude Include="module.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="queue.h" />

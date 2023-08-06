@@ -12,4 +12,5 @@ typedef enum {
     MODULE_INIT_MAX
 }module_init_type;
 
-void module_call_init(module_init_type type);
+
+

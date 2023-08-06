@@ -5,6 +5,7 @@
 #include "spte.h"
 #include "cpuid.h"
 #include "kvm_cache_regs.h"
+#include "x86.h"
 
 
 
@@ -188,6 +189,8 @@ static struct kvm_mmu_role_regs vcpu_to_role_regs(struct kvm_vcpu* vcpu) {
 
 void kvm_init_mmu(struct kvm_vcpu* vcpu) {
 	UNREFERENCED_PARAMETER(vcpu);
+
+	mmu_is_nested(vcpu);
 }
 
 void kvm_configure_mmu(bool enable_tdp, int tdp_forced_root_level,
@@ -323,10 +326,76 @@ static int fast_page_fault(struct kvm_vcpu* vcpu,
 	return RET_PF_INVALID;
 }
 
-int kvm_mmu_create(struct kvm_vcpu* vcpu) {
-	UNREFERENCED_PARAMETER(vcpu);
+static int __kvm_mmu_create(struct kvm_vcpu* vcpu, struct kvm_mmu* mmu) {
+	void* page;
+	int i;
 
-	return 0;
+	mmu->root.hpa = INVALID_PAGE;
+	mmu->root.pgd = 0;
+	for (i = 0; i < KVM_MMU_NUM_PREV_ROOTS; i++) {
+		mmu->prev_roots[i] = KVM_MMU_ROOT_INFO_INVALID;
+	}
+
+	/* vcpu->arch.guest_mmu isn't used when !tdp_enabled. */
+	if (!tdp_enabled && mmu == &vcpu->arch.guest_mmu)
+		return 0;
+
+	/*
+	 * When using PAE paging, the four PDPTEs are treated as 'root' pages,
+	 * while the PDP table is a per-vCPU construct that's allocated at MMU
+	 * creation.  When emulating 32-bit mode, cr3 is only 32 bits even on
+	 * x86_64.  Therefore we need to allocate the PDP table in the first
+	 * 4GB of memory, which happens to fit the DMA32 zone.  TDP paging
+	 * generally doesn't use PAE paging and can skip allocating the PDP
+	 * table.  The main exception, handled here, is SVM's 32-bit NPT.  The
+	 * other exception is for shadowing L1's 32-bit or PAE NPT on 64-bit
+	 * KVM; that horror is handled on-demand by mmu_alloc_special_roots().
+	 */
+	if (tdp_enabled && kvm_mmu_get_tdp_level(vcpu) > PT32E_ROOT_LEVEL)
+		return 0;
+
+	page = ExAllocatePoolZero(NonPagedPool, PAGE_SIZE, DRIVER_TAG);
+	if (!page)
+		return STATUS_NO_MEMORY;
+
+	for (i = 0; i < 4; ++i)
+		mmu->pae_root[i] = INVALID_PAE_ROOT;
+
+	return STATUS_SUCCESS;
+}
+
+static void free_mmu_pages(struct kvm_mmu* mmu) {
+	ExFreePool(mmu->pae_root);
+	ExFreePool(mmu->pml4_root);
+	ExFreePool(mmu->pml5_root);
+}
+
+int kvm_mmu_create(struct kvm_vcpu* vcpu) {
+	int ret;
+
+	vcpu->arch.mmu = &vcpu->arch.root_mmu;
+	vcpu->arch.walk_mmu = &vcpu->arch.root_mmu;
+
+	ret = __kvm_mmu_create(vcpu, &vcpu->arch.guest_mmu);
+	if (ret)
+		return ret;
+
+	bool fail_allocate_root = FALSE;
+	do
+	{
+		ret = __kvm_mmu_create(vcpu, &vcpu->arch.root_mmu);
+		if (ret) {
+			fail_allocate_root = TRUE;
+			break;
+		}
+
+		return ret;
+	} while (FALSE);
+
+	if (fail_allocate_root)
+		free_mmu_pages(&vcpu->arch.guest_mmu);
+
+	return ret;
 }
 
 static void shadow_walk_init_using_root(struct kvm_shadow_walk_iterator* iterator,
