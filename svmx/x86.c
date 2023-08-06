@@ -74,6 +74,7 @@ void kvm_enable_efer_bits(u64 mask) {
 int kvm_arch_hardware_enable(void) {
 	int ret;
 
+	// 主要设置相关寄存器和标记，使cpu进入虚拟化相关模式
 	// open the hardware feature
 	ret = kvm_x86_ops.hardware_enable();
 	if (ret != 0)
@@ -669,4 +670,10 @@ void kvm_arch_commit_memory_region(struct kvm* kvm,
 	UNREFERENCED_PARAMETER(old);
 	UNREFERENCED_PARAMETER(new);
 	UNREFERENCED_PARAMETER(change);
+}
+
+void kvm_arch_vcpu_put(struct kvm_vcpu* vcpu) {
+	
+	kvm_x86_ops.vcpu_put(vcpu);
+
 }

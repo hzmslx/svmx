@@ -33,6 +33,7 @@ int kvm_init(unsigned vcpu_size, unsigned vcpu_align){
 	NTSTATUS status = STATUS_SUCCESS;
 	
 	KeInitializeMutex(&kvm_lock, 0);
+	InitializeListHead(&vm_list);
 
 	return status;
 }
@@ -116,8 +117,6 @@ struct kvm* kvm_create_vm(unsigned long type) {
 	if (!kvm)
 		return NULL;
 
-
-
 	KVM_MMU_LOCK_INIT(kvm);
 	KeInitializeMutex(&kvm->lock, 0);
 	KeInitializeMutex(&kvm->irq_lock, 0);
@@ -134,11 +133,12 @@ struct kvm* kvm_create_vm(unsigned long type) {
 
 	NTSTATUS status;
 	// enable the hardware
-	// 硬件使能, 最终调用架构相关的 kvm_x86_ops->hardware_enable()接口
+	// 调用架构相关的kvm_x86_ops->hardware_enable()接口进行硬件使能
 	status = hardware_enable_all();
 
 	KeWaitForSingleObject(&kvm_lock, Executive, KernelMode, FALSE, NULL);
-	InsertHeadList(&kvm->vm_list, &vm_list);
+	// 将新创建的虚拟机加入KVM的虚拟机列表
+	InsertHeadList(&vm_list, &kvm->vm_list);
 	KeReleaseMutex(&kvm_lock, FALSE);
 
 	return kvm;

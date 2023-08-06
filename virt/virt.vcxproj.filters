@@ -13,13 +13,45 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
+    <Filter Include="softmmu">
+      <UniqueIdentifier>{1031d582-7ae2-4ba4-9c66-1d7bebcc63e5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="sysemu">
+      <UniqueIdentifier>{99eb954b-aa57-408d-bbd6-8cebaad86505}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="util">
+      <UniqueIdentifier>{ab51c76f-50a3-47fd-b91f-3cb84a800580}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="virt.cpp">
+    <ClCompile Include="virt.c">
       <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="vl.c">
+      <Filter>softmmu</Filter>
+    </ClCompile>
+    <ClCompile Include="runstate.c">
+      <Filter>softmmu</Filter>
+    </ClCompile>
+    <ClCompile Include="module.c">
+      <Filter>util</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <None Include="packages.config" />
+    <Natvis Include="$(MSBuildThisFileDirectory)..\..\natvis\wil.natvis" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="sysemu.h">
+      <Filter>sysemu</Filter>
+    </ClInclude>
+    <ClInclude Include="module.h">
+      <Filter>util</Filter>
+    </ClInclude>
+    <ClInclude Include="queue.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="pch.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

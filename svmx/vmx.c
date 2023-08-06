@@ -633,10 +633,10 @@ static void vmx_vcpu_load(struct kvm_vcpu* vcpu, int cpu) {
 
 }
 
-static void vmx_vcpu_put(struct kvm_vcpu* vcpu,int cpu) {
-	// struct vcpu_vmx* vmx = to_vmx(vcpu);
+static void vmx_vcpu_put(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
 
-	vmx_vcpu_load_vmcs(vcpu, cpu, NULL);
+	
 }
 
 static int vmx_vcpu_pre_run(struct kvm_vcpu* vcpu) {

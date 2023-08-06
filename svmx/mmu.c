@@ -389,3 +389,26 @@ int kvm_mmu_page_fault(struct kvm_vcpu* vcpu, gpa_t cr2_or_gpa, u64 error_code,
 
 	return 0;
 }
+
+static int mmu_set_spte(struct kvm_vcpu* vcpu, struct kvm_memory_slot* slot,
+	u64* sptep, unsigned int pte_access, gfn_t gfn,
+	kvm_pfn_t pfn, struct kvm_page_fault* fault) {
+	UNREFERENCED_PARAMETER(vcpu);
+	UNREFERENCED_PARAMETER(slot);
+	UNREFERENCED_PARAMETER(sptep);
+	UNREFERENCED_PARAMETER(pte_access);
+	UNREFERENCED_PARAMETER(gfn);
+	UNREFERENCED_PARAMETER(pfn);
+	UNREFERENCED_PARAMETER(fault);
+
+	return 0;
+}
+
+static void link_shadow_page(struct kvm_vcpu* vcpu, u64* sptep,
+	struct kvm_mmu_page* sp) {
+	UNREFERENCED_PARAMETER(vcpu);
+	UNREFERENCED_PARAMETER(sptep);
+	UNREFERENCED_PARAMETER(sp);
+	
+}
+

@@ -1065,7 +1065,7 @@ struct kvm_x86_ops {
 
 	void (*prepare_switch_to_guest)(struct kvm_vcpu* vcpu);
 	void (*vcpu_load)(struct kvm_vcpu* vcpu, int cpu);
-	void (*vcpu_put)(struct kvm_vcpu* vcpu,int cpu);
+	void (*vcpu_put)(struct kvm_vcpu* vcpu);
 
 	void (*update_exception_bitmap)(struct kvm_vcpu* vcpu);
 	int (*get_msr)(struct kvm_vcpu* vcpu, struct msr_data* msr);
@@ -1649,3 +1649,5 @@ int kvm_mmu_create(struct kvm_vcpu* vcpu);
 
 int kvm_mmu_page_fault(struct kvm_vcpu* vcpu, gpa_t cr2_or_gpa, u64 error_code,
 	void* insn, int insn_len);
+
+void kvm_arch_vcpu_put(struct kvm_vcpu* vcpu);
