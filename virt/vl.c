@@ -1,7 +1,6 @@
 #include "pch.h"
+#include "kvm.h"
 
 void virt_init(int argc, char* argv[]) {
-
-	virt_init_subsystems();
-
+	kvm_init();
 }

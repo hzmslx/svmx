@@ -370,6 +370,7 @@ enum pmc_type {
 
 
 
+
 /*
  * kvm_mmu_extended_role complements kvm_mmu_page_role, tracking properties
  * relevant to the current MMU configuration.   When loading CR0, CR4, or EFER,
@@ -480,6 +481,7 @@ union kvm_cpu_role {
 		union kvm_mmu_extended_role ext;
 	};
 };
+
 
 struct kvm_pmc {
 	enum pmc_type type;
@@ -994,6 +996,9 @@ struct kvm_vcpu_arch {
 	 */
 	bool pdptrs_from_userspace;
 };
+
+void vcpu_put(struct kvm_vcpu* vcpu);
+
 
 static inline
 struct kvm_memory_slot* id_to_memslot(struct kvm_memslots* slots, int id)

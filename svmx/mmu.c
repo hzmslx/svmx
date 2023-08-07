@@ -6,6 +6,8 @@
 #include "cpuid.h"
 #include "kvm_cache_regs.h"
 #include "x86.h"
+#include "kvm_host.h"
+#include "smm.h"
 
 
 
@@ -187,11 +189,30 @@ static struct kvm_mmu_role_regs vcpu_to_role_regs(struct kvm_vcpu* vcpu) {
 	return regs;
 }
 
-void kvm_init_mmu(struct kvm_vcpu* vcpu) {
-	UNREFERENCED_PARAMETER(vcpu);
+static union kvm_cpu_role kvm_calc_cpu_role(struct kvm_vcpu* vcpu,
+	const struct kvm_mmu_role_regs* regs) {
+	UNREFERENCED_PARAMETER(regs);
+	union kvm_cpu_role role = { 0 };
 
-	mmu_is_nested(vcpu);
+	role.base.access = ACC_ALL;
+	role.base.smm = is_smm(vcpu);
+
+	return role;
 }
+
+static void init_kvm_nested_mmu(struct kvm_vcpu* vcpu,
+	union kvm_cpu_role new_mode) {
+	UNREFERENCED_PARAMETER(vcpu);
+	UNREFERENCED_PARAMETER(new_mode);
+}
+
+static void init_kvm_softmmu(struct kvm_vcpu* vcpu,
+	union kvm_cpu_role cpu_role) {
+	UNREFERENCED_PARAMETER(vcpu);
+	UNREFERENCED_PARAMETER(cpu_role);
+}
+
+
 
 void kvm_configure_mmu(bool enable_tdp, int tdp_forced_root_level,
 	int tdp_max_root_level, int tdp_huge_page_level) {
@@ -293,6 +314,18 @@ static void init_kvm_tdp_mmu(struct kvm_vcpu* vcpu,
 	if (!is_cr0_pg(context))
 		context->gva_to_gpa = nonpaging_gva_to_gpa;
 
+}
+
+void kvm_init_mmu(struct kvm_vcpu* vcpu) {
+	struct kvm_mmu_role_regs regs = vcpu_to_role_regs(vcpu);
+	union kvm_cpu_role cpu_role = kvm_calc_cpu_role(vcpu, &regs);
+
+	if (mmu_is_nested(vcpu))
+		init_kvm_nested_mmu(vcpu, cpu_role);
+	else if (tdp_enabled)
+		init_kvm_tdp_mmu(vcpu, cpu_role);
+	else
+		init_kvm_softmmu(vcpu, cpu_role);
 }
 
 static int direct_page_fault(struct kvm_vcpu* vcpu, 
