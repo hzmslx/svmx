@@ -241,8 +241,7 @@ static void kvm_vcpu_init(struct kvm_vcpu* vcpu, struct kvm* kvm, unsigned id) {
 	vcpu->ready = FALSE;
 	vcpu->last_used_slot = NULL;
 	
-	sprintf_s(vcpu->stats_id, sizeof(vcpu->stats_id), "kvm-%d/vcpu-%d",
-		HandleToUlong(PsGetCurrentProcessId()), id);
+	sprintf_s(vcpu->stats_id, sizeof(vcpu->stats_id), "vcpu-%d",id);
 }
 
 int kvm_vm_ioctl_create_vcpu(struct kvm* kvm, u32 id) {

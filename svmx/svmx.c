@@ -168,8 +168,16 @@ NTSTATUS DriverDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
 
 	// kvm_vm_ioctl
 	case KVM_CREATE_VCPU:
-		status = kvm_vm_ioctl_create_vcpu(NULL, 0);
+	{
+		ULONG count = KeQueryActiveProcessorCount(0);
+		for(ULONG cpu =0;cpu<count;++cpu){
+			status = kvm_vm_ioctl_create_vcpu(NULL, cpu);
+			if (!NT_SUCCESS(status))
+				break;
+		}
+		
 		break;
+	}
 	default:
 
 		break;

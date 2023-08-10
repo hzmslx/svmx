@@ -1,7 +1,7 @@
 #pragma once
 #include "svmx.h"
 
-#define KVM_API_VERSION 12
+#define KVM_API_VERSION 1
 
 #pragma warning(disable:4201)
 

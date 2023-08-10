@@ -44,7 +44,7 @@ struct vmcs_controls_shadow {
  * loaded on this CPU (so we can clear them if the CPU goes down).
  */
 struct loaded_vmcs {
-	struct vmcs* vmcs; // 本vcpu对应的VMCS
+	struct vmcs* vmcs; // vcpu对应的VMCS
 	struct vmcs* shadow_vmcs;
 	int cpu; // 上一次运行的cpu编号
 	bool launched; // 是否被这个cpu加载

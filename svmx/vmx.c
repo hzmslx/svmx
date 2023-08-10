@@ -571,6 +571,8 @@ static NTSTATUS vmx_vcpu_create(struct kvm_vcpu* vcpu) {
 	// 需要4K对齐
 	/* vmcs 的分配 */
 	status = alloc_loaded_vmcs(&vmx->vmcs01);
+	if (!NT_SUCCESS(status))
+		return status;
 
 	vmx->loaded_vmcs = &vmx->vmcs01;
 
@@ -1889,7 +1891,7 @@ void vmx_vcpu_load_vmcs(struct kvm_vcpu* vcpu, int cpu,
 		// 清理当前vcpu使用的vmcs,强制初始化为inactive状态
 		loaded_vmcs_clear(vmx->loaded_vmcs);
 		// 添加到新cpu的loaded_vmcs链表
-		PLIST_ENTRY pEntry = &loaded_vmcss_on_cpu[KeGetCurrentProcessorNumber()];
+		PLIST_ENTRY pEntry = &loaded_vmcss_on_cpu[cpu];
 		InsertHeadList(&vmx->loaded_vmcs->loaded_vmcss_on_cpu_link,
 			pEntry);
 	}

@@ -391,6 +391,8 @@ static int __kvm_mmu_create(struct kvm_vcpu* vcpu, struct kvm_mmu* mmu) {
 	if (!page)
 		return STATUS_NO_MEMORY;
 
+	mmu->pae_root = page;
+
 	for (i = 0; i < 4; ++i)
 		mmu->pae_root[i] = INVALID_PAE_ROOT;
 
