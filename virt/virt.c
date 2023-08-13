@@ -18,7 +18,7 @@ int wmain(int argc,char* argv[]){
     auto const cmd = argv[1];
     
     virt_init(argc, argv);
-
+    system("pause");
     return 0;
 }
 

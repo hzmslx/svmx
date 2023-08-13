@@ -21,9 +21,7 @@
 static inline bool kvm_register_is_available(struct kvm_vcpu* vcpu,
 	enum kvm_reg reg)
 {
-	UNREFERENCED_PARAMETER(vcpu);
-	UNREFERENCED_PARAMETER(reg);
-	return FALSE;
+	return _bittest((LONG*)&vcpu->arch.regs_avail, reg);
 }
 
 static inline bool is_guest_mode(struct kvm_vcpu* vcpu)
@@ -85,4 +83,15 @@ static inline u64 kvm_pdptr_read(struct kvm_vcpu* vcpu, int index)
 		kvm_x86_ops.cache_reg(vcpu, VCPU_EXREG_PDPTR);
 
 	return vcpu->arch.walk_mmu->pdptrs[index];
+}
+
+static inline void kvm_register_mark_available(struct kvm_vcpu* vcpu,
+	enum kvm_reg reg) {
+	BitTestAndSet((LONG*)&vcpu->arch.regs_avail, reg);
+}
+
+static inline bool kvm_register_is_dirty(struct kvm_vcpu* vcpu,
+	enum kvm_reg reg)
+{
+	return _bittest((LONG*)&vcpu->arch.regs_dirty, reg);
 }

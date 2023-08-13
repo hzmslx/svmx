@@ -65,6 +65,19 @@ static inline bool cpu_has_vmx_tpr_shadow(void)
 	return vmcs_config.cpu_based_exec_ctrl & CPU_BASED_TPR_SHADOW;
 }
 
+/*
+ * Processor Trace can operate in one of three modes:
+ *  a. system-wide: trace both host/guest and output to host buffer
+ *  b. host-only:   only trace host and output to host buffer
+ *  c. host-guest:  trace host and guest simultaneously and output to their
+ *                  respective buffer
+ *
+ * KVM currently only supports (a) and (c).
+ */
+static inline bool vmx_pt_mode_is_system(void)
+{
+	return pt_mode == PT_MODE_SYSTEM;
+}
 static bool vmx_pt_mode_is_host_guest(void) {
 	return pt_mode == PT_MODE_HOST_GUEST;
 }
@@ -94,3 +107,4 @@ static inline bool cpu_has_vmx_ept_ad_bits(void)
 {
 	return vmx_capability.ept & VMX_EPT_AD_BIT;
 }
+

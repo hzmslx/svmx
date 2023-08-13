@@ -264,7 +264,7 @@ int kvm_vm_ioctl_create_vcpu(struct kvm* kvm, u32 id) {
 			break;
 		}
 
-		page = ExAllocatePoolZero(NonPagedPool, PAGE_SIZE, DRIVER_TAG);
+		page = ExAllocatePoolWithTag(NonPagedPool, PAGE_SIZE, DRIVER_TAG);
 		if (!page) {
 			r = STATUS_NO_MEMORY;
 			break;
@@ -299,7 +299,7 @@ int kvm_vm_ioctl_create_vcpu(struct kvm* kvm, u32 id) {
 }
 
 void vcpu_load(struct kvm_vcpu* vcpu) {
-	int cpu = KeGetCurrentProcessorNumber();
+	int cpu = vcpu->vcpu_id;
 	kvm_arch_vcpu_load(vcpu, cpu);
 }
 

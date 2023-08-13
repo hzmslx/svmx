@@ -50,3 +50,9 @@ int kvm_lapic_find_highest_irr(struct kvm_vcpu* vcpu)
 	 */
 	return apic_find_highest_irr(vcpu->arch.apic);
 }
+
+int kvm_create_lapic(struct kvm_vcpu* vcpu, int timer_advance_ns) {
+	UNREFERENCED_PARAMETER(vcpu);
+	UNREFERENCED_PARAMETER(timer_advance_ns);
+	return 0;
+}

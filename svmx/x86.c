@@ -271,13 +271,14 @@ static int vcpu_run(struct kvm_vcpu* vcpu) {
 		vcpu->arch.at_instruction_boundary = FALSE;
 		// 判断vcpu 状态
 		if (kvm_vcpu_running(vcpu)) {
-			// 进入guest模式
+			// vcpu进入guest模式
 			r = vcpu_enter_guest(vcpu);
 		}
 		else {
 			r = vcpu_block(vcpu);
 		}
 
+		// 只有运行异常的时候才退出循环
 		if (r <= 0)
 			break;
 	}
@@ -488,6 +489,9 @@ void kvm_vcpu_reset(struct kvm_vcpu* vcpu, bool init_event) {
 	unsigned long old_cr0 = kvm_read_cr0(vcpu);
 	unsigned long new_cr0;
 
+	vcpu->arch.dr7 = DR7_FIXED_1;
+	kvm_update_dr7(vcpu);
+
 	/*
 	* CR0.CD/NW are set on RESET, preserved on INIT.  Note, some versions
 	* of Intel's SDM list CD/NW as being set on INIT, but they contradict
@@ -499,6 +503,7 @@ void kvm_vcpu_reset(struct kvm_vcpu* vcpu, bool init_event) {
 	else
 		new_cr0 |= X86_CR0_NW | X86_CR0_CD;
 	new_cr0 = X86_CR0_ET;
+
 	kvm_x86_ops.set_cr0(vcpu, new_cr0);
 	kvm_x86_ops.set_cr4(vcpu, 0);
 	kvm_x86_ops.set_efer(vcpu, 0);
@@ -692,4 +697,32 @@ void kvm_arch_vcpu_put(struct kvm_vcpu* vcpu) {
 	
 	kvm_x86_ops.vcpu_put(vcpu);
 
+}
+
+void kvm_arch_vcpu_postcreate(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+}
+
+int x86_emulate_instruction(struct kvm_vcpu* vcpu, gpa_t cr2_or_gpa,
+	int emulation_type, void* insn, int insn_len) {
+	UNREFERENCED_PARAMETER(vcpu);
+	UNREFERENCED_PARAMETER(cr2_or_gpa);
+	UNREFERENCED_PARAMETER(emulation_type);
+	UNREFERENCED_PARAMETER(insn);
+	UNREFERENCED_PARAMETER(insn_len);
+	return 0;
+}
+
+void kvm_update_dr7(struct kvm_vcpu* vcpu) {
+	unsigned long dr7;
+
+	if (vcpu->guest_debug & KVM_GUESTDBG_USE_HW_BP)
+		dr7 = vcpu->arch.guest_debug_dr7;
+	else
+		dr7 = vcpu->arch.dr7;
+
+	kvm_x86_ops.set_dr7(vcpu, dr7);
+	vcpu->arch.switch_db_regs &= ~KVM_DEBUGREG_BP_ENABLED;
+	if (dr7 & DR7_BP_EN_MASK)
+		vcpu->arch.switch_db_regs |= KVM_DEBUGREG_BP_ENABLED;
 }

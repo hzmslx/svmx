@@ -45,3 +45,5 @@ static inline u32 kvm_lapic_get_reg(struct kvm_lapic* apic, int reg_off)
 
 u64 kvm_lapic_get_cr8(struct kvm_vcpu* vcpu);
 int kvm_lapic_find_highest_irr(struct kvm_vcpu* vcpu);
+// ≥ı ºªØlapic
+int kvm_create_lapic(struct kvm_vcpu* vcpu, int timer_advance_ns);

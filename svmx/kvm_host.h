@@ -5,10 +5,10 @@
 #include "processor-flags.h"
 #include "desc_defs.h"
 #include "kvm_emulate.h"
-#include "mmu_internal.h"
 #include "lapic.h"
 #include "types.h"
 #include "kvm_page_track.h"
+#include "pgtable_types.h"
 
 
 #define KVM_GUEST_CR0_MASK_UNRESTRICTED_GUEST				\
@@ -25,8 +25,10 @@
 #define KVM_RMODE_VM_CR4_ALWAYS_ON (X86_CR4_VME | X86_CR4_PAE | X86_CR4_VMXE)
 
 /* KVM Hugepage definitions for x86 */
-#define KVM_NR_PAGE_SIZES	3
-#define KVM_HPAGE_SHIFT(x)	(PAGE_SHIFT + (((x) - 1) * 9))
+#define KVM_MAX_HUGEPAGE_LEVEL	PG_LEVEL_1G
+#define KVM_NR_PAGE_SIZES	(KVM_MAX_HUGEPAGE_LEVEL - PG_LEVEL_4K + 1)
+#define KVM_HPAGE_GFN_SHIFT(x)	(((x) - 1) * 9)
+#define KVM_HPAGE_SHIFT(x)	(PAGE_SHIFT + KVM_HPAGE_GFN_SHIFT(x))
 #define KVM_HPAGE_SIZE(x)	(1UL << KVM_HPAGE_SHIFT(x))
 #define KVM_HPAGE_MASK(x)	(~(KVM_HPAGE_SIZE(x) - 1))
 #define KVM_PAGES_PER_HPAGE(x)	(KVM_HPAGE_SIZE(x) / PAGE_SIZE)
@@ -138,6 +140,9 @@ typedef enum exit_fastpath_completion fastpath_t;
 			  | X86_CR4_OSXSAVE | X86_CR4_SMEP | X86_CR4_FSGSBASE \
 			  | X86_CR4_OSXMMEXCPT | X86_CR4_LA57 | X86_CR4_VMXE \
 			  | X86_CR4_SMAP | X86_CR4_PKE | X86_CR4_UMIP))
+
+
+
 
 #define KVM_NR_DB_REGS	4
 
@@ -279,6 +284,7 @@ enum vcpu_sysreg {
 
 	NR_SYS_REGS	/* Nothing after this line! */
 };
+
 
 enum {
 	// host 模式
@@ -565,6 +571,137 @@ struct kvm_mmu_root_info {
 	hpa_t hpa;
 };
 
+struct kvm_mmu_page {
+	/*
+	 * Note, "link" through "spt" fit in a single 64 byte cache line on
+	 * 64-bit kernels, keep it that way unless there's a reason not to.
+	 */
+
+
+	bool tdp_mmu_page;
+	bool unsync;
+	u8 mmu_valid_gen;
+
+	/*
+	 * The shadow page can't be replaced by an equivalent huge page
+	 * because it is being used to map an executable page in the guest
+	 * and the NX huge page mitigation is enabled.
+	 */
+	bool nx_huge_page_disallowed;
+
+	/*
+	 * The following two entries are used to key the shadow page in the
+	 * hash table.
+	 */
+
+	gfn_t gfn;
+
+	u64* spt;
+
+	/*
+	 * Stores the result of the guest translation being shadowed by each
+	 * SPTE.  KVM shadows two types of guest translations: nGPA -> GPA
+	 * (shadow EPT/NPT) and GVA -> GPA (traditional shadow paging). In both
+	 * cases the result of the translation is a GPA and a set of access
+	 * constraints.
+	 *
+	 * The GFN is stored in the upper bits (PAGE_SHIFT) and the shadowed
+	 * access permissions are stored in the lower bits. Note, for
+	 * convenience and uniformity across guests, the access permissions are
+	 * stored in KVM format (e.g.  ACC_EXEC_MASK) not the raw guest format.
+	 */
+	u64* shadowed_translation;
+
+	/* Currently serving as active root */
+
+	unsigned int unsync_children;
+
+
+	/*
+	 * Tracks shadow pages that, if zapped, would allow KVM to create an NX
+	 * huge page.  A shadow page will have nx_huge_page_disallowed set but
+	 * not be on the list if a huge page is disallowed for other reasons,
+	 * e.g. because KVM is shadowing a PTE at the same gfn, the memslot
+	 * isn't properly aligned, etc...
+	 */
+
+#ifndef AMD64
+	 /*
+	  * Used out of the mmu-lock to avoid reading spte values while an
+	  * update is in progress; see the comments in __get_spte_lockless().
+	  */
+	int clear_spte_count;
+#endif
+
+	/* Number of writes since the last time traversal visited this page.  */
+	// atomic_t write_flooding_count;
+
+#ifdef AMD64
+	/* Used for freeing the page asynchronously if it is a TDP MMU page. */
+	
+#endif
+};
+
+struct kvm_page_fault {
+	/* arguments to kvm_mmu_do_page_fault.  */
+	const gpa_t addr;
+	const u32 error_code;
+	const bool prefetch;
+
+	/* Derived from error_code.  */
+	const bool exec;
+	const bool write;
+	const bool present;
+	const bool rsvd;
+	const bool user;
+
+	/* Derived from mmu and global state.  */
+	const bool is_tdp;
+	const bool nx_huge_page_workaround_enabled;
+
+	/*
+	 * Whether a >4KB mapping can be created or is forbidden due to NX
+	 * hugepages.
+	 */
+	bool huge_page_disallowed;
+
+	/*
+	 * Maximum page size that can be created for this fault; input to
+	 * FNAME(fetch), direct_map() and kvm_tdp_mmu_map().
+	 */
+	u8 max_level;
+
+	/*
+	 * Page size that can be created based on the max_level and the
+	 * page size used by the host mapping.
+	 */
+	u8 req_level;
+
+	/*
+	 * Page size that will be created based on the req_level and
+	 * huge_page_disallowed.
+	 */
+	u8 goal_level;
+
+	/* Shifted addr, or result of guest page table walk if addr is a gva.  */
+	gfn_t gfn;
+
+	/* The memslot containing gfn. May be NULL. */
+	struct kvm_memory_slot* slot;
+
+	/* Outputs of kvm_faultin_pfn.  */
+	unsigned long mmu_seq;
+	// kvm_pfn_t pfn;
+	hva_t hva;
+	bool map_writable;
+
+	/*
+	 * Indicates the guest is trying to write a gfn that contains one or
+	 * more of the PTEs used to translate the write itself, i.e. the access
+	 * is changing its own translation in the guest page tables.
+	 */
+	bool write_fault_to_shadow_pgtable;
+};
 
 /*
  * x86 supports 4 paging modes (5-level 64-bit, 4-level 64-bit, 3-level 32-bit,
@@ -765,7 +902,7 @@ struct kvm_vcpu_arch {
 	 * the paging mode of the l1 guest. This context is always used to
 	 * handle faults.
 	 */
-	// 直接操作函数
+	// 内存管理直接操作函数
 	struct kvm_mmu* mmu;
 
 	/* Non-nested MMU for L1 */
@@ -1060,6 +1197,7 @@ enum {
 	KVM_DEBUGREG_WONT_EXIT = 2,
 };
 
+// 针对不同硬件架构
 struct kvm_x86_ops {
 	NTSTATUS (*check_processor_compatibility)(void);
 
@@ -1501,7 +1639,7 @@ struct kvm {
 	/* The two memslot sets - active and inactive (per address space) */
 	struct kvm_memslots __memslots[KVM_ADDRESS_SPACE_NUM][2];
 	/* The current active memslot set for each address space */
-	struct kvm_memslots* memslots[KVM_ADDRESS_SPACE_NUM];
+	struct kvm_memslots* memslots[KVM_ADDRESS_SPACE_NUM];/* 模拟的内存条模型 */
 	/*
 	 * Protected by slots_lock, but can be read outside if an
 	 * incorrect answer is acceptable.
@@ -1532,7 +1670,7 @@ struct kvm {
 
 	KMUTEX lock;
 
-	// host 上 arch 的一些参数
+	// host arch 的一些参数
 	struct kvm_arch arch;
 
 
@@ -1599,7 +1737,7 @@ NTSTATUS kvm_x86_vendor_init(struct kvm_x86_init_ops* ops);
 void kvm_x86_vendor_exit(void);
 
 static struct kvm* kvm_arch_alloc_vm(void) {
-	return ExAllocatePoolZero(PagedPool, kvm_x86_ops.vm_size, DRIVER_TAG);
+	return ExAllocatePoolWithTag(NonPagedPool, kvm_x86_ops.vm_size, DRIVER_TAG);
 }
 
 void kvm_arch_hardware_disable(void);
@@ -1661,9 +1799,81 @@ __gfn_to_hva_memslot(const struct kvm_memory_slot* slot, gfn_t gfn)
 	return slot->userspace_addr + offset * PAGE_SIZE;
 }
 
+// 初始化MMU的函数
 int kvm_mmu_create(struct kvm_vcpu* vcpu);
 
 int kvm_mmu_page_fault(struct kvm_vcpu* vcpu, gpa_t cr2_or_gpa, u64 error_code,
 	void* insn, int insn_len);
 
 void kvm_arch_vcpu_put(struct kvm_vcpu* vcpu);
+void kvm_arch_vcpu_postcreate(struct kvm_vcpu* vcpu);
+
+/*
+ * EMULTYPE_NO_DECODE - Set when re-emulating an instruction (after completing
+ *			userspace I/O) to indicate that the emulation context
+ *			should be reused as is, i.e. skip initialization of
+ *			emulation context, instruction fetch and decode.
+ *
+ * EMULTYPE_TRAP_UD - Set when emulating an intercepted #UD from hardware.
+ *		      Indicates that only select instructions (tagged with
+ *		      EmulateOnUD) should be emulated (to minimize the emulator
+ *		      attack surface).  See also EMULTYPE_TRAP_UD_FORCED.
+ *
+ * EMULTYPE_SKIP - Set when emulating solely to skip an instruction, i.e. to
+ *		   decode the instruction length.  For use *only* by
+ *		   kvm_x86_ops.skip_emulated_instruction() implementations if
+ *		   EMULTYPE_COMPLETE_USER_EXIT is not set.
+ *
+ * EMULTYPE_ALLOW_RETRY_PF - Set when the emulator should resume the guest to
+ *			     retry native execution under certain conditions,
+ *			     Can only be set in conjunction with EMULTYPE_PF.
+ *
+ * EMULTYPE_TRAP_UD_FORCED - Set when emulating an intercepted #UD that was
+ *			     triggered by KVM's magic "force emulation" prefix,
+ *			     which is opt in via module param (off by default).
+ *			     Bypasses EmulateOnUD restriction despite emulating
+ *			     due to an intercepted #UD (see EMULTYPE_TRAP_UD).
+ *			     Used to test the full emulator from userspace.
+ *
+ * EMULTYPE_VMWARE_GP - Set when emulating an intercepted #GP for VMware
+ *			backdoor emulation, which is opt in via module param.
+ *			VMware backdoor emulation handles select instructions
+ *			and reinjects the #GP for all other cases.
+ *
+ * EMULTYPE_PF - Set when emulating MMIO by way of an intercepted #PF, in which
+ *		 case the CR2/GPA value pass on the stack is valid.
+ *
+ * EMULTYPE_COMPLETE_USER_EXIT - Set when the emulator should update interruptibility
+ *				 state and inject single-step #DBs after skipping
+ *				 an instruction (after completing userspace I/O).
+ *
+ * EMULTYPE_WRITE_PF_TO_SP - Set when emulating an intercepted page fault that
+ *			     is attempting to write a gfn that contains one or
+ *			     more of the PTEs used to translate the write itself,
+ *			     and the owning page table is being shadowed by KVM.
+ *			     If emulation of the faulting instruction fails and
+ *			     this flag is set, KVM will exit to userspace instead
+ *			     of retrying emulation as KVM cannot make forward
+ *			     progress.
+ *
+ *			     If emulation fails for a write to guest page tables,
+ *			     KVM unprotects (zaps) the shadow page for the target
+ *			     gfn and resumes the guest to retry the non-emulatable
+ *			     instruction (on hardware).  Unprotecting the gfn
+ *			     doesn't allow forward progress for a self-changing
+ *			     access because doing so also zaps the translation for
+ *			     the gfn, i.e. retrying the instruction will hit a
+ *			     !PRESENT fault, which results in a new shadow page
+ *			     and sends KVM back to square one.
+ */
+#define EMULTYPE_NO_DECODE	    (1 << 0)
+#define EMULTYPE_TRAP_UD	    (1 << 1)
+#define EMULTYPE_SKIP		    (1 << 2)
+#define EMULTYPE_ALLOW_RETRY_PF	    (1 << 3)
+#define EMULTYPE_TRAP_UD_FORCED	    (1 << 4)
+#define EMULTYPE_VMWARE_GP	    (1 << 5)
+#define EMULTYPE_PF		    (1 << 6)
+#define EMULTYPE_COMPLETE_USER_EXIT (1 << 7)
+#define EMULTYPE_WRITE_PF_TO_SP	    (1 << 8)
+
+void kvm_update_dr7(struct kvm_vcpu* vcpu);

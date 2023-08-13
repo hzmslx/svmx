@@ -36,3 +36,14 @@ static inline bool nested_cr4_valid(struct kvm_vcpu* vcpu, unsigned long val)
 
 void recalc_intercepts(struct vcpu_svm* svm);
 int vmx_get_vmx_msr(struct nested_vmx_msrs* msrs, u32 msr_index, u64* pdata);
+
+static inline u64 nested_ept_get_eptp(struct kvm_vcpu* vcpu)
+{
+	/* return the page table to be shadowed - in our case, EPT12 */
+	return get_vmcs12(vcpu)->ept_pointer;
+}
+
+static inline bool nested_ept_ad_enabled(struct kvm_vcpu* vcpu)
+{
+	return nested_ept_get_eptp(vcpu) & VMX_EPTP_AD_ENABLE_BIT;
+}

@@ -373,6 +373,11 @@ enum vmcs_field {
 #define INTR_TYPE_SOFT_EXCEPTION	(6 << 8) /* software exception */
 
 
+/* GUEST_ACTIVITY_STATE flags */
+#define GUEST_ACTIVITY_ACTIVE		0
+#define GUEST_ACTIVITY_HLT		1
+#define GUEST_ACTIVITY_SHUTDOWN		2
+#define GUEST_ACTIVITY_WAIT_SIPI	3
 
  /*
   * Definitions of Secondary Processor-Based VM-Execution Controls.
@@ -423,6 +428,7 @@ enum vmcs_field {
 #define VM_EXIT_CLEAR_BNDCFGS                   0x00800000
 #define VM_EXIT_PT_CONCEAL_PIP			0x01000000
 #define VM_EXIT_CLEAR_IA32_RTIT_CTL		0x02000000
+
 
 #define VM_EXIT_ALWAYSON_WITHOUT_TRUE_MSR	0x00036dff
 
@@ -498,11 +504,34 @@ enum vmx_l1d_flush_state {
 	VMENTER_L1D_FLUSH_NOT_REQUIRED,
 };
 
+
+
+
 #define VMX_VPID_INVVPID_BIT                    (1ull << 0) /* (32 - 32) */
 #define VMX_VPID_EXTENT_INDIVIDUAL_ADDR_BIT     (1ull << 8) /* (40 - 32) */
 #define VMX_VPID_EXTENT_SINGLE_CONTEXT_BIT      (1ull << 9) /* (41 - 32) */
 #define VMX_VPID_EXTENT_GLOBAL_CONTEXT_BIT      (1ull << 10) /* (42 - 32) */
 #define VMX_VPID_EXTENT_SINGLE_NON_GLOBAL_BIT   (1ull << 11) /* (43 - 32) */
+
+#define VMX_EPT_MT_EPTE_SHIFT			3
+#define VMX_EPTP_PWL_MASK			0x38ull
+#define VMX_EPTP_PWL_4				0x18ull
+#define VMX_EPTP_PWL_5				0x20ull
+#define VMX_EPTP_AD_ENABLE_BIT			(1ull << 6)
+#define VMX_EPTP_MT_MASK			0x7ull
+#define VMX_EPTP_MT_WB				0x6ull
+#define VMX_EPTP_MT_UC				0x0ull
+#define VMX_EPT_READABLE_MASK			0x1ull
+#define VMX_EPT_WRITABLE_MASK			0x2ull
+#define VMX_EPT_EXECUTABLE_MASK			0x4ull
+#define VMX_EPT_IPAT_BIT    			(1ull << 6)
+#define VMX_EPT_ACCESS_BIT			(1ull << 8)
+#define VMX_EPT_DIRTY_BIT			(1ull << 9)
+#define VMX_EPT_RWX_MASK                        (VMX_EPT_READABLE_MASK |       \
+						 VMX_EPT_WRITABLE_MASK |       \
+						 VMX_EPT_EXECUTABLE_MASK)
+#define VMX_EPT_MT_MASK				(7ull << VMX_EPT_MT_EPTE_SHIFT)
+
 
 #define __KVM_REQUIRED_VMX_CPU_BASED_VM_EXEC_CONTROL			\
 	(CPU_BASED_HLT_EXITING |					\
@@ -632,6 +661,31 @@ enum vmx_l1d_flush_state {
 #define VMX_MISC_ACTIVITY_WAIT_SIPI		0x00000100
 #define VMX_MISC_ZERO_LEN_INS			0x40000000
 #define VMX_MISC_MSR_LIST_MULTIPLIER		512
+
+#define VMX_EPT_RWX_MASK                        (VMX_EPT_READABLE_MASK |       \
+						 VMX_EPT_WRITABLE_MASK |       \
+						 VMX_EPT_EXECUTABLE_MASK)
+
+/*
+ * Exit Qualifications for EPT Violations
+ */
+#define EPT_VIOLATION_ACC_READ_BIT	0
+#define EPT_VIOLATION_ACC_WRITE_BIT	1
+#define EPT_VIOLATION_ACC_INSTR_BIT	2
+#define EPT_VIOLATION_RWX_SHIFT		3
+#define EPT_VIOLATION_GVA_IS_VALID_BIT	7
+#define EPT_VIOLATION_GVA_TRANSLATED_BIT 8
+#define EPT_VIOLATION_ACC_READ		(1 << EPT_VIOLATION_ACC_READ_BIT)
+#define EPT_VIOLATION_ACC_WRITE		(1 << EPT_VIOLATION_ACC_WRITE_BIT)
+#define EPT_VIOLATION_ACC_INSTR		(1 << EPT_VIOLATION_ACC_INSTR_BIT)
+#define EPT_VIOLATION_RWX_MASK		(VMX_EPT_RWX_MASK << EPT_VIOLATION_RWX_SHIFT)
+#define EPT_VIOLATION_GVA_IS_VALID	(1 << EPT_VIOLATION_GVA_IS_VALID_BIT)
+#define EPT_VIOLATION_GVA_TRANSLATED	(1 << EPT_VIOLATION_GVA_TRANSLATED_BIT)
+
+ /*
+  * Exit Qualifications for NOTIFY VM EXIT
+  */
+#define NOTIFY_VM_CONTEXT_INVALID     BIT(0)
 
 struct vmx_uret_msr {
 	bool load_into_hardware;
@@ -1144,6 +1198,7 @@ BUILD_CONTROLS_SHADOW(exec, CPU_BASED_VM_EXEC_CONTROL, 32)
 BUILD_CONTROLS_SHADOW(secondary_exec, SECONDARY_VM_EXEC_CONTROL, 32)
 BUILD_CONTROLS_SHADOW(tertiary_exec, TERTIARY_VM_EXEC_CONTROL, 64)
 
+void ept_save_pdptrs(struct kvm_vcpu* vcpu);
 
 
 
@@ -1194,3 +1249,26 @@ static unsigned long vmx_get_exit_qual(struct kvm_vcpu* vcpu) {
 
 void vmx_prepare_switch_to_guest(struct kvm_vcpu* vcpu);
 void vmx_update_host_rsp(struct vcpu_vmx* vmx, unsigned long host_rsp);
+
+bool __vmx_vcpu_run(struct vcpu_vmx* vmx, unsigned long* regs,
+	unsigned int flags);
+
+void vmx_set_constant_host_state(struct vcpu_vmx* vmx);
+
+USHORT vmx_get_es();
+USHORT vmx_get_cs();
+USHORT vmx_get_ss();
+USHORT vmx_get_ds();
+USHORT vmx_get_fs();
+
+void vmx_set_host_fs_gs(struct vmcs_host_state* host, u16 fs_sel, u16 gs_sel,
+	unsigned long fs_base, unsigned long gs_base);
+
+USHORT vmx_get_gs();
+
+u64 construct_eptp(struct kvm_vcpu* vcpu, hpa_t root_hpa, int root_level);
+
+
+static inline struct kvm_vmx* to_kvm_vmx(struct kvm* kvm) {
+	return CONTAINING_RECORD(kvm, struct kvm_vmx, kvm);
+}

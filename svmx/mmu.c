@@ -9,7 +9,7 @@
 #include "kvm_host.h"
 #include "smm.h"
 
-
+int nx_huge_pages = -1;
 
 /*
  * When setting this variable to true it enables Two-Dimensional-Paging
@@ -237,7 +237,9 @@ void kvm_configure_mmu(bool enable_tdp, int tdp_forced_root_level,
 }
 
 int kvm_mmu_load(struct kvm_vcpu* vcpu) {
-	UNREFERENCED_PARAMETER(vcpu);
+	
+
+	kvm_mmu_load_pgd(vcpu);
 
 	return 0;
 }
@@ -335,7 +337,35 @@ static int direct_page_fault(struct kvm_vcpu* vcpu,
 	return RET_PF_EMULATE;
 }
 
+#ifdef AMD64
+static int kvm_tdp_mmu_page_fault(struct kvm_vcpu* vcpu,
+	struct kvm_page_fault* fault) {
+	UNREFERENCED_PARAMETER(vcpu);
+	UNREFERENCED_PARAMETER(fault);
+
+	return 0;
+}
+#endif // AMD64
+
+
 int kvm_tdp_page_fault(struct kvm_vcpu* vcpu, struct kvm_page_fault* fault) {
+	/*
+	 * If the guest's MTRRs may be used to compute the "real" memtype,
+	 * restrict the mapping level to ensure KVM uses a consistent memtype
+	 * across the entire mapping.  If the host MTRRs are ignored by TDP
+	 * (shadow_memtype_mask is non-zero), and the VM has non-coherent DMA
+	 * (DMA doesn't snoop CPU caches), KVM's ABI is to honor the memtype
+	 * from the guest's MTRRs so that guest accesses to memory that is
+	 * DMA'd aren't cached against the guest's wishes.
+	 *
+	 * Note, KVM may still ultimately ignore guest MTRRs for certain PFNs,
+	 * e.g. KVM will force UC memtype for host MMIO.
+	 */
+
+#ifdef AMD64
+	if (tdp_mmu_enabled)
+		return kvm_tdp_mmu_page_fault(vcpu, fault);
+#endif // AMD64
 
 
 	return direct_page_fault(vcpu, fault);
@@ -387,7 +417,7 @@ static int __kvm_mmu_create(struct kvm_vcpu* vcpu, struct kvm_mmu* mmu) {
 	if (tdp_enabled && kvm_mmu_get_tdp_level(vcpu) > PT32E_ROOT_LEVEL)
 		return 0;
 
-	page = ExAllocatePoolZero(NonPagedPool, PAGE_SIZE, DRIVER_TAG);
+	page = ExAllocatePoolWithTag(NonPagedPool, PAGE_SIZE, DRIVER_TAG);
 	if (!page)
 		return STATUS_NO_MEMORY;
 
@@ -483,15 +513,40 @@ static int mmu_first_shadow_root_alloc(struct kvm* kvm) {
 	return 0;
 }
 
+/**
+ * lower_32_bits - return bits 0-31 of a number
+ * @n: the number we're accessing
+ */
+#define lower_32_bits(n) ((u32)((n) & 0xffffffff))
+
 int kvm_mmu_page_fault(struct kvm_vcpu* vcpu, gpa_t cr2_or_gpa, u64 error_code,
 	void* insn, int insn_len) {
-	UNREFERENCED_PARAMETER(vcpu);
-	UNREFERENCED_PARAMETER(cr2_or_gpa);
-	UNREFERENCED_PARAMETER(error_code);
-	UNREFERENCED_PARAMETER(insn);
-	UNREFERENCED_PARAMETER(insn_len);
+	int r, emulation_type = EMULTYPE_PF;
 
-	return 0;
+	if (!VALID_PAGE(vcpu->arch.mmu->root.hpa))
+		return RET_PF_RETRY;
+
+	r = RET_PF_INVALID;
+	if (error_code & PFERR_RSVD_MASK) {
+		
+		if (r == RET_PF_EMULATE)
+			goto emulate;
+	}
+
+	if (r == RET_PF_INVALID) {
+		r = kvm_mmu_do_page_fault(vcpu, cr2_or_gpa,
+			lower_32_bits(error_code), FALSE,
+			&emulation_type);
+	}
+
+	if (r < 0)
+		return r;
+	if (r != RET_PF_EMULATE)
+		return 1;
+
+emulate:
+	return x86_emulate_instruction(vcpu, cr2_or_gpa,
+		emulation_type, insn, insn_len);
 }
 
 static int mmu_set_spte(struct kvm_vcpu* vcpu, struct kvm_memory_slot* slot,

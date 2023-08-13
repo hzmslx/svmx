@@ -63,9 +63,19 @@ static inline bool is_64_bit_mode(struct kvm_vcpu* vcpu)
 	return cs_l;
 }
 
+static inline bool is_pae(struct kvm_vcpu* vcpu)
+{
+	return kvm_is_cr4_bit_set(vcpu, X86_CR4_PAE);
+}
+
 static inline bool is_paging(struct kvm_vcpu* vcpu)
 {
 	return kvm_is_cr0_bit_set(vcpu, X86_CR0_PG);
+}
+
+static inline bool is_pae_paging(struct kvm_vcpu* vcpu)
+{
+	return !is_long_mode(vcpu) && is_pae(vcpu) && is_paging(vcpu);
 }
 
 bool __kvm_is_valid_cr4(struct kvm_vcpu* vcpu, unsigned long cr4);
@@ -79,3 +89,6 @@ static inline bool mmu_is_nested(struct kvm_vcpu* vcpu)
 {
 	return vcpu->arch.walk_mmu == &vcpu->arch.nested_mmu;
 }
+
+int x86_emulate_instruction(struct kvm_vcpu* vcpu, gpa_t cr2_or_gpa,
+	int emulation_type, void* insn, int insn_len);

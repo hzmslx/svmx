@@ -229,4 +229,9 @@
       <Filter>mmu</Filter>
     </ClInclude>
   </ItemGroup>
+  <ItemGroup>
+    <MASM Include="vmenter.asm">
+      <Filter>vmx</Filter>
+    </MASM>
+  </ItemGroup>
 </Project>

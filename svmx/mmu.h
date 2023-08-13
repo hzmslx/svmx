@@ -1,4 +1,5 @@
 #pragma once
+#include "kvm_cache_regs.h"
 
 #define PT_WRITABLE_SHIFT 1
 
@@ -48,3 +49,25 @@ static inline gpa_t kvm_translate_gpa(struct kvm_vcpu* vcpu,
 }
 
 int kvm_tdp_page_fault(struct kvm_vcpu* vcpu, struct kvm_page_fault* fault);
+
+static inline void kvm_mmu_load_pgd(struct kvm_vcpu* vcpu) {
+	u64 root_hpa = vcpu->arch.mmu->root.hpa;
+
+	if (!VALID_PAGE(root_hpa))
+		return;
+
+	kvm_x86_ops.load_mmu_pgd(vcpu, root_hpa,
+		vcpu->arch.mmu->root_role.level);
+}
+
+static inline unsigned long kvm_get_pcid(struct kvm_vcpu* vcpu, gpa_t cr3)
+{
+	return kvm_is_cr4_bit_set(vcpu, X86_CR4_PCIDE)
+		? cr3 & X86_CR3_PCID_MASK
+		: 0;
+}
+
+static inline unsigned long kvm_get_active_pcid(struct kvm_vcpu* vcpu)
+{
+	return kvm_get_pcid(vcpu, kvm_read_cr3(vcpu));
+}

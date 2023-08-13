@@ -17,6 +17,7 @@ int kvm_init() {
 	}
 	USHORT version = 0;
 	DWORD bytes;
+	// 判断内核KVM驱动和当前virt版本是否兼容
 	if (!DeviceIoControl(hDevice, KVM_GET_API_VERSION, NULL, 0,
 		&version, sizeof(version), &bytes, NULL)) {
 		ret = -errno;
@@ -34,7 +35,7 @@ int kvm_init() {
 		fprintf(stderr, "kvm version not supported\n");
 		goto err;
 	}
-
+	// 创建虚拟机
 	if (!DeviceIoControl(hDevice, KVM_CREATE_VM, NULL, 0,
 		NULL, 0, &bytes, NULL)) {
 		ret = -errno;
