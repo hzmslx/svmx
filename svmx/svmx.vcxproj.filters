@@ -228,6 +228,9 @@
     <ClInclude Include="mmu_internal.h">
       <Filter>mmu</Filter>
     </ClInclude>
+    <ClInclude Include="hyperv.h">
+      <Filter>vmx</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <MASM Include="vmenter.asm">

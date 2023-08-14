@@ -1,6 +1,7 @@
 #pragma once
 #include "svmx.h"
 
+
 #define KVM_API_VERSION 1
 
 #pragma warning(disable:4201)
@@ -49,7 +50,8 @@
 #define KVM_CREATE_IRQCHIP	CTL_CODE(KVM_DEVICE,0x807,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 
-
+/* Architectural interrupt line count. */
+#define KVM_NR_INTERRUPTS 256
 
 struct trace_print_flags {
 	unsigned long		mask;
@@ -139,9 +141,29 @@ struct kvm_msr_entry {
 NTSTATUS kvm_dev_ioctl_create_vm(unsigned long type);
 struct kvm* kvm_create_vm(unsigned long type);
 
+struct kvm_dtable {
+	__u64 base;
+	__u16 limit;
+	__u16 padding[3];
+};
+
+/* for KVM_GET_SREGS and KVM_SET_SREGS */
+struct kvm_sregs {
+	/* out (KVM_GET_SREGS) / in (KVM_SET_SREGS) */
+	struct kvm_segment cs, ds, es, fs, gs, ss;
+	struct kvm_segment tr, ldt;
+	struct kvm_dtable gdt, idt;
+	__u64 cr0, cr2, cr3, cr4, cr8;
+	__u64 efer;
+	__u64 apic_base;
+	__u64 interrupt_bitmap[(KVM_NR_INTERRUPTS + 63) / 64];
+};
+
 /*
  * Creates some virtual cpus.  Good luck creating more than one.
  */
 int kvm_vm_ioctl_create_vcpu(struct kvm* kvm, u32 id);
+
+
 
 

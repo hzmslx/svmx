@@ -459,3 +459,5 @@ static int kvm_set_memslot(struct kvm* kvm,
 void vcpu_put(struct kvm_vcpu* vcpu) {
 	UNREFERENCED_PARAMETER(vcpu);
 }
+
+

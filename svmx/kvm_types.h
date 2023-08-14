@@ -47,3 +47,5 @@ struct kvm_vcpu_stat_generic {
 };
 
 #define KVM_STATS_NAME_SIZE	48
+
+#define INVALID_GPA	(~(gpa_t)0)

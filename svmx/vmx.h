@@ -14,6 +14,15 @@
 #include "vmx_ops.h"
 #include "kvm_cache_regs.h"
 
+enum segment_cache_field {
+	SEG_FIELD_SEL = 0,
+	SEG_FIELD_BASE = 1,
+	SEG_FIELD_LIMIT = 2,
+	SEG_FIELD_AR = 3,
+
+	SEG_FIELD_NR = 4
+};
+
 #define VMX_EXIT_REASONS_FAILED_VMENTRY         0x80000000
 #define VMX_EXIT_REASONS_SGX_ENCLAVE_MODE	0x08000000
 
@@ -1272,3 +1281,7 @@ u64 construct_eptp(struct kvm_vcpu* vcpu, hpa_t root_hpa, int root_level);
 static inline struct kvm_vmx* to_kvm_vmx(struct kvm* kvm) {
 	return CONTAINING_RECORD(kvm, struct kvm_vmx, kvm);
 }
+
+void vmx_sgdt(struct desc_ptr* dt);
+
+void __vmx_set_segment(struct kvm_vcpu* vcpu, struct kvm_segment* var, int seg);

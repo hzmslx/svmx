@@ -200,6 +200,7 @@
     <ClInclude Include="cpuid.h" />
     <ClInclude Include="desc.h" />
     <ClInclude Include="desc_defs.h" />
+    <ClInclude Include="hyperv.h" />
     <ClInclude Include="int-ll64.h" />
     <ClInclude Include="intel_pt.h" />
     <ClInclude Include="irq_vectors.h" />

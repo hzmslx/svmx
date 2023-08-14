@@ -17,8 +17,8 @@ struct vmcs {
  * used as a write-through cache of the corresponding VMCS fields.
  */
 struct vmcs_host_state {
-	unsigned long cr3;	/* May not match real cr3 */
-	unsigned long cr4;	/* May not match real cr4 */
+	u64 cr3;	/* May not match real cr3 */
+	u64 cr4;	/* May not match real cr4 */
 	unsigned long gs_base;
 	unsigned long fs_base;
 	unsigned long rsp;

@@ -3,7 +3,7 @@
 #include <pshpack1.h>
 struct desc_ptr {
 	unsigned short size;
-	unsigned long address;
+	ULONG_PTR address;
 };
 
 /* 8 byte segment descriptor */

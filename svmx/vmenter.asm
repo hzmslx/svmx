@@ -141,5 +141,10 @@ vmx_get_gs PROC
 	ret
 vmx_get_gs ENDP
 
+vmx_sgdt PROC
+	sgdt fword ptr [rcx]
+	ret
+vmx_sgdt ENDP
+
 END
 

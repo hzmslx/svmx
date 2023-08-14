@@ -141,10 +141,10 @@ void svm_set_cr0(struct kvm_vcpu* vcpu, unsigned long cr0);
 void svm_set_cr3(struct kvm_vcpu* vcpu, unsigned long root);
 void svm_set_cr4(struct kvm_vcpu* vcpu, unsigned long cr4);
 void svm_set_efer(struct kvm_vcpu* vcpu, u64 efer);
-void svm_get_idt(struct kvm_vcpu* vcpu, struct descriptor_table* dt);
-void svm_set_idt(struct kvm_vcpu* vcpu, struct descriptor_table* dt);
-void svm_get_gdt(struct kvm_vcpu* vcpu, struct descriptor_table* dt);
-void svm_set_gdt(struct kvm_vcpu* vcpu, struct descriptor_table* dt);
+void svm_get_idt(struct kvm_vcpu* vcpu, struct desc_ptr* dt);
+void svm_set_idt(struct kvm_vcpu* vcpu, struct desc_ptr* dt);
+void svm_get_gdt(struct kvm_vcpu* vcpu, struct desc_ptr* dt);
+void svm_set_gdt(struct kvm_vcpu* vcpu, struct desc_ptr* dt);
 unsigned long svm_get_dr(struct kvm_vcpu* vcpu, int dr);
 void svm_set_dr(struct kvm_vcpu* vcpu, int dr, unsigned long value,
 	int* exception);
@@ -473,33 +473,33 @@ void svm_set_efer(struct kvm_vcpu* vcpu, u64 efer) {
 	
 }
 
-void svm_get_idt(struct kvm_vcpu* vcpu, struct descriptor_table* dt) {
+void svm_get_idt(struct kvm_vcpu* vcpu, struct desc_ptr* dt) {
 	struct vcpu_svm* svm = to_svm(vcpu);
 
-	dt->limit = (u16)svm->vmcb->save.idtr.limit;
-	dt->base = (unsigned long)svm->vmcb->save.idtr.base;
+	dt->size = (u16)svm->vmcb->save.idtr.limit;
+	dt->address = (unsigned long)svm->vmcb->save.idtr.base;
 }
 
-void svm_set_idt(struct kvm_vcpu* vcpu, struct descriptor_table* dt) {
+void svm_set_idt(struct kvm_vcpu* vcpu, struct desc_ptr* dt) {
 	struct vcpu_svm* svm = to_svm(vcpu);
 
-	svm->vmcb->save.idtr.limit = dt->limit;
-	svm->vmcb->save.idtr.base = dt->base;
+	svm->vmcb->save.idtr.limit = dt->size;
+	svm->vmcb->save.idtr.base = dt->address;
 }
 
-void svm_get_gdt(struct kvm_vcpu* vcpu, struct descriptor_table* dt) {
+void svm_get_gdt(struct kvm_vcpu* vcpu, struct desc_ptr* dt) {
 	struct vcpu_svm* svm = to_svm(vcpu);
 
-	dt->limit = (u16)svm->vmcb->save.gdtr.limit;
-	dt->base = (unsigned long)svm->vmcb->save.gdtr.base;
+	dt->size = (u16)svm->vmcb->save.gdtr.limit;
+	dt->address = (ULONG_PTR)svm->vmcb->save.gdtr.base;
 }
 
-void svm_set_gdt(struct kvm_vcpu* vcpu, struct descriptor_table* dt)
+void svm_set_gdt(struct kvm_vcpu* vcpu, struct desc_ptr* dt)
 {
 	struct vcpu_svm* svm = to_svm(vcpu);
 
-	svm->vmcb->save.gdtr.limit = dt->limit;
-	svm->vmcb->save.gdtr.base = dt->base;
+	svm->vmcb->save.gdtr.limit = dt->size;
+	svm->vmcb->save.gdtr.base = dt->address;
 }
 
 unsigned long svm_get_dr(struct kvm_vcpu* vcpu, int dr) {

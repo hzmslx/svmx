@@ -16,6 +16,7 @@
 #include "smm.h"
 #include "irq_vectors.h"
 #include "mmu.h"
+#include "hyperv.h"
 
 #define VMX_XSS_EXIT_BITMAP 0
 
@@ -39,7 +40,7 @@ static RTL_BITMAP vmx_msr_bitmap_legacy;
 static RTL_BITMAP vmx_msr_bitmap_longmode;
 static RTL_BITMAP vmx_vpid_bitmap;
 
-static unsigned long host_idt_base;
+static ULONG_PTR host_idt_base;
 
 /* Guest_tsc -> host_tsc conversion requires 64-bit division.  */
 static int cpu_preemption_timer_multi;
@@ -92,6 +93,7 @@ static const struct trace_print_flags vmx_exit_reasons_str[] = {
 	{ (unsigned long)-1, NULL }
 };
 
+static bool emulate_invalid_guest_state = TRUE;
 /*
  * Comment's format: document - errata name - stepping - processor name.
  * Refer from
@@ -142,7 +144,7 @@ void __vmx_disable_intercept_for_msr(PRTL_BITMAP msr_bitmap, u32 msr);
 
 static void vmx_vcpu_reset(struct kvm_vcpu* vcpu, bool init_event);
 
-void vmcs_writel(unsigned long field, unsigned long val);
+void vmcs_writel(unsigned long field, ULONG_PTR val);
 void vmcs_write32(unsigned long field, u32 value);
 
 
@@ -164,10 +166,10 @@ void vmx_set_cr0(struct kvm_vcpu* vcpu, unsigned long cr0);
 void vmx_set_cr3(struct kvm_vcpu* vcpu, unsigned long cr3);
 void vmx_set_cr4(struct kvm_vcpu* vcpu, unsigned long cr4);
 int vmx_set_efer(struct kvm_vcpu* vcpu, u64 efer);
-void vmx_get_idt(struct kvm_vcpu* vcpu, struct descriptor_table* dt);
-void vmx_set_idt(struct kvm_vcpu* vcpu, struct descriptor_table* dt);
-void vmx_get_gdt(struct kvm_vcpu* vcpu, struct descriptor_table* dt);
-void vmx_set_gdt(struct kvm_vcpu* vcpu, struct descriptor_table* dt);
+void vmx_get_idt(struct kvm_vcpu* vcpu, struct desc_ptr* dt);
+void vmx_set_idt(struct kvm_vcpu* vcpu, struct desc_ptr* dt);
+void vmx_get_gdt(struct kvm_vcpu* vcpu, struct desc_ptr* dt);
+void vmx_set_gdt(struct kvm_vcpu* vcpu, struct desc_ptr* dt);
 void vmx_cache_reg(struct kvm_vcpu* vcpu, enum kvm_reg reg);
 unsigned long vmx_get_rflags(struct kvm_vcpu* vcpu);
 void vmx_set_rflags(struct kvm_vcpu* vcpu, unsigned long rflags);
@@ -519,6 +521,11 @@ static const struct kvm_vmx_segment_field {
 	VMX_SEGMENT_FIELD(TR),
 	VMX_SEGMENT_FIELD(LDTR),
 };
+
+static inline void vmx_segment_cache_clear(struct vcpu_vmx* vmx)
+{
+	vmx->segment_cache.bitmask = 0;
+}
 
 static void __loaded_vmcs_clear(void* arg) {
 	struct loaded_vmcs* loaded_vmcs = arg;
@@ -1179,6 +1186,11 @@ static struct kvm_x86_ops vmx_x86_ops = {
 	.set_efer = vmx_set_efer,
 	.set_dr7 = vmx_set_dr7,
 	.cache_reg = vmx_cache_reg,
+	.get_segment_base = vmx_get_segment_base,
+	.set_idt = vmx_set_idt,
+	.get_idt = vmx_get_idt,
+	.set_gdt = vmx_set_gdt,
+	.get_gdt = vmx_get_gdt,
 
 
 	.vcpu_pre_run = vmx_vcpu_pre_run,
@@ -1483,6 +1495,18 @@ static int vmx_set_msr(struct kvm_vcpu* vcpu, struct msr_data* msr_info) {
 		__vmx_vmwrite(GUEST_GS_BASE, data);
 		break;
 #endif
+	case MSR_IA32_SYSENTER_CS:
+		if (is_guest_mode(vcpu))
+			get_vmcs12(vcpu)->guest_sysenter_cs = (u32)data;
+		vmcs_write32(GUEST_SYSENTER_CS, (u32)data);
+		break;
+	case MSR_IA32_SYSENTER_EIP:
+		vmcs_writel(GUEST_SYSENTER_EIP, data);
+		break;
+	case MSR_IA32_SYSENTER_ESP:
+		vmcs_writel(GUEST_SYSENTER_ESP, data);
+		break;
+
 	default:
 		break;
 	}
@@ -1499,10 +1523,8 @@ u64 vmx_get_segment_base(struct kvm_vcpu* vcpu, int seg) {
 
 void vmx_set_segment(struct kvm_vcpu* vcpu,
 	struct kvm_segment* var, int seg) {
-	UNREFERENCED_PARAMETER(vcpu);
-	UNREFERENCED_PARAMETER(var);
-	UNREFERENCED_PARAMETER(seg);
-
+	__vmx_set_segment(vcpu, var, seg);
+	
 }
 
 
@@ -1646,28 +1668,28 @@ int vmx_set_efer(struct kvm_vcpu* vcpu, u64 efer) {
 	return 0;
 }
 
-void vmx_get_idt(struct kvm_vcpu* vcpu, struct descriptor_table* dt) {
+void vmx_get_idt(struct kvm_vcpu* vcpu, struct desc_ptr* dt) {
 	UNREFERENCED_PARAMETER(vcpu);
-	dt->limit = vmcs_read16(GUEST_IDTR_LIMIT);
-	dt->base = vmcs_readl(GUEST_IDTR_BASE);
+	dt->size = vmcs_read16(GUEST_IDTR_LIMIT);
+	dt->address = vmcs_readl(GUEST_IDTR_BASE);
 }
 
-void vmx_set_idt(struct kvm_vcpu* vcpu, struct descriptor_table* dt) {
+void vmx_set_idt(struct kvm_vcpu* vcpu, struct desc_ptr* dt) {
 	UNREFERENCED_PARAMETER(vcpu);
-	vmcs_write32(GUEST_IDTR_LIMIT, dt->limit);
-	vmcs_writel(GUEST_IDTR_BASE, dt->base);
+	vmcs_write32(GUEST_IDTR_LIMIT, dt->size);
+	vmcs_writel(GUEST_IDTR_BASE, dt->address);
 }
 
-void vmx_get_gdt(struct kvm_vcpu* vcpu, struct descriptor_table* dt) {
+void vmx_get_gdt(struct kvm_vcpu* vcpu, struct desc_ptr* dt) {
 	UNREFERENCED_PARAMETER(vcpu);
-	dt->limit = vmcs_read16(GUEST_GDTR_LIMIT);
-	dt->base = vmcs_readl(GUEST_GDTR_BASE);
+	dt->size = vmcs_read16(GUEST_GDTR_LIMIT);
+	dt->address = vmcs_readl(GUEST_GDTR_BASE);
 }
 
-void vmx_set_gdt(struct kvm_vcpu* vcpu, struct descriptor_table* dt) {
+void vmx_set_gdt(struct kvm_vcpu* vcpu, struct desc_ptr* dt) {
 	UNREFERENCED_PARAMETER(vcpu);
-	vmcs_write32(GUEST_GDTR_LIMIT, dt->limit);
-	vmcs_writel(GUEST_GDTR_BASE, dt->base);
+	vmcs_write32(GUEST_GDTR_LIMIT, dt->size);
+	vmcs_writel(GUEST_GDTR_BASE, dt->address);
 }
 
 
@@ -1724,8 +1746,22 @@ unsigned long vmx_get_rflags(struct kvm_vcpu* vcpu) {
 }
 
 void vmx_set_rflags(struct kvm_vcpu* vcpu, unsigned long rflags) {
-	if (to_vmx(vcpu)->rmode.vm86_active)
+	struct vcpu_vmx* vmx = to_vmx(vcpu);
+	ULONG_PTR old_rflags;
+
+	if (is_unrestricted_guest(vcpu)) {
+		kvm_register_mark_available(vcpu, VCPU_EXREG_RFLAGS);
+		vmx->rflags = rflags;
+		vmcs_writel(GUEST_RFLAGS, rflags);
+		return;
+	}
+
+	old_rflags = vmx_get_rflags(vcpu);
+	vmx->rflags = rflags;
+	if (vmx->rmode.vm86_active) {
+		vmx->rmode.save_rflags = rflags;
 		rflags |= X86_EFLAGS_IOPL | X86_EFLAGS_VM;
+	}
 	vmcs_writel(GUEST_RFLAGS, rflags);
 }
 
@@ -1873,11 +1909,91 @@ bool vmx_gb_page_enable() {
 	return FALSE;
 }
 
+static bool vmx_segment_cache_test_set(struct vcpu_vmx* vmx, unsigned seg,
+	unsigned field)
+{
+	bool ret;
+	u32 mask = 1 << (seg * SEG_FIELD_NR + field);
+
+	if (!kvm_register_is_available(&vmx->vcpu, VCPU_EXREG_SEGMENTS)) {
+		kvm_register_mark_available(&vmx->vcpu, VCPU_EXREG_SEGMENTS);
+		vmx->segment_cache.bitmask = 0;
+	}
+	ret = vmx->segment_cache.bitmask & mask;
+	vmx->segment_cache.bitmask |= mask;
+	return ret;
+}
+
+static u16 vmx_read_guest_seg_selector(struct vcpu_vmx* vmx, unsigned seg)
+{
+	u16* p = &vmx->segment_cache.seg[seg].selector;
+
+	if (!vmx_segment_cache_test_set(vmx, seg, SEG_FIELD_SEL))
+		*p = vmcs_read16(kvm_vmx_segment_fields[seg].selector);
+	return *p;
+}
+
+static ulong vmx_read_guest_seg_base(struct vcpu_vmx* vmx, unsigned seg)
+{
+	ulong* p = &vmx->segment_cache.seg[seg].base;
+
+	if (!vmx_segment_cache_test_set(vmx, seg, SEG_FIELD_BASE))
+		*p = vmcs_readl(kvm_vmx_segment_fields[seg].base);
+	return *p;
+}
+
+static u32 vmx_read_guest_seg_limit(struct vcpu_vmx* vmx, unsigned seg)
+{
+	u32* p = &vmx->segment_cache.seg[seg].limit;
+
+	if (!vmx_segment_cache_test_set(vmx, seg, SEG_FIELD_LIMIT))
+		*p = vmcs_read32(kvm_vmx_segment_fields[seg].limit);
+	return *p;
+}
+
+static u32 vmx_read_guest_seg_ar(struct vcpu_vmx* vmx, unsigned seg)
+{
+	u32* p = &vmx->segment_cache.seg[seg].ar;
+
+	if (!vmx_segment_cache_test_set(vmx, seg, SEG_FIELD_AR))
+		*p = vmcs_read32(kvm_vmx_segment_fields[seg].ar_bytes);
+	return *p;
+}
+
 void vmx_get_segment(struct kvm_vcpu* vcpu,
 	struct kvm_segment* var, int seg) {
-	UNREFERENCED_PARAMETER(vcpu);
-	UNREFERENCED_PARAMETER(var);
-	UNREFERENCED_PARAMETER(seg);
+	struct vcpu_vmx* vmx = to_vmx(vcpu);
+	u32 ar;
+
+	if (vmx->rmode.vm86_active && seg != VCPU_SREG_LDTR) {
+		*var = vmx->rmode.segs[seg];
+		if (seg == VCPU_SREG_TR
+			|| var->selector == vmx_read_guest_seg_selector(vmx, seg))
+			return;
+		var->base = vmx_read_guest_seg_base(vmx, seg);
+		var->selector = vmx_read_guest_seg_selector(vmx, seg);
+		return;
+	}
+	var->base = vmx_read_guest_seg_base(vmx, seg);
+	var->limit = vmx_read_guest_seg_limit(vmx, seg);
+	var->selector = vmx_read_guest_seg_selector(vmx, seg);
+	ar = vmx_read_guest_seg_ar(vmx, seg);
+	var->unusable = (ar >> 16) & 1;
+	var->type = ar & 15;
+	var->s = (ar >> 4) & 1;
+	var->dpl = (ar >> 5) & 3;
+	/*
+	 * Some userspaces do not preserve unusable property. Since usable
+	 * segment has to be present according to VMX spec we can use present
+	 * property to amend userspace bug by making unusable segment always
+	 * nonpresent. vmx_segment_access_rights() already marks nonpresent
+	 * segment as unusable.
+	 */
+	var->present = !var->unusable;
+	var->avl = (ar >> 12) & 1;
+	var->l = (ar >> 13) & 1;
+	var->db = (ar >> 14) & 1;
+	var->g = (ar >> 15) & 1;
 }
 
 void vmx_disable_intercept_for_msr(u32 msr, bool longmode_only) {
@@ -2134,6 +2250,13 @@ void vmx_vcpu_load_vmcs(struct kvm_vcpu* vcpu, int cpu,
 	}
 
 	if (!already_loaded) {
+
+		/*
+		 * per-cpu TSS and GDT ?, so set these when switching
+		 * processors.  See 22.2.4.
+		 */
+		
+
 		// ÉèÖÃcpu
 		vmx->loaded_vmcs->cpu = cpu;
 	}
@@ -2423,12 +2546,47 @@ static void init_vmcs(struct vcpu_vmx* vmx) {
 		
 		vmcs_write32(TPR_THRESHOLD, 0);
 	}
+
+	u64 cs = __readmsr(MSR_IA32_SYSENTER_CS);
+	vmcs_write32(GUEST_SYSENTER_CS, (u32)cs);
+	vmcs_writel(GUEST_SYSENTER_EIP, __readmsr(MSR_IA32_SYSENTER_EIP));
+	vmcs_writel(GUEST_SYSENTER_ESP, __readmsr(MSR_IA32_SYSENTER_ESP));
+
+	
 }
 
 static void __vmx_vcpu_reset(struct kvm_vcpu* vcpu) {
 	struct vcpu_vmx* vmx = to_vmx(vcpu);
 
+	struct desc_ptr dt;
+	__sidt(&dt);
+	vmx_set_idt(vcpu, &dt);
+	vmx_sgdt(&dt);
+	vmx_set_gdt(vcpu, &dt);
+
+	ULONG_PTR rflags = __readeflags();
+	vmx_set_rflags(vcpu, (ULONG)rflags);
+
+	struct kvm_segment var;
+
+	vmx_set_segment(vcpu, &var, VCPU_SREG_TR);
+
 	init_vmcs(vmx);
+
+	vmx->nested.posted_intr_nv = (u16)-1;
+	vmx->nested.vmxon_ptr = INVALID_GPA;
+	vmx->nested.current_vmptr = INVALID_GPA;
+	vmx->nested.hv_evmcs_vmptr = (gpa_t)EVMPTR_INVALID;
+
+	vcpu->arch.microcode_version = 0x100000000ULL;
+	vmx->msr_ia32_feature_control_valid_bits = FEAT_CTL_LOCKED;
+
+	/*
+	 * Enforce invariant: pi_desc.nv is always either POSTED_INTR_VECTOR
+	 * or POSTED_INTR_WAKEUP_VECTOR.
+	 */
+	vmx->pi_desc.nv = POSTED_INTR_VECTOR;
+	vmx->pi_desc.sn = 1;
 }
 
 
@@ -2749,6 +2907,24 @@ static void vmx_load_mmu_pgd(struct kvm_vcpu* vcpu, hpa_t root_hpa,
 void vmx_set_constant_host_state(struct vcpu_vmx* vmx) {
 	UNREFERENCED_PARAMETER(vmx);
 
+	u64 cr0, cr3, cr4;
+	cr0 = __readcr0();
+	vmcs_write64(HOST_CR0, cr0);	/* 22.2.3 */
+
+	/*
+	 * Save the most likely value for this task's CR3 in the VMCS.
+	 * We can't use __get_current_cr3_fast() because we're not atomic.
+	 */
+	cr3 = __readcr3();
+	vmcs_write64(HOST_CR3, cr3); /* 22.2.3  FIXME: shadow tables */
+	vmx->loaded_vmcs->host_state.cr3 = cr3;
+
+	/* Save the most likely value for this task's CR4 in the VMCS. */
+	cr4 = __readcr4();
+	vmcs_write64(HOST_CR4, cr4); /* 22.2.3, 22.2.5 */
+	vmx->loaded_vmcs->host_state.cr4 = cr4;
+
+
 	vmcs_write16(HOST_CS_SELECTOR, vmx_get_cs());
 #ifdef _WIN64
 	vmcs_write16(HOST_DS_SELECTOR, vmx_get_ds());
@@ -2788,4 +2964,85 @@ u64 construct_eptp(struct kvm_vcpu* vcpu, hpa_t root_hpa, int root_level) {
 	eptp |= root_hpa;
 
 	return eptp;
+}
+
+static u32 vmx_segment_access_rights(struct kvm_segment* var)
+{
+	u32 ar;
+
+	ar = var->type & 15;
+	ar |= (var->s & 1) << 4;
+	ar |= (var->dpl & 3) << 5;
+	ar |= (var->present & 1) << 7;
+	ar |= (var->avl & 1) << 12;
+	ar |= (var->l & 1) << 13;
+	ar |= (var->db & 1) << 14;
+	ar |= (var->g & 1) << 15;
+	ar |= (var->unusable || !var->present) << 16;
+
+	return ar;
+}
+
+static void fix_rmode_seg(int seg, struct kvm_segment* save) {
+	const struct kvm_vmx_segment_field* sf = &kvm_vmx_segment_fields[seg];
+	struct kvm_segment var = *save;
+
+	var.dpl = 0x3;
+	if (seg == VCPU_SREG_CS)
+		var.type = 0x3;
+
+	if (!emulate_invalid_guest_state) {
+		var.selector = (uint16_t)(var.base >> 4);
+		var.base = var.base & 0xffff0;
+		var.limit = 0xffff;
+		var.g = 0;
+		var.db = 0;
+		var.present = 1;
+		var.s = 1;
+		var.l = 0;
+		var.unusable = 0;
+		var.type = 0x3;
+		var.avl = 0;
+	}
+
+	vmcs_write16(sf->selector, var.selector);
+	vmcs_writel(sf->base, var.base);
+	vmcs_write32(sf->limit, var.limit);
+	vmcs_write32(sf->ar_bytes, vmx_segment_access_rights(&var));
+}
+
+void __vmx_set_segment(struct kvm_vcpu* vcpu, struct kvm_segment* var, 
+	int seg) {
+	struct vcpu_vmx* vmx = to_vmx(vcpu);
+	const struct kvm_vmx_segment_field* sf = &kvm_vmx_segment_fields[seg];
+
+	vmx_segment_cache_clear(vmx);
+
+	if (vmx->rmode.vm86_active && seg != VCPU_SREG_LDTR) {
+		vmx->rmode.segs[seg] = *var;
+		if (seg == VCPU_SREG_TR)
+			vmcs_write16(sf->selector, var->selector);
+		else if (var->s)
+			fix_rmode_seg(seg, &vmx->rmode.segs[seg]);
+	}
+
+	vmcs_writel(sf->base, var->base);
+	vmcs_write32(sf->limit, var->limit);
+	vmcs_write16(sf->selector, var->selector);
+
+	/*
+	 *   Fix the "Accessed" bit in AR field of segment registers for older
+	 * qemu binaries.
+	 *   IA32 arch specifies that at the time of processor reset the
+	 * "Accessed" bit in the AR field of segment registers is 1. And qemu
+	 * is setting it to 0 in the userland code. This causes invalid guest
+	 * state vmexit when "unrestricted guest" mode is turned on.
+	 *    Fix for this setup issue in cpu_reset is being pushed in the qemu
+	 * tree. Newer qemu binaries with that qemu fix would not need this
+	 * kvm hack.
+	 */
+	if (is_unrestricted_guest(vcpu) && (seg != VCPU_SREG_LDTR))
+		var->type |= 0x1; /* Accessed */
+
+	vmcs_write32(sf->ar_bytes, vmx_segment_access_rights(var));
 }

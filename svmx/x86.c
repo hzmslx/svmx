@@ -726,3 +726,97 @@ void kvm_update_dr7(struct kvm_vcpu* vcpu) {
 	if (dr7 & DR7_BP_EN_MASK)
 		vcpu->arch.switch_db_regs |= KVM_DEBUGREG_BP_ENABLED;
 }
+
+long kvm_arch_vcpu_ioctl(unsigned int ioctl, unsigned long arg) {
+	UNREFERENCED_PARAMETER(arg);
+	switch (ioctl)
+	{
+	case KVM_SET_SREGS2:
+
+		break;
+	default:
+		break;
+	}
+
+	return 0;
+}
+
+static inline unsigned long kvm_rip_read(struct kvm_vcpu* vcpu)
+{
+	return kvm_register_read_raw(vcpu, VCPU_REGS_RIP);
+}
+
+static ULONG_PTR get_segment_base(struct kvm_vcpu* vcpu, int seg)
+{
+	return kvm_x86_ops.get_segment_base(vcpu, seg);
+}
+
+unsigned long kvm_get_linear_rip(struct kvm_vcpu* vcpu)
+{
+	/* Can't read the RIP when guest state is protected, just return 0 */
+	if (vcpu->arch.guest_state_protected)
+		return 0;
+
+	if (is_64_bit_mode(vcpu))
+		return kvm_rip_read(vcpu);
+	return (u32)(get_segment_base(vcpu, VCPU_SREG_CS) +
+		kvm_rip_read(vcpu));
+}
+
+bool kvm_is_linear_rip(struct kvm_vcpu* vcpu, unsigned long linear_rip)
+{
+	return kvm_get_linear_rip(vcpu) == linear_rip;
+}
+
+static void __kvm_set_rflags(struct kvm_vcpu* vcpu, unsigned long rflags)
+{
+	if (vcpu->guest_debug & KVM_GUESTDBG_SINGLESTEP &&
+		kvm_is_linear_rip(vcpu, vcpu->arch.singlestep_rip))
+		rflags |= X86_EFLAGS_TF;
+	kvm_x86_ops.set_rflags(vcpu, rflags);
+}
+
+void kvm_set_rflags(struct kvm_vcpu* vcpu, unsigned long rflags) {
+	__kvm_set_rflags(vcpu, rflags);
+}
+
+void kvm_set_segment(struct kvm_vcpu* vcpu,
+	struct kvm_segment* var, int seg)
+{
+	kvm_x86_ops.set_segment(vcpu, var, seg);
+}
+
+static int __set_sregs_common(struct kvm_vcpu* vcpu, struct kvm_sregs* sregs,
+	int* mmu_reset_needed, bool update_pdptrs)
+{
+	UNREFERENCED_PARAMETER(vcpu);
+	UNREFERENCED_PARAMETER(sregs);
+	UNREFERENCED_PARAMETER(mmu_reset_needed);
+	UNREFERENCED_PARAMETER(update_pdptrs);
+
+	
+
+	return 0;
+}
+
+static int __set_sregs(struct kvm_vcpu* vcpu, struct kvm_sregs* sregs)
+{
+	int mmu_reset_needed = 0;
+	int ret = __set_sregs_common(vcpu, sregs, &mmu_reset_needed, TRUE);
+
+	if (ret)
+		return ret;
+
+	return 0;
+}
+
+int kvm_arch_vcpu_ioctl_set_sregs(struct kvm_vcpu* vcpu,
+	struct kvm_sregs* sregs)
+{
+	int ret;
+
+	vcpu_load(vcpu);
+	ret = __set_sregs(vcpu, sregs);
+	vcpu_put(vcpu);
+	return ret;
+}

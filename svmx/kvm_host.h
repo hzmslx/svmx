@@ -304,13 +304,6 @@ struct msr_data {
 	u64 data;
 };
 
-#include <pshpack1.h>
-struct descriptor_table {
-	u16 limit;
-	unsigned long base;
-};
-#include <poppack.h>
-
 
 #define PFERR_PRESENT_BIT 0
 #define PFERR_WRITE_BIT 1
@@ -1877,3 +1870,11 @@ void kvm_arch_vcpu_postcreate(struct kvm_vcpu* vcpu);
 #define EMULTYPE_WRITE_PF_TO_SP	    (1 << 8)
 
 void kvm_update_dr7(struct kvm_vcpu* vcpu);
+long kvm_arch_vcpu_ioctl(unsigned int ioctl, unsigned long arg);
+
+void kvm_set_rflags(struct kvm_vcpu* vcpu, unsigned long rflags);
+bool kvm_is_linear_rip(struct kvm_vcpu* vcpu, unsigned long linear_rip);
+unsigned long kvm_get_linear_rip(struct kvm_vcpu* vcpu);
+void kvm_set_segment(struct kvm_vcpu* vcpu, struct kvm_segment* var, int seg);
+int kvm_arch_vcpu_ioctl_set_sregs(struct kvm_vcpu* vcpu,
+	struct kvm_sregs* sregs);
