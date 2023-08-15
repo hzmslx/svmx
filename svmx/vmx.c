@@ -2555,6 +2555,29 @@ static void init_vmcs(struct vcpu_vmx* vmx) {
 	
 }
 
+static uint32_t x86_segment_base(x86_segment_descriptor* desc) {
+	return (uint32_t)((desc->base2 << 24) | (desc->base1 << 16) | desc->base0);
+}
+
+static ULONG_PTR get_segment_base(ULONG_PTR gdt_base,USHORT selector) {
+	x86_segment_selector sel = { selector };
+	
+	if (sel.ti == LDT_SEL) {
+		x86_segment_selector ldt_sel = { vmx_sldt() };
+		x86_segment_descriptor* desc = (x86_segment_descriptor*)(gdt_base +
+			ldt_sel.index * sizeof(x86_segment_descriptor));
+		uint32_t ldt_base = x86_segment_base(desc);
+		desc = (x86_segment_descriptor*)(ldt_base + sel.index * sizeof(x86_segment_descriptor));
+		return x86_segment_base(desc);
+	}
+	else {
+		x86_segment_descriptor* desc = (x86_segment_descriptor*)(gdt_base +
+			sel.index * sizeof(x86_segment_descriptor));
+		return x86_segment_base(desc);
+	}
+
+}
+
 static void __vmx_vcpu_reset(struct kvm_vcpu* vcpu) {
 	struct vcpu_vmx* vmx = to_vmx(vcpu);
 
@@ -2568,7 +2591,8 @@ static void __vmx_vcpu_reset(struct kvm_vcpu* vcpu) {
 	vmx_set_rflags(vcpu, (ULONG)rflags);
 
 	struct kvm_segment var;
-
+	var.selector = vmx_str();
+	var.base = get_segment_base(dt.address, var.selector);
 	vmx_set_segment(vcpu, &var, VCPU_SREG_TR);
 
 	init_vmcs(vmx);

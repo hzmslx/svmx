@@ -1285,3 +1285,40 @@ static inline struct kvm_vmx* to_kvm_vmx(struct kvm* kvm) {
 void vmx_sgdt(struct desc_ptr* dt);
 
 void __vmx_set_segment(struct kvm_vcpu* vcpu, struct kvm_segment* var, int seg);
+
+USHORT vmx_str();
+USHORT vmx_sldt();
+
+#define GDT_SEL     0
+#define LDT_SEL     1
+
+#include <pshpack1.h>
+typedef struct x86_segment_selector {
+	union {
+		uint16_t sel;
+		struct {
+			uint16_t rpl : 2;
+			uint16_t ti : 1;
+			uint16_t index : 13;
+		};
+	};
+}x86_segment_selector;
+
+typedef struct x86_segment_descriptor {
+	uint64_t limit0 : 16;
+	uint64_t    base0 : 16;
+	uint64_t    base1 : 8;
+	uint64_t    type : 4;
+	uint64_t    s : 1;
+	uint64_t    dpl : 2;
+	uint64_t    p : 1;
+	uint64_t    limit1 : 4;
+	uint64_t    avl : 1;
+	uint64_t    l : 1;
+	uint64_t    db : 1;
+	uint64_t    g : 1;
+	uint64_t    base2 : 8;
+}x86_segment_descriptor;
+
+#include <poppack.h>
+

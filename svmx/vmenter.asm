@@ -146,5 +146,15 @@ vmx_sgdt PROC
 	ret
 vmx_sgdt ENDP
 
+vmx_str PROC
+	str ax
+	ret
+vmx_str ENDP
+
+vmx_sldt PROC
+	sldt ax
+	ret
+vmx_sldt ENDP
+
 END
 
