@@ -76,26 +76,26 @@ Lspec_ctrl_done:
 	mov rax,[rsp]
 
 	; Check if vmlaunch or vmresume is needed.
-	test VMX_RUN_VMRESUME,ebx
+	test ebx,VMX_RUN_VMRESUME
 
 	; Load guest registers, Don't clobber flags
-	mov VCPU_RCX,rcx
-	mov VCPU_RDX,rdx
-	mov VCPU_RBX,rbx
-	mov VCPU_RBP,rbp
-	mov VCPU_RSI,rsi
-	mov VCPU_RDI,rdi
-	mov VCPU_R8,r8
-	mov VCPU_R9,r9
-	mov VCPU_R10,r10
-	mov VCPU_R11,r11
-	mov VCPU_R12,r12
-	mov VCPU_R13,r13
-	mov VCPU_R14,r14
-	mov VCPU_R15,r15
+	mov rcx,VCPU_RCX
+	mov rdx,VCPU_RDX
+	mov rbx,VCPU_RBX
+	mov rbp,VCPU_RBP
+	mov rsi,VCPU_RSI
+	mov rdi,VCPU_RDI
+	mov r8,VCPU_R8
+	mov r9,VCPU_R9
+	mov r10,VCPU_R10
+	mov r11,VCPU_R11
+	mov r12,VCPU_R12
+	mov r13,VCPU_R13
+	mov r14,VCPU_R14
+	mov r15,VCPU_R15
 	
 	; Load guest RAX, This kills the @regs pointer! 
-	mov VCPU_RAX,RAX
+	mov rax,VCPU_RAX
 	jz Lvmlaunch
 
 	;
@@ -103,11 +103,18 @@ Lspec_ctrl_done:
 	; resumes below at 'vmx_vmexit' due to the VMCS HOST_RIP setting.
 	; So this isn't a typical function and objtool needs to be told to
 	; save the unwind state here and restore it below.
-
+Lvmresume:
+	vmresume
+	jmp Lvmfail
 
 Lvmlaunch:
 	vmlaunch
 
+Lvmfail:
+	; VM-Fail: set return value to 1
+	mov rbx, 1
+	jmp Lclear_regs
+	
 
 __vmx_vcpu_run ENDP
 
@@ -185,6 +192,7 @@ vmx_vmexit PROC
 	; Clear return value to indicate VM-Exit (as opposed to VM-Fail).
 	xor ebx,ebx
 
+Lclear_regs::
 	; Discard @regs. The register is irrelevant, it just can't be RBX.
 	pop rax
 
@@ -225,8 +233,8 @@ vmx_vmexit PROC
 	; single call to retire, before the first unbalanced RET.
 	;
 
-	pop rdx
-	pop rcx
+	pop rdx	; @flags
+	pop rcx 	; @vmx
 
 	call vmx_spec_ctrl_restore_host
 

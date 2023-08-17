@@ -101,7 +101,7 @@ static inline bool kvm_register_is_dirty(struct kvm_vcpu* vcpu,
  * register are read/written irrespective of current vCPU mode.  In other words,
  * odds are good you shouldn't be using the raw variants.
  */
-static inline unsigned long kvm_register_read_raw(struct kvm_vcpu* vcpu, int reg)
+static inline ULONG_PTR kvm_register_read_raw(struct kvm_vcpu* vcpu, int reg)
 {
 	if (!kvm_register_is_available(vcpu, reg))
 		kvm_x86_ops.cache_reg(vcpu, reg);

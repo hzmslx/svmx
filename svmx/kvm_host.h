@@ -853,7 +853,7 @@ struct kvm_vcpu_arch {
 	 * rip and regs accesses must go through
 	 * kvm_{register,rip}_{read,write} functions.
 	 */
-	unsigned long regs[NR_VCPU_REGS];
+	ULONG_PTR regs[NR_VCPU_REGS];
 	u32 regs_avail;
 	u32 regs_dirty;
 	// 类似这些寄存器就是用来缓存真正的cpu值的
@@ -1874,7 +1874,7 @@ long kvm_arch_vcpu_ioctl(unsigned int ioctl, unsigned long arg);
 
 void kvm_set_rflags(struct kvm_vcpu* vcpu, unsigned long rflags);
 bool kvm_is_linear_rip(struct kvm_vcpu* vcpu, unsigned long linear_rip);
-unsigned long kvm_get_linear_rip(struct kvm_vcpu* vcpu);
+ULONG_PTR kvm_get_linear_rip(struct kvm_vcpu* vcpu);
 void kvm_set_segment(struct kvm_vcpu* vcpu, struct kvm_segment* var, int seg);
 int kvm_arch_vcpu_ioctl_set_sregs(struct kvm_vcpu* vcpu,
 	struct kvm_sregs* sregs);

@@ -1257,9 +1257,9 @@ static unsigned long vmx_get_exit_qual(struct kvm_vcpu* vcpu) {
 }
 
 void vmx_prepare_switch_to_guest(struct kvm_vcpu* vcpu);
-void vmx_update_host_rsp(struct vcpu_vmx* vmx, unsigned long host_rsp);
+void vmx_update_host_rsp(struct vcpu_vmx* vmx, ULONG_PTR host_rsp);
 
-bool __vmx_vcpu_run(struct vcpu_vmx* vmx, unsigned long* regs,
+bool __vmx_vcpu_run(struct vcpu_vmx* vmx, ULONG_PTR* regs,
 	unsigned int flags);
 
 void vmx_set_constant_host_state(struct vcpu_vmx* vmx);

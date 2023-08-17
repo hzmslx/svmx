@@ -750,11 +750,10 @@ unsigned int __vmx_vcpu_run_flags(struct vcpu_vmx* vmx) {
 
 static void vmx_vcpu_enter_exit(struct kvm_vcpu* vcpu,
 	unsigned int flags) {
-	UNREFERENCED_PARAMETER(flags);
 	struct vcpu_vmx* vmx = to_vmx(vcpu);
 
 
-	// __vmx_vcpu_run(vmx, (unsigned long*)&vcpu->arch.regs, flags);
+	__vmx_vcpu_run(vmx, (ULONG_PTR*)&vcpu->arch.regs, flags);
 
 	if (vmx->fail)
 		vmx->exit_reason.full = 0xdead;
@@ -2918,8 +2917,11 @@ static void vmx_set_apic_access_page_addr(struct kvm_vcpu* vcpu) {
 		return;
 }
 
-// __vmx_vcpu_run 里调用的
-void vmx_update_host_rsp(struct vcpu_vmx* vmx, unsigned long host_rsp) {
+/*	__vmx_vcpu_run 里调用的
+ *	rcx -> vmx
+ *  rdx -> host_rsp
+ */
+void vmx_update_host_rsp(struct vcpu_vmx* vmx, ULONG_PTR host_rsp) {
 	if (host_rsp != vmx->loaded_vmcs->host_state.rsp) {
 		vmx->loaded_vmcs->host_state.rsp = host_rsp;
 		vmcs_writel(HOST_RSP, host_rsp);

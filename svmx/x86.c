@@ -741,7 +741,7 @@ long kvm_arch_vcpu_ioctl(unsigned int ioctl, unsigned long arg) {
 	return 0;
 }
 
-static inline unsigned long kvm_rip_read(struct kvm_vcpu* vcpu)
+static inline ULONG_PTR kvm_rip_read(struct kvm_vcpu* vcpu)
 {
 	return kvm_register_read_raw(vcpu, VCPU_REGS_RIP);
 }
@@ -751,7 +751,7 @@ static ULONG_PTR get_segment_base(struct kvm_vcpu* vcpu, int seg)
 	return kvm_x86_ops.get_segment_base(vcpu, seg);
 }
 
-unsigned long kvm_get_linear_rip(struct kvm_vcpu* vcpu)
+ULONG_PTR kvm_get_linear_rip(struct kvm_vcpu* vcpu)
 {
 	/* Can't read the RIP when guest state is protected, just return 0 */
 	if (vcpu->arch.guest_state_protected)
