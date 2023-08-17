@@ -40,7 +40,6 @@ static RTL_BITMAP vmx_msr_bitmap_legacy;
 static RTL_BITMAP vmx_msr_bitmap_longmode;
 static RTL_BITMAP vmx_vpid_bitmap;
 
-static ULONG_PTR host_idt_base;
 
 /* Guest_tsc -> host_tsc conversion requires 64-bit division.  */
 static int cpu_preemption_timer_multi;
@@ -522,6 +521,8 @@ static const struct kvm_vmx_segment_field {
 	VMX_SEGMENT_FIELD(LDTR),
 };
 
+static ULONG_PTR host_idt_base;
+
 static inline void vmx_segment_cache_clear(struct vcpu_vmx* vmx)
 {
 	vmx->segment_cache.bitmask = 0;
@@ -624,7 +625,7 @@ void vmx_prepare_switch_to_guest(struct kvm_vcpu* vcpu) {
 	struct vcpu_vmx* vmx = to_vmx(vcpu);
 	struct vmcs_host_state* host_state;
 
-	unsigned long fs_base, gs_base;
+	ULONG_PTR fs_base, gs_base;
 	u16 fs_sel, gs_sel;
 	u32 i;
 
@@ -657,8 +658,8 @@ void vmx_prepare_switch_to_guest(struct kvm_vcpu* vcpu) {
 	fs_sel = vmx_get_fs();
 	gs_sel = vmx_get_gs();
 
-	fs_base = _readfsbase_u32();
-	gs_base = _readgsbase_u32();
+	fs_base = _readfsbase_u64();
+	gs_base = _readgsbase_u64();
 #else
 
 
@@ -669,9 +670,7 @@ void vmx_prepare_switch_to_guest(struct kvm_vcpu* vcpu) {
 }
 
 void vmx_set_host_fs_gs(struct vmcs_host_state* host, u16 fs_sel, u16 gs_sel,
-	unsigned long fs_base, unsigned long gs_base) {
-	UNREFERENCED_PARAMETER(fs_base);
-	UNREFERENCED_PARAMETER(gs_base);
+	ULONG_PTR fs_base, ULONG_PTR gs_base) {
 	if (fs_sel != host->fs_sel) {
 		if (!(fs_sel & 7))
 			vmcs_write16(HOST_FS_SELECTOR, fs_sel);
@@ -685,6 +684,14 @@ void vmx_set_host_fs_gs(struct vmcs_host_state* host, u16 fs_sel, u16 gs_sel,
 		}
 		else
 			vmcs_write16(HOST_FS_SELECTOR, 0);
+	}
+	if (fs_base != host->fs_base) {
+		vmcs_writel(HOST_FS_BASE, fs_base);
+		host->fs_base = fs_base;
+	}
+	if (gs_base != host->gs_base) {
+		vmcs_writel(HOST_GS_BASE, gs_base);
+		host->gs_base = gs_base;
 	}
 }
 
@@ -777,6 +784,13 @@ static fastpath_t vmx_exit_handlers_fastpath(struct kvm_vcpu* vcpu) {
 // 运行虚拟机，进入guest模式，即non root 模式
 static fastpath_t vmx_vcpu_run(struct kvm_vcpu* vcpu) {
 	struct vcpu_vmx* vmx = to_vmx(vcpu);
+
+
+	if (kvm_register_is_dirty(vcpu, VCPU_REGS_RSP))
+		vmcs_writel(GUEST_RSP, vcpu->arch.regs[VCPU_REGS_RSP]);
+	if (kvm_register_is_dirty(vcpu, VCPU_REGS_RIP))
+		vmcs_writel(GUEST_RIP, vcpu->arch.regs[VCPU_REGS_RIP]);
+	vcpu->arch.regs_dirty = 0;
 
 	/* When single-stepping over STI and MOV SS, we must clear the
 	 * corresponding interruptibility bits in the guest state. Otherwise
@@ -2223,6 +2237,30 @@ ULONG_PTR VmcsLoadOnSpecificCore(ULONG_PTR Arg) {
 	return 0;
 }
 
+static uint32_t x86_segment_base(x86_segment_descriptor* desc) {
+	return (uint32_t)((desc->base2 << 24) | (desc->base1 << 16) | desc->base0);
+}
+
+static ULONG_PTR get_segment_base(ULONG_PTR gdt_base, USHORT selector) {
+	x86_segment_selector sel = { selector };
+
+	if (sel.ti == LDT_SEL) {
+		x86_segment_selector ldt_sel = { vmx_sldt() };
+		x86_segment_descriptor* desc = (x86_segment_descriptor*)(gdt_base +
+			ldt_sel.index * sizeof(x86_segment_descriptor));
+		uint32_t ldt_base = x86_segment_base(desc);
+		desc = (x86_segment_descriptor*)(ldt_base + sel.index * sizeof(x86_segment_descriptor));
+		return x86_segment_base(desc);
+	}
+	else {
+		x86_segment_descriptor* desc = (x86_segment_descriptor*)(gdt_base +
+			sel.index * sizeof(x86_segment_descriptor));
+		return x86_segment_base(desc);
+	}
+
+}
+
+
 void vmx_vcpu_load_vmcs(struct kvm_vcpu* vcpu, int cpu,
 	struct loaded_vmcs* buddy) {
 	UNREFERENCED_PARAMETER(buddy);
@@ -2250,12 +2288,16 @@ void vmx_vcpu_load_vmcs(struct kvm_vcpu* vcpu, int cpu,
 	}
 
 	if (!already_loaded) {
-
+		struct desc_ptr gdt;
+		vmx_sgdt(&gdt);
+		uint16_t sel = vmx_str();
+		ULONG_PTR base = get_segment_base(gdt.address, sel);
 		/*
 		 * per-cpu TSS and GDT ?, so set these when switching
 		 * processors.  See 22.2.4.
 		 */
-		
+		vmcs_writel(HOST_TR_BASE, base);
+		vmcs_writel(HOST_GDTR_BASE, gdt.address);
 
 		// 设置cpu
 		vmx->loaded_vmcs->cpu = cpu;
@@ -2506,6 +2548,8 @@ static void init_vmcs(struct vcpu_vmx* vmx) {
 	vmcs_write16(HOST_FS_SELECTOR, 0); /* 22.2.4 */
 	vmcs_write16(HOST_GS_SELECTOR, 0); /* 22.2.4 */
 	vmx_set_constant_host_state(vmx);
+	vmcs_writel(HOST_FS_BASE, __readmsr(MSR_FS_BASE)); /* 22.2.4 */
+	vmcs_writel(HOST_GS_BASE, __readmsr(MSR_GS_BASE)); /* 22.2.4 */
 
 	if (cpu_has_vmx_xsaves())
 		vmcs_write64(XSS_EXIT_BITMAP, VMX_XSS_EXIT_BITMAP);
@@ -2555,28 +2599,8 @@ static void init_vmcs(struct vcpu_vmx* vmx) {
 	
 }
 
-static uint32_t x86_segment_base(x86_segment_descriptor* desc) {
-	return (uint32_t)((desc->base2 << 24) | (desc->base1 << 16) | desc->base0);
-}
 
-static ULONG_PTR get_segment_base(ULONG_PTR gdt_base,USHORT selector) {
-	x86_segment_selector sel = { selector };
-	
-	if (sel.ti == LDT_SEL) {
-		x86_segment_selector ldt_sel = { vmx_sldt() };
-		x86_segment_descriptor* desc = (x86_segment_descriptor*)(gdt_base +
-			ldt_sel.index * sizeof(x86_segment_descriptor));
-		uint32_t ldt_base = x86_segment_base(desc);
-		desc = (x86_segment_descriptor*)(ldt_base + sel.index * sizeof(x86_segment_descriptor));
-		return x86_segment_base(desc);
-	}
-	else {
-		x86_segment_descriptor* desc = (x86_segment_descriptor*)(gdt_base +
-			sel.index * sizeof(x86_segment_descriptor));
-		return x86_segment_base(desc);
-	}
 
-}
 
 static void __vmx_vcpu_reset(struct kvm_vcpu* vcpu) {
 	struct vcpu_vmx* vmx = to_vmx(vcpu);
@@ -2894,6 +2918,7 @@ static void vmx_set_apic_access_page_addr(struct kvm_vcpu* vcpu) {
 		return;
 }
 
+// __vmx_vcpu_run 里调用的
 void vmx_update_host_rsp(struct vcpu_vmx* vmx, unsigned long host_rsp) {
 	if (host_rsp != vmx->loaded_vmcs->host_state.rsp) {
 		vmx->loaded_vmcs->host_state.rsp = host_rsp;
@@ -2928,6 +2953,8 @@ static void vmx_load_mmu_pgd(struct kvm_vcpu* vcpu, hpa_t root_hpa,
 		vmcs_writel(GUEST_CR3, guest_cr3);
 }
 
+
+
 void vmx_set_constant_host_state(struct vcpu_vmx* vmx) {
 	UNREFERENCED_PARAMETER(vmx);
 
@@ -2957,8 +2984,26 @@ void vmx_set_constant_host_state(struct vcpu_vmx* vmx) {
 #else
 	
 #endif // WIN64
-	vmcs_write16(HOST_SS_SELECTOR, vmx_get_ss());
-	
+	vmcs_write16(HOST_SS_SELECTOR, vmx_get_ss()); /* 22.2.4 */
+	vmcs_write16(HOST_TR_SELECTOR, vmx_str()); /* 22.2.4 */
+
+
+	vmcs_writel(HOST_IDTR_BASE, host_idt_base); /* 22.2.4 */
+
+	vmcs_writel(HOST_RIP, (ULONG_PTR)vmx_vmexit); /* 22.2.5 */
+
+	vmcs_write32(HOST_IA32_SYSENTER_CS, (u32)__readmsr(HOST_IA32_SYSENTER_CS));
+
+	/*
+	 * SYSENTER is used for 32-bit system calls on either 32-bit or
+	 * 64-bit kernels.  It is always zero If neither is allowed, otherwise
+	 * vmx_vcpu_load_vmcs loads it with the per-CPU entry stack (and may
+	 * have already done so!).
+	 */
+	vmcs_writel(HOST_IA32_SYSENTER_ESP, __readmsr(MSR_IA32_SYSENTER_ESP));
+
+	vmcs_writel(HOST_IA32_SYSENTER_EIP, __readmsr(MSR_IA32_SYSENTER_EIP));  /* 22.2.3 */
+
 }
 
 void ept_save_pdptrs(struct kvm_vcpu* vcpu)
@@ -3069,4 +3114,9 @@ void __vmx_set_segment(struct kvm_vcpu* vcpu, struct kvm_segment* var,
 		var->type |= 0x1; /* Accessed */
 
 	vmcs_write32(sf->ar_bytes, vmx_segment_access_rights(var));
+}
+
+void vmx_spec_ctrl_restore_host(struct vcpu_vmx* vmx, unsigned int flags) {
+	UNREFERENCED_PARAMETER(vmx);
+	UNREFERENCED_PARAMETER(flags);
 }

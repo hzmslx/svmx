@@ -19,9 +19,9 @@ struct vmcs {
 struct vmcs_host_state {
 	u64 cr3;	/* May not match real cr3 */
 	u64 cr4;	/* May not match real cr4 */
-	unsigned long gs_base;
-	unsigned long fs_base;
-	unsigned long rsp;
+	ULONG_PTR gs_base;
+	ULONG_PTR fs_base;
+	ULONG_PTR rsp;
 
 	u16           fs_sel, gs_sel, ldt_sel;
 #ifdef _WIN64

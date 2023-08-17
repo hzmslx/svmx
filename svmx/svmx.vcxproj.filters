@@ -233,7 +233,7 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <MASM Include="vmenter.asm">
+    <MASM Include="vmxenter.asm">
       <Filter>vmx</Filter>
     </MASM>
   </ItemGroup>

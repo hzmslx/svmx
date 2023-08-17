@@ -1271,7 +1271,7 @@ USHORT vmx_get_ds();
 USHORT vmx_get_fs();
 
 void vmx_set_host_fs_gs(struct vmcs_host_state* host, u16 fs_sel, u16 gs_sel,
-	unsigned long fs_base, unsigned long gs_base);
+	ULONG_PTR fs_base, ULONG_PTR gs_base);
 
 USHORT vmx_get_gs();
 
@@ -1322,3 +1322,6 @@ typedef struct x86_segment_descriptor {
 
 #include <poppack.h>
 
+void vmx_vmexit(void);
+
+void vmx_spec_ctrl_restore_host(struct vcpu_vmx* vmx, unsigned int flags);
