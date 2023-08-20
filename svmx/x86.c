@@ -545,8 +545,10 @@ static int kvm_get_msr_feature(struct kvm_msr_entry* msr)
 		msr->data = kvm_get_arch_capabilities();
 		break;
 	case MSR_IA32_PERF_CAPABILITIES:
-		
+	{
+
 		break;
+	}
 	case MSR_IA32_UCODE_REV:
 		msr->data = __readmsr(msr->index);
 		break;
@@ -564,6 +566,9 @@ long kvm_arch_dev_ioctl(unsigned int ioctl, unsigned long arg) {
 	case KVM_GET_MSR_FEATURE_INDEX_LIST:
 		r = 0;
 		break;
+
+	case KVM_GET_SUPPORTED_CPUID:
+
 	default:
 		r = STATUS_INVALID_PARAMETER;
 		break;

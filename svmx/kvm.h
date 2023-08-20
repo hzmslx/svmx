@@ -79,20 +79,50 @@ struct kvm_userspace_memory_region {
 /* for KVM_RUN */
 struct kvm_run {
 	/* in */
+	/*
+	* Request that KVM_RUN return when it becomes possible to inject external
+	* interrupts into the guest. Useful in conjunction with KVM_INTERRUPT.
+	*/
 	__u8 request_interrupt_window;
+	/*
+	* This field is polled once when KVM_RUN starts; if non-zero, KVM_RUN
+	* exits immediately.
+	*/
 	__u8 immediate_exit;
 	__u8 padding1[6];
 
 	/* out */
+	/*
+	* When KVM_RUN has returned successfully (return value 0), this informs
+	* application code why KVM_RUN has returned. Allowable values for this
+	* field are detailed below.
+	*/
 	__u32 exit_reason;
+	__u8 ready_for_interrupt_injection;
+	__u8 if_flag;
+	__u16 flags;
 
+	/* in (per_kvm_run), out (post_kvm_run) */
+	__u64 cr8;
+	__u64 apic_base;
 
 
 	union {
+		/* KVM_EXIT_UNKNOWN */
+		struct {
+			__u64 hardware_exit_reason;
+		}hw;
+		/* KVM_EXIT_FAIL_ENTRY */
 		struct {
 			__u64 hardware_entry_failure_reason;
 			__u32 cpu;
 		} fail_entry;
+		/* KVM_EXIT_EXCEPTION */
+		struct {
+			__u32 exception;
+			__u32 error_code;
+		}ex;
+
 	};
 };
 
@@ -241,7 +271,7 @@ int kvm_vm_ioctl_create_vcpu(struct kvm* kvm, u32 id);
 #define KVM_CAP_MAX_VCPUS 66       /* returns max vcpus per vm */
 #define KVM_CAP_PPC_HIOR 67
 #define KVM_CAP_PPC_PAPR 68
-#define KVM_CAP_SW_TLB 69
+
 #define KVM_CAP_ONE_REG 70
 #define KVM_CAP_S390_GMAP 71
 #define KVM_CAP_TSC_DEADLINE_TIMER 72
@@ -257,82 +287,72 @@ int kvm_vm_ioctl_create_vcpu(struct kvm* kvm, u32 id);
 #define KVM_CAP_IRQFD_RESAMPLE 82
 #define KVM_CAP_PPC_BOOKE_WATCHDOG 83
 #define KVM_CAP_PPC_HTAB_FD 84
-#define KVM_CAP_S390_CSS_SUPPORT 85
-#define KVM_CAP_PPC_EPR 86
+
+
 #define KVM_CAP_ARM_PSCI 87
 #define KVM_CAP_ARM_SET_DEVICE_ADDR 88
 #define KVM_CAP_DEVICE_CTRL 89
-#define KVM_CAP_IRQ_MPIC 90
+
 #define KVM_CAP_PPC_RTAS 91
-#define KVM_CAP_IRQ_XICS 92
+
 #define KVM_CAP_ARM_EL1_32BIT 93
 #define KVM_CAP_SPAPR_MULTITCE 94
 #define KVM_CAP_EXT_EMUL_CPUID 95
 #define KVM_CAP_HYPERV_TIME 96
 #define KVM_CAP_IOAPIC_POLARITY_IGNORED 97
 #define KVM_CAP_ENABLE_CAP_VM 98
-#define KVM_CAP_S390_IRQCHIP 99
+
 #define KVM_CAP_IOEVENTFD_NO_LENGTH 100
 #define KVM_CAP_VM_ATTRIBUTES 101
-#define KVM_CAP_ARM_PSCI_0_2 102
-#define KVM_CAP_PPC_FIXUP_HCALL 103
-#define KVM_CAP_PPC_ENABLE_HCALL 104
+
+
 #define KVM_CAP_CHECK_EXTENSION_VM 105
-#define KVM_CAP_S390_USER_SIGP 106
-#define KVM_CAP_S390_VECTOR_REGISTERS 107
-#define KVM_CAP_S390_MEM_OP 108
-#define KVM_CAP_S390_USER_STSI 109
-#define KVM_CAP_S390_SKEYS 110
-#define KVM_CAP_MIPS_FPU 111
-#define KVM_CAP_MIPS_MSA 112
-#define KVM_CAP_S390_INJECT_IRQ 113
-#define KVM_CAP_S390_IRQ_STATE 114
-#define KVM_CAP_PPC_HWRNG 115
+
+
+
+
 #define KVM_CAP_DISABLE_QUIRKS 116
 #define KVM_CAP_X86_SMM 117
 #define KVM_CAP_MULTI_ADDRESS_SPACE 118
 #define KVM_CAP_GUEST_DEBUG_HW_BPS 119
 #define KVM_CAP_GUEST_DEBUG_HW_WPS 120
+/*
+* Create a local apic for each processor in the kernel.
+*/
 #define KVM_CAP_SPLIT_IRQCHIP 121
 #define KVM_CAP_IOEVENTFD_ANY_LENGTH 122
 #define KVM_CAP_HYPERV_SYNIC 123
-#define KVM_CAP_S390_RI 124
+
 #define KVM_CAP_SPAPR_TCE_64 125
-#define KVM_CAP_ARM_PMU_V3 126
+
 #define KVM_CAP_VCPU_ATTRIBUTES 127
 #define KVM_CAP_MAX_VCPU_ID 128
 #define KVM_CAP_X2APIC_API 129
-#define KVM_CAP_S390_USER_INSTR0 130
+
 #define KVM_CAP_MSI_DEVID 131
-#define KVM_CAP_PPC_HTM 132
+
 #define KVM_CAP_SPAPR_RESIZE_HPT 133
-#define KVM_CAP_PPC_MMU_RADIX 134
-#define KVM_CAP_PPC_MMU_HASH_V3 135
+
 #define KVM_CAP_IMMEDIATE_EXIT 136
-#define KVM_CAP_MIPS_VZ 137
-#define KVM_CAP_MIPS_TE 138
-#define KVM_CAP_MIPS_64BIT 139
-#define KVM_CAP_S390_GS 140
-#define KVM_CAP_S390_AIS 141
+
 #define KVM_CAP_SPAPR_TCE_VFIO 142
 #define KVM_CAP_X86_DISABLE_EXITS 143
 #define KVM_CAP_ARM_USER_IRQ 144
 #define KVM_CAP_S390_CMMA_MIGRATION 145
-#define KVM_CAP_PPC_FWNMI 146
-#define KVM_CAP_PPC_SMT_POSSIBLE 147
+
 #define KVM_CAP_HYPERV_SYNIC2 148
 #define KVM_CAP_HYPERV_VP_INDEX 149
-#define KVM_CAP_S390_AIS_MIGRATION 150
+
 #define KVM_CAP_PPC_GET_CPU_CHAR 151
-#define KVM_CAP_S390_BPB 152
+
 #define KVM_CAP_GET_MSR_FEATURES 153
 #define KVM_CAP_HYPERV_EVENTFD 154
 #define KVM_CAP_HYPERV_TLBFLUSH 155
-#define KVM_CAP_S390_HPAGE_1M 156
+
 #define KVM_CAP_NESTED_STATE 157
-#define KVM_CAP_ARM_INJECT_SERROR_ESR 158
+
 #define KVM_CAP_MSR_PLATFORM_INFO 159
-#define KVM_CAP_PPC_NESTED_HV 160
+
 #define KVM_CAP_HYPERV_SEND_IPI 161
 #define KVM_CAP_COALESCED_PIO 162
 #define KVM_CAP_HYPERV_ENLIGHTENED_VMCS 163
@@ -341,24 +361,21 @@ int kvm_vm_ioctl_create_vcpu(struct kvm* kvm, u32 id);
 #define KVM_CAP_MANUAL_DIRTY_LOG_PROTECT 166 /* Obsolete */
 #define KVM_CAP_HYPERV_CPUID 167
 #define KVM_CAP_MANUAL_DIRTY_LOG_PROTECT2 168
-#define KVM_CAP_PPC_IRQ_XIVE 169
-#define KVM_CAP_ARM_SVE 170
-#define KVM_CAP_ARM_PTRAUTH_ADDRESS 171
-#define KVM_CAP_ARM_PTRAUTH_GENERIC 172
+
+
 #define KVM_CAP_PMU_EVENT_FILTER 173
 #define KVM_CAP_ARM_IRQ_LINE_LAYOUT_2 174
 #define KVM_CAP_HYPERV_DIRECT_TLBFLUSH 175
 #define KVM_CAP_PPC_GUEST_DEBUG_SSTEP 176
 #define KVM_CAP_ARM_NISV_TO_USER 177
 #define KVM_CAP_ARM_INJECT_EXT_DABT 178
-#define KVM_CAP_S390_VCPU_RESETS 179
-#define KVM_CAP_S390_PROTECTED 180
-#define KVM_CAP_PPC_SECURE_GUEST 181
+
+
 #define KVM_CAP_HALT_POLL 182
 #define KVM_CAP_ASYNC_PF_INT 183
 #define KVM_CAP_LAST_CPU 184
 #define KVM_CAP_SMALLER_MAXPHYADDR 185
-#define KVM_CAP_S390_DIAG318 186
+
 #define KVM_CAP_STEAL_TIME 187
 #define KVM_CAP_X86_USER_SPACE_MSR 188
 #define KVM_CAP_X86_MSR_FILTER 189
@@ -366,7 +383,7 @@ int kvm_vm_ioctl_create_vcpu(struct kvm* kvm, u32 id);
 #define KVM_CAP_SYS_HYPERV_CPUID 191
 #define KVM_CAP_DIRTY_LOG_RING 192
 #define KVM_CAP_X86_BUS_LOCK_EXIT 193
-#define KVM_CAP_PPC_DAWR1 194
+
 #define KVM_CAP_SET_GUEST_DEBUG2 195
 #define KVM_CAP_SGX_ATTRIBUTE 196
 #define KVM_CAP_VM_COPY_ENC_CONTEXT_FROM 197
@@ -374,10 +391,10 @@ int kvm_vm_ioctl_create_vcpu(struct kvm* kvm, u32 id);
 #define KVM_CAP_HYPERV_ENFORCE_CPUID 199
 #define KVM_CAP_SREGS2 200
 #define KVM_CAP_EXIT_HYPERCALL 201
-#define KVM_CAP_PPC_RPT_INVALIDATE 202
+
 #define KVM_CAP_BINARY_STATS_FD 203
 #define KVM_CAP_EXIT_ON_EMULATION_FAILURE 204
-#define KVM_CAP_ARM_MTE 205
+
 #define KVM_CAP_VM_MOVE_ENC_CONTEXT_FROM 206
 #define KVM_CAP_VM_GPA_BITS 207
 #define KVM_CAP_XSAVE2 208
