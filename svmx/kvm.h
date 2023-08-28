@@ -69,11 +69,11 @@ struct kvm_segment {
 
 /* for KVM_SET_USER_MEMORY_REGION */
 struct kvm_userspace_memory_region {
-	__u32 slot;
-	__u32 flags;
-	__u64 guest_phys_addr;// guest的物理地址起始位置
-	__u64 memory_size; /* bytes */
-	__u64 userspace_addr; /* start of the userspace allocated memory */
+	__u32 slot; // slot编号
+	__u32 flags; // 标志位，例如是否追踪脏页、是否可用等
+	__u64 guest_phys_addr;// guest的物理地址起始位置，即GPA
+	__u64 memory_size; /* 内存大小，单位bytes */
+	__u64 userspace_addr; /* start of the userspace allocated memory, 即HVA */
 };
 
 /* for KVM_RUN */
@@ -124,6 +124,16 @@ struct kvm_run {
 		}ex;
 
 	};
+};
+
+/* for KVM_GET_REGS and KVM_SET_REGS */
+struct kvm_regs {
+	/* out (KVM_GET_REGS) / in (KVM_SET_REGS) */
+	__u64 rax, rbx, rcx, rdx;
+	__u64 rsi, rdi, rsp, rbp;
+	__u64 r8, r9, r10, r11;
+	__u64 r12, r13, r14, r15;
+	__u64 rip, rflags;
 };
 
 #define KVM_GUESTDBG_USE_SW_BP		0x00010000

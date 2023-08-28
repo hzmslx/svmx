@@ -221,13 +221,13 @@
 * Translates a virtual address according to the vcpu's current address
 * translation mode.
 */
-#define KVM_TRANSLATE CTL_CODE(KVM_DEVICE,0x815,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_TRANSLATE CTL_CODE(KVM_DEVICE,0x815,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 
 /*
 * Queues a hardware interrupt vector to be injected.
 */
-#define KVM_INTERRUPT CTL_CODE(KVM_DEVICE,0x816,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_INTERRUPT CTL_CODE(KVM_DEVICE,0x816,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * Writes model-specific registers to the vcpu. 
@@ -241,7 +241,7 @@
 * by KVM, etc..., it stops prossing the MSR list and returns the number of 
 * MSRs that have been set successfully.
 */
-#define KVM_SET_MSRS CTL_CODE(KVM_DEVICE,0x817,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_SET_MSRS CTL_CODE(KVM_DEVICE,0x817,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * Defines the vcpu responses to the cpuid instruction. Applications
@@ -258,17 +258,17 @@
 * 
 * 
 */
-#define KVM_SET_CPUID CTL_CODE(KVM_DEVICE,0x818,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_SET_CPUID CTL_CODE(KVM_DEVICE,0x818,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * Reads the floating point state from the vcpu.
 */
-#define KVM_GET_FPU CTL_CODE(KVM_DEVICE,0x819,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_GET_FPU CTL_CODE(KVM_DEVICE,0x819,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * Writes the floating point state to the vcpu.
 */
-#define KVM_SET_FPU CTL_CODE(KVM_DEVICE,0x81A,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_SET_FPU CTL_CODE(KVM_DEVICE,0x81A,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * Creates an interrupt controller model in the kernel.
@@ -276,7 +276,7 @@
 * futrue vcpus to have a local APIC. IRQ routing for GSIs 0-15 is set to both
 * PIC and IOAPIC; GSI 16-23 only go to the IOAPIC.
 */
-#define KVM_CREATE_IRQCHIP CTL_CODE(KVM_DEVICE,0x81B,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_CREATE_IRQCHIP CTL_CODE(KVM_DEVICE,0x81B,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * Set the level of a GSI input to the interrupt controller model in the kernel.
@@ -299,55 +299,55 @@
 * 
 * 
 */
-#define KVM_IRQ_LINE CTL_CODE(KVM_DEVICE,0x81C,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_IRQ_LINE CTL_CODE(KVM_DEVICE,0x81C,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * Reads the state of a kernel interrupt controller created with
 * KVM_CREATE_IRQCHIP into a buffer provided by the caller.
 */
-#define KVM_GET_IRQCHIP CTL_CODE(KVM_DEVICE,0x81D,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_GET_IRQCHIP CTL_CODE(KVM_DEVICE,0x81D,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * Sets the state of a kernel interrupt controller created with 
 * KVM_CREATE_IRQCHIP from a buffer provided by the caller.
 */
-#define KVM_SET_IRQCHIP CTL_CODE(KVM_DEVICE,0x81E,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_SET_IRQCHIP CTL_CODE(KVM_DEVICE,0x81E,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * Gets the current timestamp of kvmclock as seen by the current guest. In 
 * conjunction with KVM_SET_CLOCK, it is used to ensure monotonicity on scenarios
 * such as migration.
 */
-#define KVM_GET_CLOCK CTL_CODE(KVM_DEVICE,0x81F,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_GET_CLOCK CTL_CODE(KVM_DEVICE,0x81F,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * Sets the current timestamp of kvmclock to the value specified in its parameter.
 * In conjunction with KVM_GET_CLOCK, it is used to ensure monotonicity on scenarios
 * such as migration.
 */
-#define KVM_SET_CLOCK CTL_CODE(KVM_DEVICE,0x820,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_SET_CLOCK CTL_CODE(KVM_DEVICE,0x820,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * Gets currently pending exceptions, interrupts, and NMIs as well as related
 * states of the vcpu.
 */
-#define KVM_GET_VCPU_EVENTS CTL_CODE(KVM_DEVICE,0x821,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_GET_VCPU_EVENTS CTL_CODE(KVM_DEVICE,0x821,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * Set pending exceptions, interrupts, and NMIs as well as related states of the
 * vcpu.
 */
-#define KVM_SET_VCPU_EVENTS CTL_CODE(KVM_DEVICE,0x822,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_SET_VCPU_EVENTS CTL_CODE(KVM_DEVICE,0x822,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * Reads debug registers from the vcpu.
 */
-#define KVM_GET_DEBUGREGS CTL_CODE(KVM_DEVICE,0x823,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_GET_DEBUGREGS CTL_CODE(KVM_DEVICE,0x823,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * Writes debug registers into the vcpu.
 */
-#define KVM_SET_DEBUGREGS CTL_CODE(KVM_DEVICE,0x824,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_SET_DEBUGREGS CTL_CODE(KVM_DEVICE,0x824,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * This ioctl defines the phsical address of a three-page region in the guest
@@ -360,7 +360,7 @@
 * because of a quirk in the virtualization implementation (see the internals
 * documentation when it pops into existence).
 */
-#define KVM_SET_TSS_ADDR CTL_CODE(KVM_DEVICE,0x825,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_SET_TSS_ADDR CTL_CODE(KVM_DEVICE,0x825,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * Not all extension are enabled by default. Using this ioctl the application
@@ -372,7 +372,7 @@
 * To check if a capability can be enabled, the KVM_CHECK_EXTENSION ioctl should
 * be used.
 */
-#define KVM_ENABLE_CAP CTL_CODE(KVM_DEVICE,0x826,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_ENABLE_CAP CTL_CODE(KVM_DEVICE,0x826,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * Returns the vcpu's current "multiprocessing state" (though also valid on
@@ -382,7 +382,7 @@
 * in-kernel irqchip, the multiprocessing state must be maintained by userspace on
 * these architectures.
 */
-#define KVM_GET_MP_STATE CTL_CODE(KVM_DEVICE,0x827,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_GET_MP_STATE CTL_CODE(KVM_DEVICE,0x827,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * Define which vcpu is the Boostrap Processor (BSP). Values are the same as 
@@ -390,12 +390,12 @@
 * is vcpu 0. This ioctl has to be called before vcpu creation,
 * otherwise it will return error.
 */
-#define KVM_SET_BOOT_CPU_ID CTL_CODE(KVM_DEVICE,0x828,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_SET_BOOT_CPU_ID CTL_CODE(KVM_DEVICE,0x828,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * This ioctl would copy current vcpu's xsave struct to the userspace.
 */
-#define KVM_GET_XSAVE CTL_CODE(KVM_DEVICE,0x829,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_GET_XSAVE CTL_CODE(KVM_DEVICE,0x829,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * This ioctl would copy userspace's xsave struct to the kernel. It copies
@@ -407,17 +407,17 @@
 * The offsets of the state save areas in struct kvm_xsave follow the
 * contents of CPUID leaf 0xD on the host.
 */
-#define KVM_SET_XSAVE CTL_CODE(KVM_DEVICE,0x82A,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_SET_XSAVE CTL_CODE(KVM_DEVICE,0x82A,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * This ioctl would copy current vcpu's xcrs to the userspace.
 */
-#define KVM_GET_XCRS CTL_CODE(KVM_DEVICE,0x82B,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_GET_XCRS CTL_CODE(KVM_DEVICE,0x82B,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * This ioctl would set vcpu's xcr to the value userspace specified.
 */
-#define KVM_SET_XCRS CTL_CODE(KVM_DEVICE,0x82C,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_SET_XCRS CTL_CODE(KVM_DEVICE,0x82C,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * This ioctl returns x86 cpuid features which are supported by both the 
@@ -429,7 +429,7 @@
 * feature consistency across a cluster).
 *
 */
-#define KVM_GET_SUPPORTED_CPUID CTL_CODE(KVM_DEVICE,0x82D,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_GET_SUPPORTED_CPUID CTL_CODE(KVM_DEVICE,0x82D,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * This ioctl fetches PV specific information that need to pe passed to the guest
@@ -440,43 +440,43 @@
 * If any additional field gets added to this structure later on, a bit for that
 * additional piece of information will be set in the flags bitmap.
 */
-#define KVM_PPC_GET_PVINFO CTL_CODE(KVM_DEVICE,0x82E,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_PPC_GET_PVINFO CTL_CODE(KVM_DEVICE,0x82E,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * Sets the GSI routing table entries, overwriting any previously set entries.
 */
-#define KVM_SET_GSI_ROUTING CTL_CODE(KVM_DEVICE,0x82F,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_SET_GSI_ROUTING CTL_CODE(KVM_DEVICE,0x82F,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 
 /*
 * Sepecifies  the tsc frequency for the virtual machine. The unit of the
 * frequency is KHz.
 */
-#define KVM_SET_TSC_KHZ CTL_CODE(KVM_DEVICE,0x830,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_SET_TSC_KHZ CTL_CODE(KVM_DEVICE,0x830,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * Returns the tsc frequency of the guest. The unit of the return value is
 * KHz. 
 */
-#define KVM_GET_TSC_KHZ CTL_CODE(KVM_DEVICE,0x830,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_GET_TSC_KHZ CTL_CODE(KVM_DEVICE,0x830,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * Reads the Local APIC registers and copies them into the input argument. The
 * data format and layout are the same as documented in the architecture manual.
 */
-#define KVM_GET_LAPIC CTL_CODE(KVM_DEVICE,0x831,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_GET_LAPIC CTL_CODE(KVM_DEVICE,0x831,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * Copies the input argument into the Local APIC registers. The data format 
 * and layout are the same as documented in the architecture manual.
 */
-#define KVM_SET_LAPIC CTL_CODE(KVM_DEVICE,0x832,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_SET_LAPIC CTL_CODE(KVM_DEVICE,0x832,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * This must be called whenever userspace has changed an entry in the shared
 * TLB, prior to calling KVM_RUN on the associated vcpu.
 */
-#define KVM_DIRTY_TLB CTL_CODE(KVM_DEVICE,0x833,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_DIRTY_TLB CTL_CODE(KVM_DEVICE,0x833,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * Queues an NMI on the thread's vcpu. Note this is well defined only
@@ -484,32 +484,32 @@
 * between the virtual cpu core and virtual local APIC. After KVM_CREATE_IRQCHIP
 * has been called, this interface is completely emulated within the kernel.
 */
-#define KVM_NMI CTL_CODE(KVM_DEVICE,0x834,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_NMI CTL_CODE(KVM_DEVICE,0x834,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * This ioctl sets a flag accessible to the guest indicating that the specified
 * vCPU has been paused by the host userspace.
 */
-#define KVM_KVMCLOCK_CTRL CTL_CODE(KVM_DEVICE,0x835,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_KVMCLOCK_CTRL CTL_CODE(KVM_DEVICE,0x835,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * Directly inject a MSI message. Only valid with in-kernel irqchip that handles
 * MSI messages.
 */
-#define KVM_SIGNAL_MSI CTL_CODE(KVM_DEVICE,0x836,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_SIGNAL_MSI CTL_CODE(KVM_DEVICE,0x836,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * Creates an in-kernel device model for the i8254 PIT. This call is only valid
 * after enabling in-kernel irqchip support via KVM_CREATE_IRQCHIP. The following
 * parameters have to be passed.
 */
-#define KVM_CREATE_PIT2 CTL_CODE(KVM_DEVICE,0x837,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_CREATE_PIT2 CTL_CODE(KVM_DEVICE,0x837,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * Retrieves the state of the in-kernel PIT model. Only valid after
 * KVM_CREATE_PIT2. 
 */
-#define KVM_CREATE_PIT2 CTL_CODE(KVM_DEVICE,0x838,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_GET_PIT2 CTL_CODE(KVM_DEVICE,0x838,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * Sets the state of the in-kernel PIT model. Only valid after KVM_CREATE_PIT2.
@@ -517,7 +517,7 @@
 * 
 * This IOCTL replaces the obsolete KVM_SET_PIT.
 */
-#define KVM_SET_PIT2 CTL_CODE(KVM_DEVICE,0x839,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_SET_PIT2 CTL_CODE(KVM_DEVICE,0x839,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * The member 'flag' is used for passing flags from userspace.
@@ -528,12 +528,12 @@
 * 
 * 
 */
-#define KVM_GET_EMULATED_CPUID CTL_CODE(KVM_DEVICE,0x83A,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_GET_EMULATED_CPUID CTL_CODE(KVM_DEVICE,0x83A,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * Queues an SMI on the thread's vcpu.
 */
-#define KVM_SMI CTL_CODE(KVM_DEVICE,0x83B,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_SMI CTL_CODE(KVM_DEVICE,0x83B,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * This ioctl allows userspace to define up to 16 bitmaps of MSR ranges to deny
@@ -560,20 +560,20 @@
 * filtering. In that mode, KVM_MSR_FILTER_DEFAULT_DENY is invalid and caouses an
 * error.
 */
-#define KVM_X86_SET_MSR_FILTER CTL_CODE(KVM_DEVICE,0x83C,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_X86_SET_MSR_FILTER CTL_CODE(KVM_DEVICE,0x83C,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 
 /*
 * i8254 (PIT) has two modes, reinject and !reinject.
 */
-#define KVM_REINJECT_CONTROL CTL_CODE(KVM_DEVICE,0x83D,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_REINJECT_CONTROL CTL_CODE(KVM_DEVICE,0x83D,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * Returns supported MCE capabilities.The u64 mce_cap parameter
 * has the same format as the MSR_IA32_MCG_CAP register. Supported
 * capabilities will have the corresponding bits set.
 */
-#define KVM_X86_GET_MCE_CAP_SUPPORTED CTL_CODE(KVM_DEVICE,0x83E,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_X86_GET_MCE_CAP_SUPPORTED CTL_CODE(KVM_DEVICE,0x83E,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 
 /*
@@ -584,7 +584,7 @@
 * checking for KVM_CAP_MCE. The supported capabilities can be
 * retrieved with KVM_X86_GET_MCE_CAP_SUPPORTED.
 */
-#define KVM_X86_SETUP_MCE CTL_CODE(KVM_DEVICE,0x83F,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_X86_SETUP_MCE CTL_CODE(KVM_DEVICE,0x83F,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * Inject a machine check error (MCE) into the guest.
@@ -598,7 +598,7 @@
 * store it in the corresponding bank (provided this bank is
 * not holding a previously reported uncorrected error).
 */
-#define KVM_X86_SET_MCE CTL_CODE(KVM_DEVICE,0x840,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_X86_SET_MCE CTL_CODE(KVM_DEVICE,0x840,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * If the platform supports creating encrypted VMs then this ioctl can be used
@@ -608,7 +608,7 @@
 * Currently, this ioctl is used for issuing Secure Encrypted Virtualization
 * (SEV) commands on AMD Processors. 
 */
-#define KVM_MEMORY_ENCRYPT_OP CTL_CODE(KVM_DEVICE,0x841,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_MEMORY_ENCRYPT_OP CTL_CODE(KVM_DEVICE,0x841,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * This ioctl can be used to register a guest memory region which may
@@ -626,13 +626,13 @@
 * swap or migrate (move) ciphertext pages. Hence, for now we pin the guest
 * memory region registered with the ioctl.
 */
-#define KVM_MEMORY_ENCRYPT_REG_REGION CTL_CODE(KVM_DEVICE,0x842,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_MEMORY_ENCRYPT_REG_REGION CTL_CODE(KVM_DEVICE,0x842,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * This ioctl can be used to unregister the guest memory region registered
 * with KVM_MEMORY_ENCRYPT_REG_REGION ioctl above.
 */
-#define KVM_MEMORY_ENCRYPT_UNREG_REGION CTL_CODE(KVM_DEVICE,0x843,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_MEMORY_ENCRYPT_UNREG_REGION CTL_CODE(KVM_DEVICE,0x843,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * This ioctl copies the vcpu's nested virtualization state from the kernel to
@@ -641,19 +641,19 @@
 * The maximum size of the state can be retrieved by passing KVM_CAP_NESTED_STATE
 * to the KVM_CHECK_EXTENSION ioctl().
 */
-#define KVM_GET_NESTED_STATE CTL_CODE(KVM_DEVICE,0x844,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_GET_NESTED_STATE CTL_CODE(KVM_DEVICE,0x844,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * This copies the vcpu's kvm_nested_state struct from userspace to the kernel.
 * 
 */
-#define KVM_SET_NESTED_STATE CTL_CODE(KVM_DEVICE,0x845,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_SET_NESTED_STATE CTL_CODE(KVM_DEVICE,0x845,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * Read special registers from the vcpu.
 * This ioctl (when supported) replaces the KVM_GET_SREGS.
 */
-#define KVM_GET_SREGS2 CTL_CODE(KVM_DEVICE,0x846,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_GET_SREGS2 CTL_CODE(KVM_DEVICE,0x846,METHOD_BUFFERED,FILE_ANY_ACCESS)
 
 /*
 * This ioctl would copy current vcpu's xsave struct to the userspace. It
@@ -665,4 +665,4 @@
 * The offsets of the state save areas in struct kvm_xsave follow the contets
 * of CPUID leaf 0xD on the host.
 */
-#define KVM_GET_XSAVE2 CTL_CODE(KVM_DEVICE,0x847,METHOD_BUFFERED,FILA_ANY_ACCESS)
+#define KVM_GET_XSAVE2 CTL_CODE(KVM_DEVICE,0x847,METHOD_BUFFERED,FILE_ANY_ACCESS)

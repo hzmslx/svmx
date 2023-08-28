@@ -492,6 +492,10 @@ void kvm_vcpu_reset(struct kvm_vcpu* vcpu, bool init_event) {
 	vcpu->arch.dr7 = DR7_FIXED_1;
 	kvm_update_dr7(vcpu);
 
+	/* All GPRs except RDX (handled below) are zeroed on RESET/INIT. */
+	memset(vcpu->arch.regs, 0, sizeof(vcpu->arch.regs));
+	kvm_register_mark_dirty(vcpu, VCPU_REGS_RSP);
+
 	/*
 	* CR0.CD/NW are set on RESET, preserved on INIT.  Note, some versions
 	* of Intel's SDM list CD/NW as being set on INIT, but they contradict
@@ -560,7 +564,8 @@ static int kvm_get_msr_feature(struct kvm_msr_entry* msr)
 
 long kvm_arch_dev_ioctl(unsigned int ioctl, unsigned long arg) {
 	UNREFERENCED_PARAMETER(arg);
-	long r;
+	long r = 0;
+
 	switch (ioctl)
 	{
 	case KVM_GET_MSR_FEATURE_INDEX_LIST:
@@ -569,6 +574,7 @@ long kvm_arch_dev_ioctl(unsigned int ioctl, unsigned long arg) {
 
 	case KVM_GET_SUPPORTED_CPUID:
 
+		break;
 	default:
 		r = STATUS_INVALID_PARAMETER;
 		break;
@@ -815,6 +821,11 @@ static int __set_sregs(struct kvm_vcpu* vcpu, struct kvm_sregs* sregs)
 	return 0;
 }
 
+static void __set_regs(struct kvm_vcpu* vcpu, struct kvm_regs* regs) {
+	UNREFERENCED_PARAMETER(vcpu);
+	UNREFERENCED_PARAMETER(regs);
+}
+
 int kvm_arch_vcpu_ioctl_set_sregs(struct kvm_vcpu* vcpu,
 	struct kvm_sregs* sregs)
 {
@@ -824,4 +835,11 @@ int kvm_arch_vcpu_ioctl_set_sregs(struct kvm_vcpu* vcpu,
 	ret = __set_sregs(vcpu, sregs);
 	vcpu_put(vcpu);
 	return ret;
+}
+
+int kvm_arch_vcpu_ioctl_set_regs(struct kvm_vcpu* vcpu, struct kvm_regs* regs) {
+	vcpu_load(vcpu);
+	__set_regs(vcpu, regs);
+	vcpu_put(vcpu);
+	return 0;
 }

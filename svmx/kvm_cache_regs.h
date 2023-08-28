@@ -96,6 +96,13 @@ static inline bool kvm_register_is_dirty(struct kvm_vcpu* vcpu,
 	return _bittest((LONG*)&vcpu->arch.regs_dirty, reg);
 }
 
+static inline void kvm_register_mark_dirty(struct kvm_vcpu* vcpu,
+	enum kvm_reg reg)
+{
+	BitTestAndSet((LONG*)&vcpu->arch.regs_avail, reg);
+	BitTestAndSet((LONG*)&vcpu->arch.regs_dirty, reg);
+}
+
 /*
  * The "raw" register helpers are only for cases where the full 64 bits of a
  * register are read/written irrespective of current vCPU mode.  In other words,

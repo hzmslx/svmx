@@ -1878,3 +1878,4 @@ ULONG_PTR kvm_get_linear_rip(struct kvm_vcpu* vcpu);
 void kvm_set_segment(struct kvm_vcpu* vcpu, struct kvm_segment* var, int seg);
 int kvm_arch_vcpu_ioctl_set_sregs(struct kvm_vcpu* vcpu,
 	struct kvm_sregs* sregs);
+int kvm_arch_vcpu_ioctl_set_regs(struct kvm_vcpu* vcpu, struct kvm_regs* regs);
