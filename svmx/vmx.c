@@ -780,6 +780,8 @@ static fastpath_t vmx_exit_handlers_fastpath(struct kvm_vcpu* vcpu) {
 	}
 }
 
+extern ULONG_PTR Lclear_regs;
+
 // 运行虚拟机，进入guest模式，即non root 模式
 static fastpath_t vmx_vcpu_run(struct kvm_vcpu* vcpu) {
 	struct vcpu_vmx* vmx = to_vmx(vcpu);
@@ -790,6 +792,8 @@ static fastpath_t vmx_vcpu_run(struct kvm_vcpu* vcpu) {
 	if (kvm_register_is_dirty(vcpu, VCPU_REGS_RIP))
 		vmcs_writel(GUEST_RIP, vcpu->arch.regs[VCPU_REGS_RIP]);
 	vcpu->arch.regs_dirty = 0;
+
+	
 
 	/* When single-stepping over STI and MOV SS, we must clear the
 	 * corresponding interruptibility bits in the guest state. Otherwise
@@ -2595,7 +2599,7 @@ static void init_vmcs(struct vcpu_vmx* vmx) {
 	vmcs_writel(GUEST_SYSENTER_EIP, __readmsr(MSR_IA32_SYSENTER_EIP));
 	vmcs_writel(GUEST_SYSENTER_ESP, __readmsr(MSR_IA32_SYSENTER_ESP));
 
-	
+	vmcs_writel(GUEST_RIP, Lclear_regs);
 }
 
 

@@ -209,7 +209,6 @@ static bool kvm_vcpu_running(struct kvm_vcpu* vcpu) {
  */
 static int vcpu_enter_guest(struct kvm_vcpu* vcpu)
 {
-	UNREFERENCED_PARAMETER(vcpu);
 	int r = 0;
 	
 	fastpath_t exit_fastpath;

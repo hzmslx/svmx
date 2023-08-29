@@ -50,6 +50,12 @@ int kvm_init() {
 		goto err;
 	}
 
+	if (!DeviceIoControl(hDevice, KVM_RUN, NULL, 0, NULL, 0, &bytes, NULL)) {
+		ret = -errno;
+		Error("Failed to run");
+		goto err;
+	}
+
 	return 0;
 
 err:

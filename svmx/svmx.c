@@ -7,6 +7,7 @@ extern KMUTEX vendor_module_lock;
 extern struct vmcs** vmxarea;
 extern struct vmcs** current_vmcs;
 extern bool* hardware_enabled;
+extern struct kvm* g_kvm;
 
 DRIVER_UNLOAD DriverUnload;
 DRIVER_DISPATCH DriverDeviceControl;
@@ -46,7 +47,7 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) 
 	DriverObject->MajorFunction[IRP_MJ_SHUTDOWN] = DriverShutdown;
 
 	KeInitializeMutex(&vendor_module_lock, 0);
-	
+
 	UNICODE_STRING devName = RTL_CONSTANT_STRING(L"\\Device\\KVM");
 	PDEVICE_OBJECT DeviceObject;
 
@@ -71,15 +72,15 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) 
 		IoDeleteDevice(DeviceObject);
 		return status;
 	}
-	
+
 	int cpuInfo[4];
 	CpuIdEx(cpuInfo, 0, 0);
 	char brand[13] = { 0 };
 	memcpy_s(brand, 4, &cpuInfo[1], 4);
-	memcpy_s(brand + 4, 4,&cpuInfo[3], 4);
+	memcpy_s(brand + 4, 4, &cpuInfo[3], 4);
 	memcpy_s(brand + 8, 4, &cpuInfo[2], 4);
-	if (strcmp(brand,"GenuineIntel") == 0) {
-		
+	if (strcmp(brand, "GenuineIntel") == 0) {
+
 		vmxarea = ExAllocatePoolWithTag(NonPagedPool, count * sizeof(struct vmcs*),
 			DRIVER_TAG);
 		if (vmxarea == NULL) {
@@ -134,53 +135,53 @@ NTSTATUS DriverDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
 	ULONG ioctl = irpStack->Parameters.DeviceIoControl.IoControlCode;
 	switch (ioctl)
 	{
-	case KVM_GET_API_VERSION:
-		if (Irp->AssociatedIrp.SystemBuffer == NULL) {
-			status = STATUS_INVALID_PARAMETER;
-			break;
-		}
-		if (irpStack->Parameters.DeviceIoControl.OutputBufferLength 
-			< sizeof(USHORT)) {
-			status = STATUS_BUFFER_TOO_SMALL;
-			break;
-		}
-		*(USHORT*)Irp->AssociatedIrp.SystemBuffer = KVM_API_VERSION;
-		len = sizeof(USHORT);
-		break;
-
-	case KVM_CREATE_VM:
-		// create virtual machine
-		status = kvm_dev_ioctl_create_vm(0);
-		break;
-
-	case KVM_CHECK_EXTENSION:
-
-		break;
-
-	case KVM_GET_VCPU_MMPA_SIZE:
-
-		break;
-	case KVM_TRACE_ENABLE:
-	case KVM_TRACE_PAUSE:
-	case KVM_TRACE_DISABLE:
-		status = STATUS_NOT_SUPPORTED;
-		break;
-
-	// kvm_vm_ioctl
-	case KVM_CREATE_VCPU:
-	{
-		ULONG count = KeQueryActiveProcessorCount(0);
-		for(ULONG cpu =0;cpu<count;++cpu){
-			status = kvm_vm_ioctl_create_vcpu(NULL, cpu);
-			if (!NT_SUCCESS(status))
+		case KVM_GET_API_VERSION:
+			if (Irp->AssociatedIrp.SystemBuffer == NULL) {
+				status = STATUS_INVALID_PARAMETER;
 				break;
-		}
-		
-		break;
-	}
-	default:
+			}
+			if (irpStack->Parameters.DeviceIoControl.OutputBufferLength
+				< sizeof(USHORT)) {
+				status = STATUS_BUFFER_TOO_SMALL;
+				break;
+			}
+			*(USHORT*)Irp->AssociatedIrp.SystemBuffer = KVM_API_VERSION;
+			len = sizeof(USHORT);
+			break;
 
-		break;
+		case KVM_CREATE_VM:
+			// create virtual machine
+			status = kvm_dev_ioctl_create_vm(0);
+			break;
+
+		case KVM_CHECK_EXTENSION:
+
+			break;
+
+		case KVM_GET_VCPU_MMPA_SIZE:
+
+			break;
+		case KVM_TRACE_ENABLE:
+		case KVM_TRACE_PAUSE:
+		case KVM_TRACE_DISABLE:
+			status = STATUS_NOT_SUPPORTED;
+			break;
+
+			// kvm_vm_ioctl
+		case KVM_CREATE_VCPU:
+		{
+			ULONG count = KeQueryActiveProcessorCount(0);
+			for (ULONG cpu = 0; cpu < count; ++cpu) {
+				status = kvm_vm_ioctl_create_vcpu(g_kvm, cpu);
+				if (!NT_SUCCESS(status))
+					break;
+			}
+
+			break;
+		}
+		default:
+
+			break;
 	}
 	Irp->IoStatus.Status = status;
 	Irp->IoStatus.Information = len;

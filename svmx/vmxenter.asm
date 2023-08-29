@@ -1,4 +1,5 @@
 PUBLIC vmx_get_cs
+PUBLIC Lclear_regs
 
 .data
 

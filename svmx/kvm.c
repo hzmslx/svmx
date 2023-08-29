@@ -5,11 +5,11 @@
 
 /*
 * Kernel-based Virtual Machine driver for Windows
-* 
+*
 * This module enables machines with Intel VT-x extensions to run virtual
 * machines without emulation or binary translation.
-* 
-* 
+*
+*
 */
 PMDL kvm_vcpu_cache_mdl;
 
@@ -26,12 +26,14 @@ bool kvm_rebooting;
 
 bool* hardware_enabled = NULL;
 
+struct kvm* g_kvm = NULL;
 
-int kvm_init(unsigned vcpu_size, unsigned vcpu_align){
+
+int kvm_init(unsigned vcpu_size, unsigned vcpu_align) {
 	UNREFERENCED_PARAMETER(vcpu_align);
 	UNREFERENCED_PARAMETER(vcpu_size);
 	NTSTATUS status = STATUS_SUCCESS;
-	
+
 	KeInitializeMutex(&kvm_lock, 0);
 	InitializeListHead(&vm_list);
 
@@ -43,7 +45,7 @@ void kvm_disable_largepages() {
 }
 
 void kvm_exit(void) {
-	
+
 
 
 }
@@ -56,6 +58,7 @@ NTSTATUS kvm_dev_ioctl_create_vm(unsigned long type) {
 	if (!kvm) {
 		return STATUS_UNSUCCESSFUL;
 	}
+	g_kvm = kvm;
 	return STATUS_SUCCESS;
 }
 
@@ -126,7 +129,7 @@ struct kvm* kvm_create_vm(unsigned long type) {
 
 	for (i = 0; i < KVM_ADDRESS_SPACE_NUM; i++) {
 		for (j = 0; j < 2; j++) {
-			
+
 		}
 	}
 
@@ -198,7 +201,7 @@ static void kvm_destroy_vm(struct kvm* kvm) {
 
 void kvm_put_kvm(struct kvm* kvm) {
 	UNREFERENCED_PARAMETER(kvm);
-	
+
 }
 
 static void hardware_disable_nolock(void* junk) {
@@ -240,8 +243,8 @@ static void kvm_vcpu_init(struct kvm_vcpu* vcpu, struct kvm* kvm, unsigned id) {
 	vcpu->preempted = FALSE;
 	vcpu->ready = FALSE;
 	vcpu->last_used_slot = NULL;
-	
-	sprintf_s(vcpu->stats_id, sizeof(vcpu->stats_id), "vcpu-%d",id);
+
+	sprintf_s(vcpu->stats_id, sizeof(vcpu->stats_id), "vcpu-%d", id);
 }
 
 int kvm_vm_ioctl_create_vcpu(struct kvm* kvm, u32 id) {
@@ -252,6 +255,12 @@ int kvm_vm_ioctl_create_vcpu(struct kvm* kvm, u32 id) {
 
 	do
 	{
+		KeWaitForSingleObject(&kvm->lock, Executive, KernelMode, FALSE, NULL);
+		if (kvm->created_vcpus >= kvm->max_vcpus) {
+			KeReleaseMutex(&kvm->lock, FALSE);
+			return STATUS_INVALID_PARAMETER;
+		}
+
 		mdl = IoAllocateMdl(NULL, sizeof(struct kvm_vcpu), FALSE, FALSE, NULL);
 		if (!mdl) {
 			r = STATUS_NO_MEMORY;
@@ -276,12 +285,15 @@ int kvm_vm_ioctl_create_vcpu(struct kvm* kvm, u32 id) {
 
 		// 创建 vcpu 结构, 架构相关
 		r = kvm_arch_vcpu_create(vcpu);
-		if (r)
+		if (r) {
 			break;
+		}
+
+		KeReleaseMutex(&kvm->lock, FALSE);
 
 		return r;
 	} while (FALSE);
-	
+
 
 	if (!NT_SUCCESS(r)) {
 		if (mdl != NULL) {
@@ -305,17 +317,20 @@ void vcpu_load(struct kvm_vcpu* vcpu) {
 
 static long kvm_vcpu_ioctl(unsigned int ioctl, unsigned long arg) {
 	UNREFERENCED_PARAMETER(arg);
-
+	NTSTATUS status = STATUS_INVALID_PARAMETER;
 	switch (ioctl)
 	{
-	case KVM_RUN:
+		case KVM_RUN:
+		{
+			
+			break;
+		}
 
-		break;
-	default:
-		break;
+		default:
+			break;
 	}
 
-	return STATUS_INVALID_PARAMETER;
+	return status;
 }
 
 kvm_pfn_t __gfn_to_pfn_memslot(const struct kvm_memory_slot* slot, gfn_t gfn,
@@ -349,16 +364,16 @@ static long kvm_vm_ioctl(unsigned int ioctl, unsigned long arg) {
 	switch (ioctl)
 	{
 
-	// 建立 guest 物理地址空间中的内存区域与 qemu-kvm 虚拟地址空间中的内存区域的映射
-	case KVM_SET_USER_MEMORY_REGION:
-	{
+		// 建立 guest 物理地址空间中的内存区域与 qemu-kvm 虚拟地址空间中的内存区域的映射
+		case KVM_SET_USER_MEMORY_REGION:
+		{
 
 
-		break;
-	}
+			break;
+		}
 
-	default:
-		break;
+		default:
+			break;
 	}
 
 	return r;
