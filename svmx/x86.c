@@ -842,3 +842,48 @@ int kvm_arch_vcpu_ioctl_set_regs(struct kvm_vcpu* vcpu, struct kvm_regs* regs) {
 	vcpu_put(vcpu);
 	return 0;
 }
+
+int kvm_arch_init_vm(struct kvm* kvm, unsigned long type) {
+	int ret = 0;
+
+	if (type)
+		return STATUS_INVALID_PARAMETER;
+
+	bool out_page_track = FALSE;
+	bool out_uninit_mmu = FALSE;
+	do
+	{
+		ret = kvm_mmu_init_vm(kvm);
+		if (ret) {
+			out_page_track = TRUE;
+			break;
+		}
+
+		ret = kvm_x86_ops.vm_init(kvm);
+		if (ret) {
+			out_uninit_mmu = TRUE;
+			break;
+		}
+
+		return 0;
+	} while (FALSE);
+
+	if (out_uninit_mmu) {
+		kvm_mmu_uninit_vm(kvm);
+	}
+
+	if (out_page_track) {
+		
+	}
+
+	return ret;
+}
+
+int kvm_arch_post_init_vm(struct kvm* kvm) {
+	return kvm_mmu_post_init_vm(kvm);
+}
+
+int kvm_arch_vcpu_precreate(struct kvm* kvm, unsigned int id) {
+	UNREFERENCED_PARAMETER(id);
+	return kvm_x86_ops.vcpu_precreate(kvm);
+}

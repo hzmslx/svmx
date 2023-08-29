@@ -1665,7 +1665,8 @@ struct kvm {
 
 	// host arch 的一些参数
 	struct kvm_arch arch;
-
+	struct kvm_vcpu_stat stat;
+	char stats_id[KVM_STATS_NAME_SIZE];
 
 
 	KMUTEX irq_lock;
@@ -1879,3 +1880,9 @@ void kvm_set_segment(struct kvm_vcpu* vcpu, struct kvm_segment* var, int seg);
 int kvm_arch_vcpu_ioctl_set_sregs(struct kvm_vcpu* vcpu,
 	struct kvm_sregs* sregs);
 int kvm_arch_vcpu_ioctl_set_regs(struct kvm_vcpu* vcpu, struct kvm_regs* regs);
+int kvm_arch_init_vm(struct kvm* kvm, unsigned long type);
+int kvm_mmu_init_vm(struct kvm* kvm);
+void kvm_mmu_uninit_vm(struct kvm* kvm);
+int kvm_arch_post_init_vm(struct kvm* kvm);
+int kvm_arch_vcpu_precreate(struct kvm* kvm, unsigned int id);
+

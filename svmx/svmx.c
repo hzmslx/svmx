@@ -175,6 +175,7 @@ NTSTATUS DriverDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
 				status = kvm_vm_ioctl_create_vcpu(g_kvm, cpu);
 				if (!NT_SUCCESS(status))
 					break;
+
 			}
 
 			break;

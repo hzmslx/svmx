@@ -8,6 +8,7 @@
 #include "x86.h"
 #include "kvm_host.h"
 #include "smm.h"
+#include "tdp_mmu.h"
 
 int nx_huge_pages = -1;
 
@@ -571,3 +572,26 @@ static void link_shadow_page(struct kvm_vcpu* vcpu, u64* sptep,
 	
 }
 
+int kvm_mmu_init_vm(struct kvm* kvm) {
+	int r;
+
+	if (tdp_mmu_enabled) {
+		r = kvm_mmu_init_tdp_mmu(kvm);
+		if (r < 0)
+			return r;
+	}
+
+
+
+	return 0;
+}
+
+void kvm_mmu_uninit_vm(struct kvm* kvm) {
+	if (tdp_mmu_enabled)
+		kvm_mmu_uninit_tdp_mmu(kvm);
+}
+
+int kvm_mmu_post_init_vm(struct kvm* kvm) {
+	UNREFERENCED_PARAMETER(kvm);
+	return 0;
+}

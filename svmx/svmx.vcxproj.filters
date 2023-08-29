@@ -67,9 +67,6 @@
     <ClCompile Include="pmu_intel.c">
       <Filter>vmx</Filter>
     </ClCompile>
-    <ClCompile Include="tdp_mmu.c">
-      <Filter>kvm</Filter>
-    </ClCompile>
     <ClCompile Include="cpuid.c">
       <Filter>kvm</Filter>
     </ClCompile>
@@ -83,6 +80,9 @@
       <Filter>mmu</Filter>
     </ClCompile>
     <ClCompile Include="spte.c">
+      <Filter>mmu</Filter>
+    </ClCompile>
+    <ClCompile Include="tdp_mmu.c">
       <Filter>mmu</Filter>
     </ClCompile>
   </ItemGroup>
@@ -168,9 +168,6 @@
     <ClInclude Include="lapic.h">
       <Filter>kvm</Filter>
     </ClInclude>
-    <ClInclude Include="tdp_mmu.h">
-      <Filter>kvm</Filter>
-    </ClInclude>
     <ClInclude Include="kvm_mm.h">
       <Filter>kvm</Filter>
     </ClInclude>
@@ -230,6 +227,9 @@
     </ClInclude>
     <ClInclude Include="hyperv.h">
       <Filter>vmx</Filter>
+    </ClInclude>
+    <ClInclude Include="tdp_mmu.h">
+      <Filter>mmu</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

@@ -125,6 +125,12 @@ struct kvm* kvm_create_vm(unsigned long type) {
 	KeInitializeMutex(&kvm->irq_lock, 0);
 	KeInitializeMutex(&kvm->slots_loc, 0);
 	KeInitializeMutex(&kvm->slots_arch_lock, 0);
+	kvm->max_vcpus = KeQueryActiveProcessorCount(0);
+	
+	sprintf_s(kvm->stats_id, sizeof(kvm->stats_id), "kvm-%d",
+		HandleToUlong(PsGetCurrentProcessId()));
+
+
 
 
 	for (i = 0; i < KVM_ADDRESS_SPACE_NUM; i++) {
@@ -135,9 +141,14 @@ struct kvm* kvm_create_vm(unsigned long type) {
 
 
 	NTSTATUS status;
+	status = kvm_arch_init_vm(kvm, type);
+
 	// enable the hardware
 	// 调用架构相关的kvm_x86_ops->hardware_enable()接口进行硬件使能
 	status = hardware_enable_all();
+
+	status = kvm_arch_post_init_vm(kvm);
+
 
 	KeWaitForSingleObject(&kvm_lock, Executive, KernelMode, FALSE, NULL);
 	// 将新创建的虚拟机加入KVM的虚拟机列表
@@ -261,6 +272,15 @@ int kvm_vm_ioctl_create_vcpu(struct kvm* kvm, u32 id) {
 			return STATUS_INVALID_PARAMETER;
 		}
 
+		r = kvm_arch_vcpu_precreate(kvm, id);
+		if (r) {
+			KeReleaseMutex(&kvm->lock, FALSE);
+			return r;
+		}
+
+		kvm->created_vcpus++;
+		KeReleaseMutex(&kvm->lock, FALSE);
+
 		mdl = IoAllocateMdl(NULL, sizeof(struct kvm_vcpu), FALSE, FALSE, NULL);
 		if (!mdl) {
 			r = STATUS_NO_MEMORY;
@@ -289,7 +309,7 @@ int kvm_vm_ioctl_create_vcpu(struct kvm* kvm, u32 id) {
 			break;
 		}
 
-		KeReleaseMutex(&kvm->lock, FALSE);
+		kvm_arch_vcpu_postcreate(vcpu);
 
 		return r;
 	} while (FALSE);

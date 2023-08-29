@@ -8,3 +8,7 @@ int kvm_mmu_init_tdp_mmu(struct kvm* kvm)
 	
 	return 1;
 }
+
+void kvm_mmu_uninit_tdp_mmu(struct kvm* kvm) {
+	UNREFERENCED_PARAMETER(kvm);
+}
