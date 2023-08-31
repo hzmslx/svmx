@@ -1633,6 +1633,7 @@ struct kvm {
 	struct kvm_memslots __memslots[KVM_ADDRESS_SPACE_NUM][2];
 	/* The current active memslot set for each address space */
 	struct kvm_memslots* memslots[KVM_ADDRESS_SPACE_NUM];/* 模拟的内存条模型 */
+	struct kvm_vcpu** vcpu_array;
 	/*
 	 * Protected by slots_lock, but can be read outside if an
 	 * incorrect answer is acceptable.
@@ -1885,4 +1886,13 @@ int kvm_mmu_init_vm(struct kvm* kvm);
 void kvm_mmu_uninit_vm(struct kvm* kvm);
 int kvm_arch_post_init_vm(struct kvm* kvm);
 int kvm_arch_vcpu_precreate(struct kvm* kvm, unsigned int id);
+
+void kvm_arch_free_vm(struct kvm* kvm);
+void kvm_arch_pre_destroy_vm(struct kvm* kvm);
+void kvm_arch_destroy_vm(struct kvm* kvm);
+
+long kvm_vcpu_ioctl(unsigned int ioctl, PIRP Irp);
+int kvm_arch_vcpu_runnable(struct kvm_vcpu* vcpu);
+void kvm_vcpu_halt(struct kvm_vcpu* vcpu);
+bool kvm_vcpu_block(struct kvm_vcpu* vcpu);
 

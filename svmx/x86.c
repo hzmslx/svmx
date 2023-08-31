@@ -248,9 +248,48 @@ static int vcpu_enter_guest(struct kvm_vcpu* vcpu)
 	return r;
 }
 
+static inline bool kvm_vcpu_has_events(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+	return FALSE;
+}
+
+int kvm_arch_vcpu_runnable(struct kvm_vcpu* vcpu) {
+	return kvm_vcpu_running(vcpu) || kvm_vcpu_has_events(vcpu);
+}
+
 /* Called within kvm->srcu read side.  */
 static int vcpu_block(struct kvm_vcpu* vcpu) {
-	UNREFERENCED_PARAMETER(vcpu);
+	
+	if (!kvm_arch_vcpu_runnable(vcpu)) {
+
+		if (vcpu->arch.mp_state == KVM_MP_STATE_HALTED)
+			kvm_vcpu_halt(vcpu);
+		else
+			kvm_vcpu_block(vcpu);
+
+		/*
+		 * If the vCPU is not runnable, a signal or another host event
+		 * of some kind is pending; service it without changing the
+		 * vCPU's activity state.
+		 */
+		if (!kvm_arch_vcpu_runnable(vcpu))
+			return 1;
+	}
+
+	switch (vcpu->arch.mp_state) {
+		case KVM_MP_STATE_HALTED:
+		case KVM_MP_STATE_AP_RESET_HOLD:
+			vcpu->arch.pv.pv_unhalted = FALSE;
+			vcpu->arch.mp_state = KVM_MP_STATE_RUNNABLE;
+			__fallthrough;
+		case KVM_MP_STATE_RUNNABLE:
+			vcpu->arch.apf.halted = FALSE;
+			break;
+		case KVM_MP_STATE_INIT_RECEIVED:
+			break;
+		default:
+			break;
+	}
 
 	return 1;
 }
@@ -288,16 +327,24 @@ static int vcpu_run(struct kvm_vcpu* vcpu) {
 // 运行 vcpu (即运行虚拟机）的入口函数
 int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu* vcpu) {
 	int r;
+	struct kvm_run* kvm_run = vcpu->run;
 
 	// KVM 虚拟机 vcpu 数据结构载入物理 cpu
 	vcpu_load(vcpu);
+	kvm_run->flags = 0;
 
 	if (vcpu->arch.mp_state == KVM_MP_STATE_UNINITIALIZED) {
-
+		
 	}
+
+	r = kvm_x86_ops.vcpu_pre_run(vcpu);
+	if (r <= 0)
+		goto out;
 
 	// 死循环进入vcpu_enter_guest
 	r = vcpu_run(vcpu);
+
+out:
 
 	return r;
 }
@@ -308,6 +355,8 @@ int kvm_arch_vcpu_create(struct kvm_vcpu* vcpu) {
 	vcpu->arch.last_vmentry_cpu = -1;
 	vcpu->arch.regs_avail = ~0ul;
 	vcpu->arch.regs_dirty = ~0ul;
+
+	vcpu->arch.mp_state = KVM_MP_STATE_RUNNABLE;
 
 	r = kvm_mmu_create(vcpu);
 	if (r < 0)
@@ -886,4 +935,21 @@ int kvm_arch_post_init_vm(struct kvm* kvm) {
 int kvm_arch_vcpu_precreate(struct kvm* kvm, unsigned int id) {
 	UNREFERENCED_PARAMETER(id);
 	return kvm_x86_ops.vcpu_precreate(kvm);
+}
+
+static inline void __kvm_arch_free_vm(struct kvm* kvm) {
+	ExFreePool(kvm);
+}
+
+void kvm_arch_free_vm(struct kvm* kvm) {
+	__kvm_arch_free_vm(kvm);
+}
+
+void kvm_arch_pre_destroy_vm(struct kvm* kvm) {
+	kvm_mmu_pre_destroy_vm(kvm);
+}
+
+void kvm_arch_destroy_vm(struct kvm* kvm) {
+
+	kvm_x86_ops.vm_destroy(kvm);
 }

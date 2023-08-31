@@ -58,6 +58,8 @@ NTSTATUS kvm_dev_ioctl_create_vm(unsigned long type) {
 	if (!kvm) {
 		return STATUS_UNSUCCESSFUL;
 	}
+	
+
 	g_kvm = kvm;
 	return STATUS_SUCCESS;
 }
@@ -155,6 +157,14 @@ struct kvm* kvm_create_vm(unsigned long type) {
 	InsertHeadList(&vm_list, &kvm->vm_list);
 	KeReleaseMutex(&kvm_lock, FALSE);
 
+	kvm->vcpu_array = ExAllocatePoolWithTag(NonPagedPool,
+		sizeof(void*) * KeQueryActiveProcessorCount(0),DRIVER_TAG);
+	if (!kvm->vcpu_array) {
+		ExFreePool(kvm);
+		kvm = NULL;
+		return NULL;
+	}
+
 	return kvm;
 }
 
@@ -206,7 +216,13 @@ static void hardware_disable_all(void) {
 }
 
 static void kvm_destroy_vm(struct kvm* kvm) {
-	UNREFERENCED_PARAMETER(kvm);
+	KeWaitForSingleObject(&kvm->lock, Executive, KernelMode, FALSE, NULL);
+	RemoveEntryList(&kvm->vm_list);
+	KeReleaseMutex(&kvm_lock, FALSE);
+	kvm_arch_pre_destroy_vm(kvm);
+
+	kvm_arch_destroy_vm(kvm);
+
 	hardware_disable_all();
 }
 
@@ -311,6 +327,7 @@ int kvm_vm_ioctl_create_vcpu(struct kvm* kvm, u32 id) {
 
 		kvm_arch_vcpu_postcreate(vcpu);
 
+		kvm->vcpu_array[id] = vcpu;
 		return r;
 	} while (FALSE);
 
@@ -335,14 +352,21 @@ void vcpu_load(struct kvm_vcpu* vcpu) {
 	kvm_arch_vcpu_load(vcpu, cpu);
 }
 
-static long kvm_vcpu_ioctl(unsigned int ioctl, unsigned long arg) {
-	UNREFERENCED_PARAMETER(arg);
+ULONG_PTR RunKvm(ULONG_PTR Arg) {
+	UNREFERENCED_PARAMETER(Arg);
+	int cpu = KeGetCurrentProcessorNumber();
+	int r = kvm_arch_vcpu_ioctl_run(g_kvm->vcpu_array[cpu]);
+	return r;
+}
+
+long kvm_vcpu_ioctl(unsigned int ioctl, PIRP Irp) {
+	UNREFERENCED_PARAMETER(Irp);
 	NTSTATUS status = STATUS_INVALID_PARAMETER;
 	switch (ioctl)
 	{
 		case KVM_RUN:
 		{
-			
+			KeIpiGenericCall(RunKvm, 0);
 			break;
 		}
 
@@ -495,4 +519,24 @@ void vcpu_put(struct kvm_vcpu* vcpu) {
 	UNREFERENCED_PARAMETER(vcpu);
 }
 
+/*
+ * Emulate a vCPU halt condition, e.g. HLT on x86, WFI on arm, etc...  If halt
+ * polling is enabled, busy wait for a short time before blocking to avoid the
+ * expensive block+unblock sequence if a wake event arrives soon after the vCPU
+ * is halted.
+ */
+void kvm_vcpu_halt(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+}
 
+/*
+ * Block the vCPU until the vCPU is runnable, an event arrives, or a signal is
+ * pending.  This is mostly used when halting a vCPU, but may also be used
+ * directly for other vCPU non-runnable states, e.g. x86's Wait-For-SIPI.
+ */
+bool kvm_vcpu_block(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+	bool waited = FALSE;
+
+	return waited;
+}

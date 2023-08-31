@@ -158,8 +158,18 @@ NTSTATUS DriverDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
 
 			break;
 
-		case KVM_GET_VCPU_MMPA_SIZE:
-
+		case KVM_GET_VCPU_MMAP_SIZE:
+			if (Irp->AssociatedIrp.SystemBuffer == NULL) {
+				status = STATUS_INVALID_PARAMETER;
+				break;
+			}
+			if (irpStack->Parameters.DeviceIoControl.OutputBufferLength
+				< sizeof(ULONG)) {
+				status = STATUS_BUFFER_TOO_SMALL;
+				break;
+			}
+			*(ULONG*)Irp->AssociatedIrp.SystemBuffer = PAGE_SIZE;
+			len = sizeof(ULONG);
 			break;
 		case KVM_TRACE_ENABLE:
 		case KVM_TRACE_PAUSE:
@@ -167,7 +177,7 @@ NTSTATUS DriverDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
 			status = STATUS_NOT_SUPPORTED;
 			break;
 
-			// kvm_vm_ioctl
+		// kvm_vm_ioctl
 		case KVM_CREATE_VCPU:
 		{
 			ULONG count = KeQueryActiveProcessorCount(0);
@@ -175,13 +185,12 @@ NTSTATUS DriverDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
 				status = kvm_vm_ioctl_create_vcpu(g_kvm, cpu);
 				if (!NT_SUCCESS(status))
 					break;
-
 			}
 
 			break;
 		}
 		default:
-
+			status = kvm_vcpu_ioctl(ioctl, Irp);
 			break;
 	}
 	Irp->IoStatus.Status = status;

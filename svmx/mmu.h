@@ -73,3 +73,5 @@ static inline unsigned long kvm_get_active_pcid(struct kvm_vcpu* vcpu)
 }
 
 int kvm_mmu_post_init_vm(struct kvm* kvm);
+void kvm_mmu_pre_destroy_vm(struct kvm* kvm);
+

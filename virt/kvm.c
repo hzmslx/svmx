@@ -18,6 +18,7 @@ int kvm_init() {
 	USHORT version = 0;
 	DWORD bytes;
 	// 判断内核KVM驱动和当前virt版本是否兼容
+	/* Make sure we have the stable version of the API */
 	if (!DeviceIoControl(hDevice, KVM_GET_API_VERSION, NULL, 0,
 		&version, sizeof(version), &bytes, NULL)) {
 		ret = -errno;
@@ -38,7 +39,7 @@ int kvm_init() {
 	// 创建虚拟机
 	if (!DeviceIoControl(hDevice, KVM_CREATE_VM, NULL, 0,
 		NULL, 0, &bytes, NULL)) {
-		ret = -errno;
+		ret = GetLastError();
 		Error("Failed to create vm");
 		goto err;
 	}
@@ -49,13 +50,22 @@ int kvm_init() {
 		Error("Failed to create vcpu");
 		goto err;
 	}
-
+	ULONG mapSize = 0;
+	if (!DeviceIoControl(hDevice, KVM_GET_VCPU_MMAP_SIZE, 0, NULL, &mapSize, sizeof(mapSize),
+		&bytes, NULL)) {
+		ret = GetLastError();
+		Error("Failed to get mmap size");
+		goto err;
+	}
+	 
 	if (!DeviceIoControl(hDevice, KVM_RUN, NULL, 0, NULL, 0, &bytes, NULL)) {
 		ret = -errno;
 		Error("Failed to run");
 		goto err;
 	}
 
+
+	system("pause");
 	return 0;
 
 err:

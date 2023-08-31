@@ -595,3 +595,7 @@ int kvm_mmu_post_init_vm(struct kvm* kvm) {
 	UNREFERENCED_PARAMETER(kvm);
 	return 0;
 }
+
+void kvm_mmu_pre_destroy_vm(struct kvm* kvm) {
+	UNREFERENCED_PARAMETER(kvm);
+}
