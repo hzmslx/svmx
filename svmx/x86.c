@@ -540,6 +540,8 @@ void kvm_vcpu_reset(struct kvm_vcpu* vcpu, bool init_event) {
 	vcpu->arch.dr7 = DR7_FIXED_1;
 	kvm_update_dr7(vcpu);
 
+	vcpu->arch.apf.halted = FALSE;
+
 	/* All GPRs except RDX (handled below) are zeroed on RESET/INIT. */
 	memset(vcpu->arch.regs, 0, sizeof(vcpu->arch.regs));
 	kvm_register_mark_dirty(vcpu, VCPU_REGS_RSP);
@@ -952,4 +954,13 @@ void kvm_arch_pre_destroy_vm(struct kvm* kvm) {
 void kvm_arch_destroy_vm(struct kvm* kvm) {
 
 	kvm_x86_ops.vm_destroy(kvm);
+}
+
+
+void kvm_arch_async_page_present(struct kvm_vcpu* vcpu,
+	struct kvm_async_pf* work) {
+	UNREFERENCED_PARAMETER(work);
+
+	vcpu->arch.apf.halted = FALSE;
+	vcpu->arch.mp_state = KVM_MP_STATE_RUNNABLE;
 }

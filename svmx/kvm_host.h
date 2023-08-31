@@ -285,6 +285,20 @@ enum vcpu_sysreg {
 	NR_SYS_REGS	/* Nothing after this line! */
 };
 
+struct kvm_arch_async_pf {
+	ULONG_PTR pfault_token;
+};
+
+struct kvm_async_pf {
+	struct kvm_vcpu* vcpu;
+	struct mm_struct* mm;
+	gpa_t cr2_or_gpa;
+	ULONG_PTR addr;
+	struct kvm_arch_async_pf arch;
+	bool   wakeup_all;
+	bool notpresent_injected;
+};
+
 
 enum {
 	// host ģʽ
@@ -1066,7 +1080,7 @@ struct kvm_vcpu_arch {
 		u32 host_apf_flags;
 		bool delivery_as_pf_vmexit;
 		bool pageready_pending;
-	} apf;
+	} apf;// async page fault
 
 	/* OSVW MSRs (AMD only) */
 	struct {
@@ -1895,4 +1909,5 @@ long kvm_vcpu_ioctl(unsigned int ioctl, PIRP Irp);
 int kvm_arch_vcpu_runnable(struct kvm_vcpu* vcpu);
 void kvm_vcpu_halt(struct kvm_vcpu* vcpu);
 bool kvm_vcpu_block(struct kvm_vcpu* vcpu);
-
+void kvm_arch_async_page_present(struct kvm_vcpu* vcpu,
+	struct kvm_async_pf* work);
