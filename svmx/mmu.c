@@ -19,7 +19,7 @@ int nx_huge_pages = -1;
  * 2. while doing 1. it walks guest-physical to host-physical
  * If the hardware supports that we don't need to do shadow paging.
  */
-bool tdp_enabled = FALSE;
+bool tdp_enabled = TRUE;
 
 static int max_huge_page_level;
 static int tdp_root_level;

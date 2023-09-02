@@ -57,4 +57,5 @@ struct loaded_vmcs {
 	LIST_ENTRY loaded_vmcss_on_cpu_link;/* 这个cpu上的所有 vmcs链表 */
 	struct vmcs_host_state host_state;
 	struct vmcs_controls_shadow controls_shadow;
+	int vcpu_id;
 };

@@ -283,7 +283,6 @@ static void kvm_vcpu_init(struct kvm_vcpu* vcpu, struct kvm* kvm, unsigned id) {
 int kvm_vm_ioctl_create_vcpu(struct kvm* kvm, u32 id) {
 	int r;
 	struct kvm_vcpu* vcpu = NULL;
-	PMDL mdl;
 	void* page = NULL;
 
 	do
@@ -303,13 +302,7 @@ int kvm_vm_ioctl_create_vcpu(struct kvm* kvm, u32 id) {
 		kvm->created_vcpus++;
 		KeReleaseMutex(&kvm->lock, FALSE);
 
-		mdl = IoAllocateMdl(NULL, s_vcpu_size, FALSE, FALSE, NULL);
-		if (!mdl) {
-			r = STATUS_NO_MEMORY;
-			break;
-		}
-		vcpu = MmMapLockedPagesSpecifyCache(mdl, KernelMode,
-			MmNonCached, NULL, FALSE, NormalPagePriority);
+		vcpu = ExAllocatePoolWithTag(NonPagedPool, s_vcpu_size, DRIVER_TAG);
 		if (!vcpu) {
 			r = STATUS_NO_MEMORY;
 			break;
@@ -340,11 +333,8 @@ int kvm_vm_ioctl_create_vcpu(struct kvm* kvm, u32 id) {
 
 
 	if (!NT_SUCCESS(r)) {
-		if (mdl != NULL) {
-			if (vcpu != NULL) {
-				MmUnmapLockedPages(vcpu, mdl);
-			}
-			IoFreeMdl(mdl);
+		if (vcpu != NULL) {
+			ExFreePool(vcpu);
 		}
 		if (page != NULL) {
 			ExFreePool(page);
@@ -523,7 +513,7 @@ static int kvm_set_memslot(struct kvm* kvm,
 }
 
 void vcpu_put(struct kvm_vcpu* vcpu) {
-	UNREFERENCED_PARAMETER(vcpu);
+	kvm_arch_vcpu_put(vcpu);
 }
 
 /*

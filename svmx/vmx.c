@@ -601,7 +601,8 @@ static NTSTATUS vmx_vcpu_create(struct kvm_vcpu* vcpu) {
 
 	vmx = to_vmx(vcpu);
 	
-	vmx->vmcs01.cpu = vcpu->vcpu_id;
+	vmx->vmcs01.vcpu_id = vcpu->vcpu_id;
+	
 	// 分配并初始化这个vcpu对应的vmcs01
 	// 需要4K对齐
 	/* vmcs 的分配 */
@@ -706,11 +707,31 @@ static void vmx_vcpu_load(struct kvm_vcpu* vcpu, int cpu) {
 
 }
 
+static void vmx_prepare_switch_to_host(struct vcpu_vmx* vmx) {
+	struct vmcs_host_state* host_state;
+
+	if (!vmx->guest_state_loaded)
+		return;
+
+	host_state = &vmx->loaded_vmcs->host_state;
+
+	++vmx->vcpu.stat.host_state_reload;
+
+	vmx->msr_guest_kernel_gs_base = __readmsr(MSR_KERNEL_GS_BASE);
+
+	if (host_state->ldt_sel || (host_state->gs_sel & 7)) {
+		
+	}
+
+	vmx->guest_state_loaded = FALSE;
+	vmx->guest_uret_msrs_loaded = FALSE;
+}
+
 // vmx_vcpu_load的反运算
 static void vmx_vcpu_put(struct kvm_vcpu* vcpu) {
-	UNREFERENCED_PARAMETER(vcpu);
-
 	
+
+	vmx_prepare_switch_to_host(to_vmx(vcpu));
 }
 
 static int vmx_vcpu_pre_run(struct kvm_vcpu* vcpu) {
@@ -752,16 +773,15 @@ static void vmx_vcpu_enter_exit(struct kvm_vcpu* vcpu,
 	unsigned int flags) {
 	struct vcpu_vmx* vmx = to_vmx(vcpu);
 
-	dump_vmcs(vcpu);
 
-	__vmx_vcpu_run(vmx, (ULONG_PTR*)&vcpu->arch.regs, flags);
+	vmx->fail = __vmx_vcpu_run(vmx, (ULONG_PTR*)&vcpu->arch.regs, flags);
 
 	if (vmx->fail)
 		vmx->exit_reason.full = 0xdead;
 	else
 		vmx->exit_reason.full = vmcs_read32(VM_EXIT_REASON);
 
-
+	
 
 }
 
@@ -2190,7 +2210,7 @@ NTSTATUS vmx_init() {
 ULONG_PTR VmcsClearOnSpecificCore(ULONG_PTR arg) {
 	struct loaded_vmcs* loaded_vmcs = (struct loaded_vmcs* )arg;
 	int cpu = KeGetCurrentProcessorNumber();
-	if(cpu == loaded_vmcs->cpu)
+	if(cpu == loaded_vmcs->vcpu_id)
 		vmcs_clear(loaded_vmcs->vmcs);
 	return 0;
 }
@@ -2234,7 +2254,7 @@ int alloc_loaded_vmcs(struct loaded_vmcs* loaded_vmcs) {
 ULONG_PTR VmcsLoadOnSpecificCore(ULONG_PTR Arg) {
 	struct loaded_vmcs* loaded_vmcs = (struct loaded_vmcs*)Arg;
 	int cpu = KeGetCurrentProcessorNumber();
-	if (cpu == loaded_vmcs->cpu) {
+	if (cpu == loaded_vmcs->vcpu_id) {
 		// 调用vmptrld
 		vmcs_load(loaded_vmcs->vmcs);
 	}
@@ -2316,7 +2336,7 @@ RunOnTargetCore(
 ) {
 	struct loaded_vmcs* loaded_vmcs = (struct loaded_vmcs*)Argument;
 	int cpu = KeGetCurrentProcessorNumber();
-	if (cpu != loaded_vmcs->cpu) {
+	if (cpu != loaded_vmcs->vcpu_id) {
 		return 1;
 	}
 	__loaded_vmcs_clear(loaded_vmcs);
@@ -2635,6 +2655,7 @@ static void init_vmcs(struct vcpu_vmx* vmx) {
 	vmcs_write16(HOST_FS_SELECTOR, 0); /* 22.2.4 */
 	vmcs_write16(HOST_GS_SELECTOR, 0); /* 22.2.4 */
 	vmx_set_constant_host_state(vmx);
+
 	vmcs_writel(HOST_FS_BASE, __readmsr(MSR_FS_BASE)); /* 22.2.4 */
 	vmcs_writel(HOST_GS_BASE, __readmsr(MSR_GS_BASE)); /* 22.2.4 */
 
@@ -2760,6 +2781,7 @@ static void vmx_vcpu_reset(struct kvm_vcpu* vcpu, bool init_event) {
 
 	vmx->rmode.vm86_active = 0;
 
+	// set guest segment fields
 	seg_setup(VCPU_SREG_CS);
 	vmcs_write16(GUEST_CS_SELECTOR, 0xf000);
 	vmcs_writel(GUEST_CS_BASE, 0xffff0000ul);
@@ -3061,7 +3083,6 @@ static void vmx_load_mmu_pgd(struct kvm_vcpu* vcpu, hpa_t root_hpa,
 
 
 void vmx_set_constant_host_state(struct vcpu_vmx* vmx) {
-	UNREFERENCED_PARAMETER(vmx);
 
 	u64 cr0, cr3, cr4;
 	cr0 = __readcr0();
@@ -3085,7 +3106,7 @@ void vmx_set_constant_host_state(struct vcpu_vmx* vmx) {
 #ifdef _WIN64
 	vmcs_write16(HOST_DS_SELECTOR, vmx_get_ds());
 	vmcs_write16(HOST_ES_SELECTOR, vmx_get_es());
-
+	
 #else
 	
 #endif // WIN64
@@ -3228,6 +3249,8 @@ void vmx_spec_ctrl_restore_host(struct vcpu_vmx* vmx, unsigned int flags) {
 	ULONG_PTR hardware_entry_failure_reason =
 		vmcs_read32(VM_INSTRUCTION_ERROR);
 
-	if(hardware_entry_failure_reason)
+	if (hardware_entry_failure_reason) {
 		LogErr("hardware entry failure reason: 0x%x\n", hardware_entry_failure_reason);
+		dump_vmcs(&vmx->vcpu);
+	}
 }

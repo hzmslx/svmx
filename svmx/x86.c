@@ -331,6 +331,8 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu* vcpu) {
 
 	// KVM 虚拟机 vcpu 数据结构载入物理 cpu
 	vcpu_load(vcpu);
+	
+	
 	kvm_run->flags = 0;
 
 	if (vcpu->arch.mp_state == KVM_MP_STATE_UNINITIALIZED) {
@@ -550,6 +552,9 @@ void kvm_vcpu_reset(struct kvm_vcpu* vcpu, bool init_event) {
 	memset(vcpu->arch.regs, 0, sizeof(vcpu->arch.regs));
 	kvm_register_mark_dirty(vcpu, VCPU_REGS_RSP);
 
+
+	kvm_x86_ops.vcpu_reset(vcpu, init_event);
+
 	/*
 	* CR0.CD/NW are set on RESET, preserved on INIT.  Note, some versions
 	* of Intel's SDM list CD/NW as being set on INIT, but they contradict
@@ -761,7 +766,7 @@ void kvm_arch_commit_memory_region(struct kvm* kvm,
 void kvm_arch_vcpu_put(struct kvm_vcpu* vcpu) {
 	
 	kvm_x86_ops.vcpu_put(vcpu);
-
+	vcpu->arch.last_host_tsc = __rdtsc();
 }
 
 void kvm_arch_vcpu_postcreate(struct kvm_vcpu* vcpu) {

@@ -47,6 +47,9 @@ __vmx_vcpu_run PROC
 	; @vmx
 	push rcx
 
+	; @flags
+	push r8
+
 	; @regs
 	push rdx
 
@@ -105,6 +108,8 @@ Lvmlaunch:
 Lvmfail:
 	; VM-Fail: set return value to 1
 	mov rbx, 1
+	; Discard @regs.  The register is irrelevant, it just can't be RBX.
+	pop rax
 	;
 	; Clear all general purpose register except RSP and RBX to prevent
 	; speculative use of the guest's values, even those that are reloadoed
