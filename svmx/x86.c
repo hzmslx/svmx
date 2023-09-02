@@ -378,10 +378,6 @@ int kvm_arch_vcpu_create(struct kvm_vcpu* vcpu) {
 	return r;
 }
 
-void kvm_arch_vcpu_load(struct kvm_vcpu* vcpu, int cpu) {
-	kvm_x86_ops.vcpu_load(vcpu, cpu);
-}
-
 static void kvm_vcpu_write_tsc_offset(struct kvm_vcpu* vcpu, u64 l1_offset)
 {
 	vcpu->arch.l1_tsc_offset = l1_offset;
@@ -389,7 +385,15 @@ static void kvm_vcpu_write_tsc_offset(struct kvm_vcpu* vcpu, u64 l1_offset)
 	kvm_x86_ops.write_tsc_offset(vcpu, vcpu->arch.l1_tsc_offset);
 }
 
-int kvm_set_cr0(struct kvm_vcpu* vcpu, unsigned long cr0) {
+void kvm_arch_vcpu_load(struct kvm_vcpu* vcpu, int cpu) {
+	kvm_x86_ops.vcpu_load(vcpu, cpu);
+	u64 offset = 0;
+	kvm_vcpu_write_tsc_offset(vcpu, offset);
+}
+
+
+
+int kvm_set_cr0(struct kvm_vcpu* vcpu, ULONG_PTR cr0) {
 	
 	cr0 |= X86_CR0_ET;
 
@@ -421,7 +425,7 @@ int kvm_set_cr0(struct kvm_vcpu* vcpu, unsigned long cr0) {
 	return 0;
 }
 
-bool __kvm_is_valid_cr4(struct kvm_vcpu* vcpu, unsigned long cr4)
+bool __kvm_is_valid_cr4(struct kvm_vcpu* vcpu, ULONG_PTR cr4)
 {
 	// 如果guest尝试设置cr4值中任何一个保留位，则cr4值无效
 	if (cr4 & cr4_reserved_bits)
@@ -433,7 +437,7 @@ bool __kvm_is_valid_cr4(struct kvm_vcpu* vcpu, unsigned long cr4)
 	return TRUE;
 }
 
-static bool kvm_is_valid_cr4(struct kvm_vcpu* vcpu, unsigned long cr4)
+static bool kvm_is_valid_cr4(struct kvm_vcpu* vcpu, ULONG_PTR cr4)
 {
 	return __kvm_is_valid_cr4(vcpu, cr4) &&
 		kvm_x86_ops.is_valid_cr4(vcpu, cr4);
@@ -442,7 +446,7 @@ static bool kvm_is_valid_cr4(struct kvm_vcpu* vcpu, unsigned long cr4)
 /*
  * Load the pae pdptrs.  Return 1 if they are all valid, 0 otherwise.
  */
-int load_pdptrs(struct kvm_vcpu* vcpu, unsigned long cr3)
+int load_pdptrs(struct kvm_vcpu* vcpu, ULONG_PTR cr3)
 {
 	UNREFERENCED_PARAMETER(vcpu);
 	UNREFERENCED_PARAMETER(cr3);
@@ -468,8 +472,8 @@ int load_pdptrs(struct kvm_vcpu* vcpu, unsigned long cr3)
 	return 1;
 }
 
-int kvm_set_cr4(struct kvm_vcpu* vcpu, unsigned long cr4) {
-	unsigned long old_cr4 = kvm_read_cr4(vcpu);
+int kvm_set_cr4(struct kvm_vcpu* vcpu, ULONG_PTR cr4) {
+	ULONG_PTR old_cr4 = kvm_read_cr4(vcpu);
 
 	// 判断cr4是否有效，无效则报错
 	if (!kvm_is_valid_cr4(vcpu, cr4))
@@ -499,7 +503,7 @@ int kvm_set_cr4(struct kvm_vcpu* vcpu, unsigned long cr4) {
 	return 0;
 }
 
-void kvm_lmsw(struct kvm_vcpu* vcpu, unsigned long msw)
+void kvm_lmsw(struct kvm_vcpu* vcpu, ULONG_PTR msw)
 {
 	(void)kvm_set_cr0(vcpu, kvm_read_cr0_bits(vcpu, ~0x0eul) | (msw & 0x0f));
 }
@@ -534,8 +538,8 @@ static void vcpu_load_eoi_exitmap(struct kvm_vcpu* vcpu)
 }
 
 void kvm_vcpu_reset(struct kvm_vcpu* vcpu, bool init_event) {
-	unsigned long old_cr0 = kvm_read_cr0(vcpu);
-	unsigned long new_cr0;
+	ULONG_PTR old_cr0 = kvm_read_cr0(vcpu);
+	ULONG_PTR new_cr0;
 
 	vcpu->arch.dr7 = DR7_FIXED_1;
 	kvm_update_dr7(vcpu);

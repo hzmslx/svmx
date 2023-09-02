@@ -56,8 +56,8 @@ bool tdp_mmu_enabled = TRUE;
 
 
 struct kvm_mmu_role_regs {
-	const unsigned long cr0;
-	const unsigned long cr4;
+	const ULONG_PTR cr0;
+	const ULONG_PTR cr4;
 	const u64 efer;
 };
 
@@ -277,7 +277,7 @@ kvm_calc_tdp_mmu_root_page_role(struct kvm_vcpu* vcpu,
 	return role;
 }
 
-static unsigned long get_guest_cr3(struct kvm_vcpu* vcpu)
+static ULONG_PTR get_guest_cr3(struct kvm_vcpu* vcpu)
 {
 	return kvm_read_cr3(vcpu);
 }

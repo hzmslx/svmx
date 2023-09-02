@@ -64,7 +64,7 @@ struct operand {
 	union {
 		unsigned long* reg;
 		struct segmented_address {
-			ulong ea;
+			ULONG_PTR ea;
 			unsigned seg;
 		} mem;
 		unsigned xmm;
@@ -167,14 +167,14 @@ struct x86_emulate_ops {
 	 *
 	 * @reg: gpr number.
 	 */
-	ulong(*read_gpr)(struct x86_emulate_ctxt* ctxt, unsigned reg);
+	ULONG_PTR(*read_gpr)(struct x86_emulate_ctxt* ctxt, unsigned reg);
 	/*
 	 * write_gpr: write a general purpose register (rax - r15)
 	 *
 	 * @reg: gpr number.
 	 * @val: value to write.
 	 */
-	void (*write_gpr)(struct x86_emulate_ctxt* ctxt, unsigned reg, ulong val);
+	void (*write_gpr)(struct x86_emulate_ctxt* ctxt, unsigned reg, ULONG_PTR val);
 	/*
 	 * read_std: Read bytes of standard (non-emulated/special) memory.
 	 *           Used for descriptor reading.
@@ -246,7 +246,7 @@ struct x86_emulate_ops {
 		const void* new,
 		unsigned int bytes,
 		struct x86_exception* fault);
-	void (*invlpg)(struct x86_emulate_ctxt* ctxt, ulong addr);
+	void (*invlpg)(struct x86_emulate_ctxt* ctxt, ULONG_PTR addr);
 
 	int (*pio_in_emulated)(struct x86_emulate_ctxt* ctxt,
 		int size, unsigned short port, void* val,
@@ -266,11 +266,11 @@ struct x86_emulate_ops {
 	void (*get_idt)(struct x86_emulate_ctxt* ctxt, struct desc_ptr* dt);
 	void (*set_gdt)(struct x86_emulate_ctxt* ctxt, struct desc_ptr* dt);
 	void (*set_idt)(struct x86_emulate_ctxt* ctxt, struct desc_ptr* dt);
-	ulong(*get_cr)(struct x86_emulate_ctxt* ctxt, int cr);
-	int (*set_cr)(struct x86_emulate_ctxt* ctxt, int cr, ulong val);
+	ULONG_PTR(*get_cr)(struct x86_emulate_ctxt* ctxt, int cr);
+	int (*set_cr)(struct x86_emulate_ctxt* ctxt, int cr, ULONG_PTR val);
 	int (*cpl)(struct x86_emulate_ctxt* ctxt);
-	void (*get_dr)(struct x86_emulate_ctxt* ctxt, int dr, ulong* dest);
-	int (*set_dr)(struct x86_emulate_ctxt* ctxt, int dr, ulong value);
+	void (*get_dr)(struct x86_emulate_ctxt* ctxt, int dr, ULONG_PTR* dest);
+	int (*set_dr)(struct x86_emulate_ctxt* ctxt, int dr, ULONG_PTR value);
 	int (*set_msr_with_filter)(struct x86_emulate_ctxt* ctxt, u32 msr_index, u64 data);
 	int (*get_msr_with_filter)(struct x86_emulate_ctxt* ctxt, u32 msr_index, u64* pdata);
 	int (*get_msr)(struct x86_emulate_ctxt* ctxt, u32 msr_index, u64* pdata);

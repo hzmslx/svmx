@@ -5,10 +5,10 @@
 #include "vmcs.h"
 #include "x86.h"
 
-static unsigned long vmcs_readl(ULONG_PTR field) {
-	size_t value;
+static ULONG_PTR vmcs_readl(ULONG_PTR field) {
+	ULONG_PTR value;
 	__vmx_vmread(field, &value);
-	return (u32)value;
+	return value;
 }
 
 static void vmcs_writel(unsigned long field, ULONG_PTR value) {

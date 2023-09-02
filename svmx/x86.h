@@ -78,7 +78,7 @@ static inline bool is_pae_paging(struct kvm_vcpu* vcpu)
 	return !is_long_mode(vcpu) && is_pae(vcpu) && is_paging(vcpu);
 }
 
-bool __kvm_is_valid_cr4(struct kvm_vcpu* vcpu, unsigned long cr4);
+bool __kvm_is_valid_cr4(struct kvm_vcpu* vcpu, ULONG_PTR cr4);
 
 fastpath_t handle_fastpath_set_msr_irqoff(struct kvm_vcpu* vcpu);
 

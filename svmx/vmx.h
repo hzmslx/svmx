@@ -921,7 +921,7 @@ struct vcpu_vmx {
 	unsigned long         exit_qualification;
 	u32                   exit_intr_info;
 	u32                   idt_vectoring_info;
-	ulong                 rflags;
+	ULONG_PTR                 rflags;
 
 	/*
 	 * User return MSRs are always emulated when enabled in the guest, but
@@ -958,14 +958,14 @@ struct vcpu_vmx {
 
 	struct {
 		int vm86_active;
-		ulong save_rflags;
+		ULONG_PTR save_rflags;
 		struct kvm_segment segs[8];
 	} rmode;
 	struct {
 		u32 bitmask; /* 4 bits per segment (1 bit per field) */
 		struct kvm_save_segment {
 			u16 selector;
-			unsigned long base;
+			ULONG_PTR base;
 			u32 limit;
 			u32 ar;
 		} seg[8];

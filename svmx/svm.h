@@ -530,7 +530,7 @@ struct vcpu_svm {
 
 	u32* msrpm;
 
-	ulong nmi_iret_rip;
+	ULONG_PTR nmi_iret_rip;
 
 	struct svm_nested_state nested;
 

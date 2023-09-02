@@ -29,22 +29,22 @@ static inline bool is_guest_mode(struct kvm_vcpu* vcpu)
 	return vcpu->arch.hflags & HF_GUEST_MASK;
 }
 
-static inline ulong kvm_read_cr0_bits(struct kvm_vcpu* vcpu, ulong mask) {
-	ulong tmask = mask & KVM_POSSIBLE_CR0_GUEST_BITS;
+static inline ULONG_PTR kvm_read_cr0_bits(struct kvm_vcpu* vcpu, ULONG_PTR mask) {
+	ULONG_PTR tmask = mask & KVM_POSSIBLE_CR0_GUEST_BITS;
 	if ((tmask & vcpu->arch.cr0_guest_owned_bits) &&
 		!kvm_register_is_available(vcpu, VCPU_EXREG_CR0))
 		kvm_x86_ops.cache_reg(vcpu, VCPU_EXREG_CR0);
 	return vcpu->arch.cr0 & mask;
 }
 
-static inline ulong kvm_read_cr0(struct kvm_vcpu* vcpu)
+static inline ULONG_PTR kvm_read_cr0(struct kvm_vcpu* vcpu)
 {
 	return kvm_read_cr0_bits(vcpu, ~0UL);
 }
 
-static inline ulong kvm_read_cr4_bits(struct kvm_vcpu* vcpu, ulong mask)
+static inline ULONG_PTR kvm_read_cr4_bits(struct kvm_vcpu* vcpu, ULONG_PTR mask)
 {
-	ulong tmask = mask & KVM_POSSIBLE_CR4_GUEST_BITS;
+	ULONG_PTR tmask = mask & KVM_POSSIBLE_CR4_GUEST_BITS;
 	if ((tmask & vcpu->arch.cr4_guest_owned_bits) &&
 		!kvm_register_is_available(vcpu, VCPU_EXREG_CR4))
 		kvm_x86_ops.cache_reg(vcpu, VCPU_EXREG_CR4);
@@ -57,7 +57,7 @@ static bool kvm_is_cr4_bit_set(struct kvm_vcpu* vcpu,
 	return !!kvm_read_cr4_bits(vcpu, cr4_bit);
 }
 
-static inline ulong kvm_read_cr4(struct kvm_vcpu* vcpu)
+static inline ULONG_PTR kvm_read_cr4(struct kvm_vcpu* vcpu)
 {
 	return kvm_read_cr4_bits(vcpu, ~0UL);
 }
@@ -68,7 +68,7 @@ static bool kvm_is_cr0_bit_set(struct kvm_vcpu* vcpu,
 	return !!kvm_read_cr0_bits(vcpu, cr0_bit);
 }
 
-static inline ulong kvm_read_cr3(struct kvm_vcpu* vcpu)
+static inline ULONG_PTR kvm_read_cr3(struct kvm_vcpu* vcpu)
 {
 	if (!kvm_register_is_available(vcpu, VCPU_EXREG_CR3))
 		kvm_x86_ops.cache_reg(vcpu, VCPU_EXREG_CR3);

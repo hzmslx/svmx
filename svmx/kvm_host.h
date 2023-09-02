@@ -716,7 +716,7 @@ struct kvm_page_fault {
  * current mmu mode.
  */
 struct kvm_mmu {
-	unsigned long (*get_guest_pgd)(struct kvm_vcpu* vcpu);
+	ULONG_PTR (*get_guest_pgd)(struct kvm_vcpu* vcpu);
 	u64(*get_pdptr)(struct kvm_vcpu* vcpu, int index);
 	int (*page_fault)(struct kvm_vcpu* vcpu, struct kvm_page_fault* fault);
 	void (*inject_page_fault)(struct kvm_vcpu* vcpu,
@@ -871,14 +871,14 @@ struct kvm_vcpu_arch {
 	u32 regs_avail;
 	u32 regs_dirty;
 	// 类似这些寄存器就是用来缓存真正的cpu值的
-	unsigned long cr0;
-	unsigned long cr0_guest_owned_bits;
-	unsigned long cr2;
-	unsigned long cr3;
-	unsigned long cr4;
-	unsigned long cr4_guest_owned_bits;
-	unsigned long cr4_guest_rsvd_bits;
-	unsigned long cr8;
+	ULONG_PTR cr0;
+	ULONG_PTR cr0_guest_owned_bits;
+	ULONG_PTR cr2;
+	ULONG_PTR cr3;
+	ULONG_PTR cr4;
+	ULONG_PTR cr4_guest_owned_bits;
+	ULONG_PTR cr4_guest_rsvd_bits;
+	ULONG_PTR cr8;
 	u32 host_pkru;
 	u32 pkru;
 	u32 hflags;
@@ -1238,20 +1238,20 @@ struct kvm_x86_ops {
 	void (*set_segment)(struct kvm_vcpu* vcpu,
 		struct kvm_segment* var, int seg);
 	void (*get_cs_db_l_bits)(struct kvm_vcpu* vcpu, int* db, int* l);
-	void (*set_cr0)(struct kvm_vcpu* vcpu, unsigned long cr0);
-	void (*post_set_cr3)(struct kvm_vcpu* vcpu, unsigned long cr3);
-	bool (*is_valid_cr4)(struct kvm_vcpu* vcpu, unsigned long cr0);
-	void (*set_cr4)(struct kvm_vcpu* vcpu, unsigned long cr4);
+	void (*set_cr0)(struct kvm_vcpu* vcpu, ULONG_PTR cr0);
+	void (*post_set_cr3)(struct kvm_vcpu* vcpu, ULONG_PTR cr3);
+	bool (*is_valid_cr4)(struct kvm_vcpu* vcpu, ULONG_PTR cr0);
+	void (*set_cr4)(struct kvm_vcpu* vcpu, ULONG_PTR cr4);
 	int (*set_efer)(struct kvm_vcpu* vcpu, u64 efer);
 	void (*get_idt)(struct kvm_vcpu* vcpu, struct desc_ptr* dt);
 	void (*set_idt)(struct kvm_vcpu* vcpu, struct desc_ptr* dt);
 	void (*get_gdt)(struct kvm_vcpu* vcpu, struct desc_ptr* dt);
 	void (*set_gdt)(struct kvm_vcpu* vcpu, struct desc_ptr* dt);
 	void (*sync_dirty_debug_regs)(struct kvm_vcpu* vcpu);
-	void (*set_dr7)(struct kvm_vcpu* vcpu, unsigned long value);
+	void (*set_dr7)(struct kvm_vcpu* vcpu, ULONG_PTR value);
 	void (*cache_reg)(struct kvm_vcpu* vcpu, enum kvm_reg reg);
-	unsigned long (*get_rflags)(struct kvm_vcpu* vcpu);
-	void (*set_rflags)(struct kvm_vcpu* vcpu, unsigned long rflags);
+	ULONG_PTR(*get_rflags)(struct kvm_vcpu* vcpu);
+	void (*set_rflags)(struct kvm_vcpu* vcpu, ULONG_PTR rflags);
 	bool (*get_if_flag)(struct kvm_vcpu* vcpu);
 
 	void (*flush_tlb_all)(struct kvm_vcpu* vcpu);
@@ -1303,7 +1303,7 @@ struct kvm_x86_ops {
 	void (*enable_irq_window)(struct kvm_vcpu* vcpu);
 	void (*update_cr8_intercept)(struct kvm_vcpu* vcpu, int tpr, int irr);
 	//bool (*check_apicv_inhibit_reasons)(enum kvm_apicv_inhibit reason);
-	const unsigned long required_apicv_inhibits;
+	const ULONG_PTR required_apicv_inhibits;
 	bool allow_apicv_in_x2apic_without_x2apic_virtualization;
 	void (*refresh_apicv_exec_ctrl)(struct kvm_vcpu* vcpu);
 	void (*hwapic_irr_update)(struct kvm_vcpu* vcpu, int max_irr);
@@ -1401,7 +1401,7 @@ struct kvm_x86_ops {
 	/*
 	 * Returns vCPU specific APICv inhibit reasons
 	 */
-	unsigned long (*vcpu_get_apicv_inhibit_reasons)(struct kvm_vcpu* vcpu);
+	ULONG_PTR (*vcpu_get_apicv_inhibit_reasons)(struct kvm_vcpu* vcpu);
 };
 
 enum kvm_mr_change {
@@ -1763,10 +1763,10 @@ void kvm_arch_vcpu_load(struct kvm_vcpu* vcpu, int cpu);
 
 #define HF_GUEST_MASK		(1 << 0) /* VCPU is in guest-mode */
 
-int kvm_set_cr0(struct kvm_vcpu* vcpu, unsigned long cr0);
-int kvm_set_cr4(struct kvm_vcpu* vcpu, unsigned long cr4);
+int kvm_set_cr0(struct kvm_vcpu* vcpu, ULONG_PTR cr0);
+int kvm_set_cr4(struct kvm_vcpu* vcpu, ULONG_PTR cr4);
 
-void kvm_lmsw(struct kvm_vcpu* vcpu, unsigned long msw);
+void kvm_lmsw(struct kvm_vcpu* vcpu, ULONG_PTR msw);
 
 static inline bool kvm_request_pending(struct kvm_vcpu* vcpu)
 {
