@@ -64,7 +64,8 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) 
 	}
 
 	ULONG count = KeQueryActiveProcessorCount(0);
-	hardware_enabled = ExAllocatePoolWithTag(NonPagedPool, count * sizeof(bool),
+	ULONG len = count * sizeof(bool);
+	hardware_enabled = ExAllocatePoolWithTag(NonPagedPool,len,
 		DRIVER_TAG);
 	if (hardware_enabled == NULL) {
 		status = STATUS_NO_MEMORY;
@@ -72,6 +73,7 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) 
 		IoDeleteDevice(DeviceObject);
 		return status;
 	}
+	RtlZeroMemory(hardware_enabled, len);
 
 	int cpuInfo[4];
 	CpuIdEx(cpuInfo, 0, 0);
@@ -80,8 +82,8 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) 
 	memcpy_s(brand + 4, 4, &cpuInfo[3], 4);
 	memcpy_s(brand + 8, 4, &cpuInfo[2], 4);
 	if (strcmp(brand, "GenuineIntel") == 0) {
-
-		vmxarea = ExAllocatePoolWithTag(NonPagedPool, count * sizeof(struct vmcs*),
+		ULONG size = count * sizeof(struct vmcs*);
+		vmxarea = ExAllocatePoolWithTag(NonPagedPool,size,
 			DRIVER_TAG);
 		if (vmxarea == NULL) {
 			status = STATUS_NO_MEMORY;
@@ -89,7 +91,8 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) 
 			IoDeleteDevice(DeviceObject);
 			return status;
 		}
-		current_vmcs = ExAllocatePoolWithTag(NonPagedPool, count * sizeof(struct vmcs*),
+		RtlZeroMemory(vmxarea, size);
+		current_vmcs = ExAllocatePoolWithTag(NonPagedPool, size,
 			DRIVER_TAG);
 		if (current_vmcs == NULL) {
 			status = STATUS_NO_MEMORY;
@@ -99,6 +102,7 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) 
 			IoDeleteDevice(DeviceObject);
 			return status;
 		}
+		RtlZeroMemory(vmxarea, size);
 		// module initialize
 		status = vmx_init();
 		if (NT_SUCCESS(status))

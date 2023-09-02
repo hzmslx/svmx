@@ -45,7 +45,7 @@ static RTL_BITMAP vmx_vpid_bitmap;
 static int cpu_preemption_timer_multi;
 static bool enable_preemption_timer = TRUE;
 
-static bool dump_invalid_vmcs = 0;
+static bool dump_invalid_vmcs = TRUE;
 
 LIST_ENTRY* loaded_vmcss_on_cpu;
 
@@ -752,6 +752,7 @@ static void vmx_vcpu_enter_exit(struct kvm_vcpu* vcpu,
 	unsigned int flags) {
 	struct vcpu_vmx* vmx = to_vmx(vcpu);
 
+	dump_vmcs(vcpu);
 
 	__vmx_vcpu_run(vmx, (ULONG_PTR*)&vcpu->arch.regs, flags);
 
@@ -2332,10 +2333,25 @@ void loaded_vmcs_clear(struct loaded_vmcs* loaded_vmcs) {
 	}
 }
 
+static void vmx_dump_sel(char* name, uint32_t sel) {
+	LogErr("%s sel=0x%04x, attr=0x%05x, limit=0x%08x, base=0x%016lx\n",
+		name, vmcs_read16(sel),
+		vmcs_read32(sel + GUEST_ES_AR_BYTES - GUEST_ES_SELECTOR),
+		vmcs_read32(sel + GUEST_ES_LIMIT - GUEST_ES_SELECTOR),
+		vmcs_readl(sel + GUEST_ES_BASE - GUEST_ES_SELECTOR));
+}
+
+static void vmx_dump_dtsel(char* name, uint32_t limit) {
+	LogErr("%s				limit=0x%08x, base=0x%016lx\n",
+		name, vmcs_read32(limit),
+		vmcs_readl(limit + GUEST_GDTR_BASE - GUEST_GDTR_LIMIT));
+}
+
 void dump_vmcs(struct kvm_vcpu* vcpu) {
-	UNREFERENCED_PARAMETER(vcpu);
+	struct vcpu_vmx* vmx = to_vmx(vcpu);
 	u32 vmentry_ctl, vmexit_ctl;
 	u32 cpu_based_exec_ctrl, pin_based_exec_ctrl, secondary_exec_control;
+	u64 tertiary_exec_control;
 	unsigned long cr4;
 	
 	if (!dump_invalid_vmcs) {
@@ -2348,12 +2364,49 @@ void dump_vmcs(struct kvm_vcpu* vcpu) {
 	pin_based_exec_ctrl = vmcs_read32(PIN_BASED_VM_EXEC_CONTROL);
 	cr4 = vmcs_readl(GUEST_CR4);
 
+	if (cpu_has_secondary_exec_ctrls())
+		secondary_exec_control = vmcs_read32(SECONDARY_VM_EXEC_CONTROL);
+	else
+		secondary_exec_control = 0;
+
+	if (cpu_has_tertiary_exec_ctrls())
+		tertiary_exec_control = vmcs_read64(TERTIARY_VM_EXEC_CONTROL);
+	else
+		tertiary_exec_control = 0;
+
+	LogErr("VMCS %p, last attempted VM-entry on CPU %d\n",
+		vmx->loaded_vmcs->vmcs, vcpu->arch.last_vmentry_cpu);
+	LogErr("*** Guest State ***\n");
+	LogErr("CR0: actual=0x%016lx,shadow=0x%016lx,gh_mask=%016lx\n",
+		vmcs_readl(GUEST_CR0), vmcs_readl(CR0_READ_SHADOW),
+		vmcs_readl(CR0_GUEST_HOST_MASK));
+	LogErr("CR4: actual=0x%016lx,shadow=0x%016lx,gh_mask=%016lx\n",
+		vmcs_readl(GUEST_CR4), vmcs_readl(CR4_READ_SHADOW),
+		vmcs_readl(CR4_GUEST_HOST_MASK));
+	LogErr("CR3 = 0x%016lx\n", vmcs_readl(GUEST_CR3));
 	if (cpu_has_vmx_ept()) {
 		LogErr("PDPTR0 = 0x%016llx PDPTR1 = 0x%016llx\n",
 			vmcs_read64(GUEST_PDPTR0), vmcs_read64(GUEST_PDPTR1));
 		LogErr("PDPTR2 = 0x%16llx PDPTR3 = 0x%016llx\n",
 			vmcs_read64(GUEST_PDPTR2), vmcs_read64(GUEST_PDPTR3));
 	}
+	LogErr("RSP = 0x%016lx RIP = 0x%016lx\n",
+		vmcs_readl(GUEST_RIP), vmcs_readl(GUEST_RIP));
+	LogErr("RFLAGS=0x%08lx		DR7 = 0x%016lx\n",
+		vmcs_readl(GUEST_RFLAGS), vmcs_readl(GUEST_DR7));
+	LogErr("Sysenter RSP=%016lx CS:RIP=%04x:%016lx\n",
+		vmcs_readl(GUEST_SYSENTER_ESP),
+		vmcs_read32(GUEST_SYSENTER_CS), vmcs_readl(GUEST_SYSENTER_EIP));
+	vmx_dump_sel("CS:  ", GUEST_CS_SELECTOR);
+	vmx_dump_sel("DS:  ", GUEST_DS_SELECTOR);
+	vmx_dump_sel("SS:  ", GUEST_SS_SELECTOR);
+	vmx_dump_sel("ES:  ", GUEST_ES_SELECTOR);
+	vmx_dump_sel("FS:  ", GUEST_FS_SELECTOR);
+	vmx_dump_sel("GS:  ", GUEST_GS_SELECTOR);
+	vmx_dump_dtsel("GDTR:", GUEST_GDTR_LIMIT);
+	vmx_dump_sel("LDTR:", GUEST_LDTR_SELECTOR);
+	vmx_dump_dtsel("IDTR:", GUEST_IDTR_LIMIT);
+	vmx_dump_sel("TR:  ", GUEST_TR_SELECTOR);
 
 	if (vmentry_ctl & VM_ENTRY_LOAD_IA32_EFER)
 		LogErr("EFER= 0x%016llx\n", vmcs_read64(GUEST_IA32_EFER));
@@ -2368,15 +2421,26 @@ void dump_vmcs(struct kvm_vcpu* vcpu) {
 
 
 
-
-	if (cpu_has_secondary_exec_ctrls())
-		secondary_exec_control = vmcs_read32(SECONDARY_VM_EXEC_CONTROL);
-	else
-		secondary_exec_control = 0;
-
-
 	LogErr("*** Host State ***\n");
-
+	LogErr("RIP = 0x%016lx RSP = 0x%016lx\n",
+		vmcs_readl(HOST_RIP), vmcs_readl(HOST_RSP));
+	LogErr("CS=%04x SS=%04x DS=%04x ES=%04x FS=%04x GS=%04x TR=%04x\n",
+		vmcs_read16(HOST_CS_SELECTOR), vmcs_read16(HOST_SS_SELECTOR),
+		vmcs_read16(HOST_DS_SELECTOR), vmcs_read16(HOST_ES_SELECTOR),
+		vmcs_read16(HOST_FS_SELECTOR), vmcs_read16(HOST_GS_SELECTOR),
+		vmcs_read16(HOST_TR_SELECTOR));
+	LogErr("FSBase=%016lx GSBase=%016lx TRBase=%016lx\n",
+		vmcs_readl(HOST_FS_BASE), vmcs_readl(HOST_GS_BASE),
+		vmcs_readl(HOST_TR_BASE));
+	LogErr("GDTBase=%016lx IDTBase=%016lx\n",
+		vmcs_readl(HOST_GDTR_BASE), vmcs_readl(HOST_IDTR_BASE));
+	LogErr("CR0=%016lx CR3=%016lx CR4=%016lx\n",
+		vmcs_readl(HOST_CR0), vmcs_readl(HOST_CR3),
+		vmcs_readl(HOST_CR4));
+	LogErr("Sysenter RSP=%016lx CS:RIP=%04x:%016lx\n",
+		vmcs_readl(HOST_IA32_SYSENTER_ESP),
+		vmcs_read32(HOST_IA32_SYSENTER_CS),
+		vmcs_readl(HOST_IA32_SYSENTER_EIP));
 	if (vmexit_ctl & VM_EXIT_LOAD_IA32_EFER)
 		LogErr("EFER= 0x%016llx\n", vmcs_read64(HOST_IA32_EFER));
 	if (vmentry_ctl & VM_EXIT_LOAD_IA32_PAT)
@@ -2386,11 +2450,29 @@ void dump_vmcs(struct kvm_vcpu* vcpu) {
 		LogErr("PerfGlobCtl = 0x%016llx\n",
 			vmcs_read64(HOST_IA32_PERF_GLOBAL_CTRL));
 
-	if (secondary_exec_control & SECONDARY_EXEC_VIRTUAL_INTR_DELIVERY)
-		LogErr("InterruptStatus = %04x\n",
-			vmcs_read16(GUEST_INTR_STATUS));
-
-
+	LogErr("*** Control State ***\n");
+	LogErr("CPUBased=0x%08x SecondaryExec=0x%08x TertiaryExec=0x%016llx\n",
+		cpu_based_exec_ctrl, secondary_exec_control, tertiary_exec_control);
+	LogErr("PinBased=0x%08x EntryControls=%08x ExitControls=%08x\n",
+		pin_based_exec_ctrl, vmentry_ctl, vmexit_ctl);
+	LogErr("ExceptionBitmap=%08x PFECmask=%08x PFECmatch=%08x\n",
+		vmcs_read32(EXCEPTION_BITMAP),
+		vmcs_read32(PAGE_FAULT_ERROR_CODE_MASK),
+		vmcs_read32(PAGE_FAULT_ERROR_CODE_MATCH));
+	LogErr("VMEntry: intr_info=%08x errcode=%08x ilen=%08x\n",
+		vmcs_read32(VM_ENTRY_INTR_INFO_FIELD),
+		vmcs_read32(VM_ENTRY_EXCEPTION_ERROR_CODE),
+		vmcs_read32(VM_ENTRY_INSTRUCTION_LEN));
+	LogErr("VMExit: intr_info=%08x errcode=%08x ilen=%08x\n",
+		vmcs_read32(VM_EXIT_INTR_INFO),
+		vmcs_read32(VM_EXIT_INTR_ERROR_CODE),
+		vmcs_read32(VM_EXIT_INSTRUCTION_LEN));
+	LogErr("        reason=%08x qualification=%016lx\n",
+		vmcs_read32(VM_EXIT_REASON), vmcs_readl(EXIT_QUALIFICATION));
+	LogErr("IDTVectoring: info=%08x errcode=%08x\n",
+		vmcs_read32(IDT_VECTORING_INFO_FIELD),
+		vmcs_read32(IDT_VECTORING_ERROR_CODE));
+	LogErr("TSC Offset = 0x%016llx\n", vmcs_read64(TSC_OFFSET));
 	if (secondary_exec_control & SECONDARY_EXEC_TSC_SCALING)
 		LogErr("TSC Multiplier = 0x%016llx\n",
 			vmcs_read64(TSC_MULTIPLIER));
@@ -2404,7 +2486,6 @@ void dump_vmcs(struct kvm_vcpu* vcpu) {
 			LogErr("APIC-access addr = 0x%016llx ",
 				vmcs_read64(APIC_ACCESS_ADDR));
 	}
-
 	if (pin_based_exec_ctrl & PIN_BASED_POSTED_INTR)
 		LogErr("PostedIntrVec = 0x%02x\n", vmcs_read16(POSTED_INTR_NV));
 	if ((secondary_exec_control & SECONDARY_EXEC_ENABLE_EPT))
@@ -2526,6 +2607,7 @@ static void init_vmcs(struct vcpu_vmx* vmx) {
 		vmcs_write64(MSR_BITMAP, phys_addr);
 	}
 
+	vmcs_write64(VMCS_LINK_POINTER, INVALID_GPA);
 
 	/* Control */
 	pin_controls_set(vmx, vmx_pin_based_exec_ctrl(vmx));
@@ -2596,8 +2678,10 @@ static void init_vmcs(struct vcpu_vmx* vmx) {
 
 	u64 cs = __readmsr(MSR_IA32_SYSENTER_CS);
 	vmcs_write32(GUEST_SYSENTER_CS, (u32)cs);
-	vmcs_writel(GUEST_SYSENTER_EIP, __readmsr(MSR_IA32_SYSENTER_EIP));
 	vmcs_writel(GUEST_SYSENTER_ESP, __readmsr(MSR_IA32_SYSENTER_ESP));
+	vmcs_writel(GUEST_SYSENTER_EIP, __readmsr(MSR_IA32_SYSENTER_EIP));
+
+	
 
 	vmcs_writel(GUEST_RIP, Lclear_regs);
 }

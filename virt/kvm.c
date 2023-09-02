@@ -64,12 +64,10 @@ int kvm_init() {
 		goto err;
 	}
 
-
-	system("pause");
 	return 0;
 
 err:
-	assert(ret < 0);
+
 	if (hDevice != INVALID_HANDLE_VALUE) {
 		CloseHandle(hDevice);
 	}

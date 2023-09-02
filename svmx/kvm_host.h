@@ -1746,7 +1746,11 @@ NTSTATUS kvm_x86_vendor_init(struct kvm_x86_init_ops* ops);
 void kvm_x86_vendor_exit(void);
 
 static struct kvm* kvm_arch_alloc_vm(void) {
-	return ExAllocatePoolWithTag(NonPagedPool, kvm_x86_ops.vm_size, DRIVER_TAG);
+	struct kvm* kvm = ExAllocatePoolWithTag(NonPagedPool, kvm_x86_ops.vm_size, DRIVER_TAG);
+	if (kvm != NULL) {
+		RtlZeroMemory(kvm, kvm_x86_ops.vm_size);
+	}
+	return kvm;
 }
 
 void kvm_arch_hardware_disable(void);

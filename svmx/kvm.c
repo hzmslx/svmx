@@ -3,6 +3,7 @@
 #include "kvm.h"
 #include "kvm_mm.h"
 
+
 /*
 * Kernel-based Virtual Machine driver for Windows
 *
@@ -28,11 +29,14 @@ bool* hardware_enabled = NULL;
 
 struct kvm* g_kvm = NULL;
 
+static ULONG s_vcpu_size;
+
 
 int kvm_init(unsigned vcpu_size, unsigned vcpu_align) {
 	UNREFERENCED_PARAMETER(vcpu_align);
-	UNREFERENCED_PARAMETER(vcpu_size);
 	NTSTATUS status = STATUS_SUCCESS;
+
+	s_vcpu_size = vcpu_size;
 
 	KeInitializeMutex(&kvm_lock, 0);
 	InitializeListHead(&vm_list);
@@ -157,13 +161,15 @@ struct kvm* kvm_create_vm(unsigned long type) {
 	InsertHeadList(&vm_list, &kvm->vm_list);
 	KeReleaseMutex(&kvm_lock, FALSE);
 
+	SIZE_T size = sizeof(void*) * KeQueryActiveProcessorCount(0);
 	kvm->vcpu_array = ExAllocatePoolWithTag(NonPagedPool,
-		sizeof(void*) * KeQueryActiveProcessorCount(0),DRIVER_TAG);
+		size,DRIVER_TAG);
 	if (!kvm->vcpu_array) {
 		ExFreePool(kvm);
 		kvm = NULL;
 		return NULL;
 	}
+	RtlZeroMemory(kvm->vcpu_array, size);
 
 	return kvm;
 }
@@ -297,7 +303,7 @@ int kvm_vm_ioctl_create_vcpu(struct kvm* kvm, u32 id) {
 		kvm->created_vcpus++;
 		KeReleaseMutex(&kvm->lock, FALSE);
 
-		mdl = IoAllocateMdl(NULL, sizeof(struct kvm_vcpu), FALSE, FALSE, NULL);
+		mdl = IoAllocateMdl(NULL, s_vcpu_size, FALSE, FALSE, NULL);
 		if (!mdl) {
 			r = STATUS_NO_MEMORY;
 			break;
@@ -314,6 +320,7 @@ int kvm_vm_ioctl_create_vcpu(struct kvm* kvm, u32 id) {
 			r = STATUS_NO_MEMORY;
 			break;
 		}
+		RtlZeroMemory(page, PAGE_SIZE);
 		vcpu->run = page;
 
 		kvm_vcpu_init(vcpu, kvm, id);

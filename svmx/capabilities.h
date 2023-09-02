@@ -108,3 +108,7 @@ static inline bool cpu_has_vmx_ept_ad_bits(void)
 	return vmx_capability.ept & VMX_EPT_AD_BIT;
 }
 
+static inline bool cpu_has_tertiary_exec_ctrls(void) {
+	return vmcs_config.cpu_based_exec_ctrl &
+		CPU_BASED_ACTIVATE_TERTIARY_CONTROLS;
+}

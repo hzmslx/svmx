@@ -421,6 +421,7 @@ static int __kvm_mmu_create(struct kvm_vcpu* vcpu, struct kvm_mmu* mmu) {
 	page = ExAllocatePoolWithTag(NonPagedPool, PAGE_SIZE, DRIVER_TAG);
 	if (!page)
 		return STATUS_NO_MEMORY;
+	RtlZeroMemory(page, PAGE_SIZE);
 
 	mmu->pae_root = page;
 
