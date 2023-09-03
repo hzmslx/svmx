@@ -190,7 +190,7 @@ NTSTATUS DriverDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
 				if (!NT_SUCCESS(status))
 					break;
 			}
-
+			
 			break;
 		}
 		default:

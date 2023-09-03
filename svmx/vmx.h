@@ -360,26 +360,7 @@ enum vmcs_field {
 #define GUEST_INTR_STATE_SMI		0x00000004
 #define GUEST_INTR_STATE_NMI		0x00000008
 
-/*
- * Interruption-information format
- */
-#define INTR_INFO_VECTOR_MASK           0xff            /* 7:0 */
-#define INTR_INFO_INTR_TYPE_MASK        0x700           /* 10:8 */
-#define INTR_INFO_DELIVER_CODE_MASK     0x800           /* 11 */
-#define INTR_INFO_UNBLOCK_NMI		0x1000		/* 12 */
-#define INTR_INFO_VALID_MASK            0x80000000      /* 31 */
-#define INTR_INFO_RESVD_BITS_MASK       0x7ffff000
 
-#define VECTORING_INFO_VECTOR_MASK           	INTR_INFO_VECTOR_MASK
-#define VECTORING_INFO_TYPE_MASK        	INTR_INFO_INTR_TYPE_MASK
-#define VECTORING_INFO_DELIVER_CODE_MASK    	INTR_INFO_DELIVER_CODE_MASK
-#define VECTORING_INFO_VALID_MASK       	INTR_INFO_VALID_MASK
-
-#define INTR_TYPE_EXT_INTR              (0 << 8) /* external interrupt */
-#define INTR_TYPE_NMI_INTR		(2 << 8) /* NMI */
-#define INTR_TYPE_HARD_EXCEPTION	(3 << 8) /* processor exception */
-#define INTR_TYPE_SOFT_INTR             (4 << 8) /* software interrupt */
-#define INTR_TYPE_SOFT_EXCEPTION	(6 << 8) /* software exception */
 
 
 /* GUEST_ACTIVITY_STATE flags */
@@ -674,6 +655,23 @@ enum vmx_l1d_flush_state {
 #define VMX_EPT_RWX_MASK                        (VMX_EPT_READABLE_MASK |       \
 						 VMX_EPT_WRITABLE_MASK |       \
 						 VMX_EPT_EXECUTABLE_MASK)
+
+/*
+ * VMX_REGS_LAZY_LOAD_SET - The set of registers that will be updated in the
+ * cache on demand.  Other registers not listed here are synced to
+ * the cache immediately after VM-Exit.
+ */
+#define VMX_REGS_LAZY_LOAD_SET	((1 << VCPU_REGS_RIP) |         \
+				(1 << VCPU_REGS_RSP) |          \
+				(1 << VCPU_EXREG_RFLAGS) |      \
+				(1 << VCPU_EXREG_PDPTR) |       \
+				(1 << VCPU_EXREG_SEGMENTS) |    \
+				(1 << VCPU_EXREG_CR0) |         \
+				(1 << VCPU_EXREG_CR3) |         \
+				(1 << VCPU_EXREG_CR4) |         \
+				(1 << VCPU_EXREG_EXIT_INFO_1) | \
+				(1 << VCPU_EXREG_EXIT_INFO_2))
+
 
 /*
  * Exit Qualifications for EPT Violations
@@ -1325,3 +1323,11 @@ typedef struct x86_segment_descriptor {
 void vmx_vmexit(void);
 
 void vmx_spec_ctrl_restore_host(struct vcpu_vmx* vmx, unsigned int flags);
+
+
+void vmx_set_cr2(ULONG_PTR cr2);
+
+static inline bool kvm_register_test_and_mark_available(struct kvm_vcpu* vcpu,
+	enum kvm_reg reg) {
+	return _bittestandset((LONG*)&vcpu->arch.regs_avail, reg);
+}

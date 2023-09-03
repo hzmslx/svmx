@@ -1,5 +1,6 @@
 #pragma once
 
+
 struct vmcs_hdr {
 	u32 revision_id : 31;
 	u32 shadow_vmcs : 1;
@@ -59,3 +60,34 @@ struct loaded_vmcs {
 	struct vmcs_controls_shadow controls_shadow;
 	int vcpu_id;
 };
+
+/*
+ * Interruption-information format
+ */
+#define INTR_INFO_VECTOR_MASK           0xff            /* 7:0 */
+#define INTR_INFO_INTR_TYPE_MASK        0x700           /* 10:8 */
+#define INTR_INFO_DELIVER_CODE_MASK     0x800           /* 11 */
+#define INTR_INFO_UNBLOCK_NMI		0x1000		/* 12 */
+#define INTR_INFO_VALID_MASK            0x80000000      /* 31 */
+#define INTR_INFO_RESVD_BITS_MASK       0x7ffff000
+
+#define VECTORING_INFO_VECTOR_MASK           	INTR_INFO_VECTOR_MASK
+#define VECTORING_INFO_TYPE_MASK        	INTR_INFO_INTR_TYPE_MASK
+#define VECTORING_INFO_DELIVER_CODE_MASK    	INTR_INFO_DELIVER_CODE_MASK
+#define VECTORING_INFO_VALID_MASK       	INTR_INFO_VALID_MASK
+
+#define INTR_TYPE_EXT_INTR              (0 << 8) /* external interrupt */
+#define INTR_TYPE_NMI_INTR		(2 << 8) /* NMI */
+#define INTR_TYPE_HARD_EXCEPTION	(3 << 8) /* processor exception */
+#define INTR_TYPE_SOFT_INTR             (4 << 8) /* software interrupt */
+#define INTR_TYPE_SOFT_EXCEPTION	(6 << 8) /* software exception */
+
+static bool is_intr_type(u32 intr_info, u32 type) {
+	const u32 mask = INTR_INFO_VALID_MASK | INTR_INFO_INTR_TYPE_MASK;
+
+	return (intr_info & mask) == (INTR_INFO_VALID_MASK | type);
+}
+
+static bool is_nmi(u32 intr_info) {
+	return is_intr_type(intr_info, INTR_TYPE_NMI_INTR);
+}

@@ -301,7 +301,10 @@ vmx_vmexit ENDP
 
 
 
-
+vmx_set_cr2 PROC
+	mov cr2, rcx
+    ret
+vmx_set_cr2 ENDP
 
 
 

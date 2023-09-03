@@ -92,3 +92,8 @@ static inline bool mmu_is_nested(struct kvm_vcpu* vcpu)
 
 int x86_emulate_instruction(struct kvm_vcpu* vcpu, gpa_t cr2_or_gpa,
 	int emulation_type, void* insn, int insn_len);
+
+
+static inline void kvm_machine_check(void) {
+	
+}

@@ -236,12 +236,48 @@ static int vcpu_enter_guest(struct kvm_vcpu* vcpu)
 		* per-VM state, and responsing vCPUs must wait for the update
 		* to complete before servicing KVM_REQ_APICV_UPDATE.
 		*/
+
+
 		exit_fastpath = kvm_x86_ops.vcpu_run(vcpu);
 		if (exit_fastpath != EXIT_FASTPATH_REENTER_GUEST)
 			break;
+
+		
 		
 	}
 	
+	/*
+	* Do this here before retoring debug registers on the host. And
+	* since we don this before handling the vmexit, a DR access vmexit
+	* can 
+		(a) read the correct value of the debug registers, 
+		(b) set KVM_DEBUGGER_WONT_EXIT again.
+	*/
+	if (vcpu->arch.switch_db_regs & KVM_DEBUGREG_WONT_EXIT) {
+		
+	}
+
+	/*
+	* If the guest has used debug registers, at least dr7
+	* will be disabled while returning to the host.
+	* If we don't have active breakpoints in the host, we don't
+	* care about the messed up debug address registers. But if
+	* we have some of them active, restore the old state.
+	*/
+	
+
+	vcpu->arch.last_vmentry_cpu = vcpu->cpu;
+	
+	vcpu->mode = OUTSIDE_GUEST_MODE;
+
+	kvm_x86_ops.handle_exit_irqoff(vcpu);
+
+	++vcpu->stat.exits;
+
+	/*
+	* Profile KVM exit RIPs
+	*/
+
 	// vmexit的处理,处理虚拟机异常
 	r = kvm_x86_ops.handle_exit(vcpu, exit_fastpath);
 
@@ -545,6 +581,8 @@ void kvm_vcpu_reset(struct kvm_vcpu* vcpu, bool init_event) {
 
 	vcpu->arch.dr7 = DR7_FIXED_1;
 	kvm_update_dr7(vcpu);
+
+	vcpu->arch.cr2 = __readcr2();
 
 	vcpu->arch.apf.halted = FALSE;
 

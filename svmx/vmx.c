@@ -769,20 +769,36 @@ unsigned int __vmx_vcpu_run_flags(struct vcpu_vmx* vmx) {
 	return flags;
 }
 
+static inline u32 vmx_get_intr_info(struct kvm_vcpu* vcpu) {
+	struct  vcpu_vmx* vmx = to_vmx(vcpu);
+
+	if (!kvm_register_test_and_mark_available(vcpu, VCPU_EXREG_EXIT_INFO_2))
+		vmx->exit_intr_info = vmcs_read32(VM_EXIT_INTR_INFO);
+
+	return vmx->exit_intr_info;
+}
+
 static void vmx_vcpu_enter_exit(struct kvm_vcpu* vcpu,
 	unsigned int flags) {
 	struct vcpu_vmx* vmx = to_vmx(vcpu);
 
+	if (vcpu->arch.cr2 != __readcr2())
+		vmx_set_cr2(vcpu->arch.cr2);
 
 	vmx->fail = __vmx_vcpu_run(vmx, (ULONG_PTR*)&vcpu->arch.regs, flags);
+
+	vcpu->arch.cr2 = __readcr2();
 
 	if (vmx->fail)
 		vmx->exit_reason.full = 0xdead;
 	else
 		vmx->exit_reason.full = vmcs_read32(VM_EXIT_REASON);
 
+	if(vmx->exit_reason.basic == EXIT_REASON_EXCEPTION_NMI &&
+		is_nmi(vmx_get_intr_info(vcpu))) {
+		
+	}
 	
-
 }
 
 static fastpath_t handle_fastpath_preemption_timer(struct kvm_vcpu* vcpu) {
@@ -806,7 +822,7 @@ extern ULONG_PTR Lclear_regs;
 // 运行虚拟机，进入guest模式，即non root 模式
 static fastpath_t vmx_vcpu_run(struct kvm_vcpu* vcpu) {
 	struct vcpu_vmx* vmx = to_vmx(vcpu);
-
+	ULONG_PTR cr3, cr4;
 
 	if (kvm_register_is_dirty(vcpu, VCPU_REGS_RSP))
 		vmcs_writel(GUEST_RSP, vcpu->arch.regs[VCPU_REGS_RSP]);
@@ -814,7 +830,24 @@ static fastpath_t vmx_vcpu_run(struct kvm_vcpu* vcpu) {
 		vmcs_writel(GUEST_RIP, vcpu->arch.regs[VCPU_REGS_RIP]);
 	vcpu->arch.regs_dirty = 0;
 
-	
+	/*
+	* Refresh vmcs.HOST_CR3 if necessary.
+	*/
+	cr3 = __readcr3();
+	if (cr3 != vmx->loaded_vmcs->host_state.cr3) {
+		vmcs_writel(HOST_CR3, cr3);
+		vmx->loaded_vmcs->host_state.cr3 = cr3;
+	}
+
+	cr4 = __readcr4();
+	if (cr4 != vmx->loaded_vmcs->host_state.cr4) {
+		vmcs_writel(HOST_CR4, cr4);
+		vmx->loaded_vmcs->host_state.cr4 = cr4;
+	}
+
+	/* When KVM_DEBUGREG_WONT_EXIT, dr6 is accessible in guest */
+	if (vcpu->arch.switch_db_regs & KVM_DEBUGREG_WONT_EXIT)
+		__writedr(6, vcpu->arch.dr6);
 
 	/* When single-stepping over STI and MOV SS, we must clear the
 	 * corresponding interruptibility bits in the guest state. Otherwise
@@ -828,10 +861,46 @@ static fastpath_t vmx_vcpu_run(struct kvm_vcpu* vcpu) {
 
 	vmx_vcpu_enter_exit(vcpu, __vmx_vcpu_run_flags(vmx));
 
+	/* MSR_IA32_DEBUGCTLMSR is zeroed on vmexit. Restore it if needed */
+	if (vmx->host_debugctlmsr)
+		__writemsr(MSR_IA32_DEBUGCTLMSR, vmx->host_debugctlmsr);
+
+	
+	vcpu->arch.regs_avail &= ~VMX_REGS_LAZY_LOAD_SET;
+
+	if (is_guest_mode(vcpu)) {
+		/*
+		* Track VMLAUNCH/VMRESUME that have made past guest state
+		* checking.
+		*/
+		if (vmx->nested.nested_run_pending &&
+			!vmx->exit_reason.failed_vmentry)
+			++vcpu->stat.nested_run;
+
+		vmx->nested.nested_run_pending = 0;
+	}
+
+	vmx->idt_vectoring_info = 0;
+
+	if (vmx->fail)
+		return EXIT_FASTPATH_NONE;
+
+	if (vmx->exit_reason.basic == EXIT_REASON_MCE_DURING_VMENTRY)
+		kvm_machine_check();
+
+	if (!vmx->exit_reason.failed_vmentry)
+		vmx->idt_vectoring_info = vmcs_read32(IDT_VECTORING_INFO_FIELD);
+
+	if (vmx->exit_reason.failed_vmentry)
+		return EXIT_FASTPATH_NONE;
+
 	// 设置已经 vmlaunch
 	vmx->loaded_vmcs->launched = 1;
 
-	return EXIT_FASTPATH_NONE;
+	if (is_guest_mode(vcpu))
+		return EXIT_FASTPATH_NONE;
+
+	return vmx_exit_handlers_fastpath(vcpu);
 }
 
 static int handle_exception_nmi(struct kvm_vcpu* vcpu) {
@@ -1085,6 +1154,9 @@ static int (*kvm_vmx_exit_handlers[])(struct kvm_vcpu* vcpu) = {
 	[EXIT_REASON_NOTIFY] = handle_notify,
 };
 
+static const u32 kvm_vmx_max_exit_handlers =
+ARRAYSIZE(kvm_vmx_exit_handlers);
+
 static void vmx_flush_pml_buffer(struct kvm_vcpu* vcpu) {
 	UNREFERENCED_PARAMETER(vcpu);
 }
@@ -1096,7 +1168,6 @@ static void vmx_flush_pml_buffer(struct kvm_vcpu* vcpu) {
 // __vmx_vcpu_run返回 0 表明是 VM-exit, 返回1表明是 VM-Fail
 static int __vmx_handle_exit(struct kvm_vcpu* vcpu, fastpath_t exit_fastpath)
 {
-	UNREFERENCED_PARAMETER(exit_fastpath);
 	struct vcpu_vmx* vmx = to_vmx(vcpu);
 	union vmx_exit_reason exit_reason = vmx->exit_reason;
 	// u32 vectoring_info = vmx->idt_vectoring_info;
@@ -1123,8 +1194,20 @@ static int __vmx_handle_exit(struct kvm_vcpu* vcpu, fastpath_t exit_fastpath)
 
 	}
 
+	/* If guest state is invalid, starting emulating. L2 is handled above. */
+	
+
+	if (exit_reason.failed_vmentry) {
+		dump_vmcs(vcpu);
+		vcpu->run->exit_reason = KVM_EXIT_FAIL_ENTRY;
+		vcpu->run->fail_entry.hardware_entry_failure_reason
+			= exit_reason.full;
+		vcpu->run->fail_entry.cpu = vcpu->arch.last_vmentry_cpu;
+		return 0;
+	}
+
 	if (vmx->fail) {
-		
+		dump_vmcs(vcpu);
 		vcpu->run->exit_reason = KVM_EXIT_FAIL_ENTRY;
 		vcpu->run->fail_entry.hardware_entry_failure_reason
 			= vmcs_read32(VM_INSTRUCTION_ERROR);
@@ -1132,12 +1215,20 @@ static int __vmx_handle_exit(struct kvm_vcpu* vcpu, fastpath_t exit_fastpath)
 		return 0;
 	}
 
+
+	if (exit_fastpath != EXIT_FASTPATH_NONE)
+		return 1;
+
+	if (exit_reason.basic >= kvm_vmx_max_exit_handlers)
+		goto unexpected_vmexit;
+
 	exit_handler_index = (u16)exit_reason.basic;
 
 	return kvm_vmx_exit_handlers[exit_handler_index](vcpu);
 
 unexpected_vmexit:
 	dump_vmcs(vcpu);
+	vcpu->run->exit_reason = KVM_EXIT_INTERNAL_ERROR;
 	
 
 	return 0;
@@ -1146,6 +1237,18 @@ unexpected_vmexit:
 static int vmx_handle_exit(struct kvm_vcpu* vcpu, fastpath_t exit_fastpath) {
 	int ret = __vmx_handle_exit(vcpu, exit_fastpath);
 
+	/*
+	* Exit to user space when bus lock detected to inform that there is
+	* a bus lock in guest.
+	* 
+	*/
+	if (to_vmx(vcpu)->exit_reason.bus_lock_detected) {
+		if (ret > 0)
+			vcpu->run->exit_reason = KVM_EXIT_X86_BUS_LOCK;
+
+		vcpu->run->flags |= KVM_RUN_X86_BUS_LOCK;
+		return 0;
+	}
 	return ret;
 }
 
@@ -1190,6 +1293,10 @@ static void vmx_set_dr7(struct kvm_vcpu* vcpu, ULONG_PTR val)
 {
 	UNREFERENCED_PARAMETER(vcpu);
 	vmcs_writel(GUEST_DR7, val);
+}
+
+static void vmx_handle_exit_irqoff(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
 }
 
 static void vmx_load_mmu_pgd(struct kvm_vcpu* vcpu, hpa_t root_hpa,
@@ -1238,6 +1345,9 @@ static struct kvm_x86_ops vmx_x86_ops = {
 	.write_tsc_offset = vmx_write_tsc_offset,
 
 	.load_mmu_pgd = vmx_load_mmu_pgd,
+
+
+	.handle_exit_irqoff = vmx_handle_exit_irqoff,
 };
 
 static struct kvm_x86_init_ops vmx_init_ops = {
@@ -3243,8 +3353,9 @@ void __vmx_set_segment(struct kvm_vcpu* vcpu, struct kvm_segment* var,
 }
 
 void vmx_spec_ctrl_restore_host(struct vcpu_vmx* vmx, unsigned int flags) {
-	UNREFERENCED_PARAMETER(vmx);
-	UNREFERENCED_PARAMETER(flags);
+	
+	if (flags & VMX_RUN_SAVE_SPEC_CTRL)
+		vmx->spec_ctrl = __readmsr(MSR_IA32_SPEC_CTRL);
 
 	ULONG_PTR hardware_entry_failure_reason =
 		vmcs_read32(VM_INSTRUCTION_ERROR);
