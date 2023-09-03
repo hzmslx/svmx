@@ -429,3 +429,4 @@ int kvm_vm_ioctl_create_vcpu(struct kvm* kvm, u32 id);
 #define KVM_CAP_COUNTER_OFFSET 227
 
 #define KVM_RUN_X86_BUS_LOCK     (1 << 1)
+

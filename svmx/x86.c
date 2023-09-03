@@ -384,6 +384,8 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu* vcpu) {
 
 out:
 
+
+	vcpu_put(vcpu);
 	return r;
 }
 
@@ -1001,6 +1003,8 @@ void kvm_arch_pre_destroy_vm(struct kvm* kvm) {
 void kvm_arch_destroy_vm(struct kvm* kvm) {
 
 	kvm_x86_ops.vm_destroy(kvm);
+	kvm_destroy_vcpus(kvm);
+	kvm_mmu_uninit_vm(kvm);
 }
 
 
@@ -1010,4 +1014,8 @@ void kvm_arch_async_page_present(struct kvm_vcpu* vcpu,
 
 	vcpu->arch.apf.halted = FALSE;
 	vcpu->arch.mp_state = KVM_MP_STATE_RUNNABLE;
+}
+
+void kvm_arch_vcpu_destroy(struct kvm_vcpu* vcpu) {
+	kvm_x86_ops.vcpu_free(vcpu);
 }

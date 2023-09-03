@@ -50,3 +50,24 @@ static int cpu_vmxoff(void) {
 	KeIpiGenericCall(ExecuteVmxOff, 0);
 	return 0;
 }
+
+static inline int cpu_vmx_enabled(void) {
+	return __readcr4() & X86_CR4_VMXE;
+}
+
+/*
+* Disable VMX if it is enabled on the current CPU
+* 
+*/
+static inline void __cpu_emergency_vmxoff(void) {
+	if (cpu_vmx_enabled())
+		ExecuteVmxOff(0);
+}
+
+/*
+* Disable VMX if it is supported and enabled on the current CPU
+*/
+static inline void cpu_emergency_vmxoff(void) {
+	if (cpu_has_vmx())
+		__cpu_emergency_vmxoff();
+}

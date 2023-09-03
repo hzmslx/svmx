@@ -617,7 +617,8 @@ static NTSTATUS vmx_vcpu_create(struct kvm_vcpu* vcpu) {
 }
 
 static void vmx_vcpu_free(struct kvm_vcpu* vcpu) {
-	UNREFERENCED_PARAMETER(vcpu);
+	struct vcpu_vmx* vmx = to_vmx(vcpu);
+	free_loaded_vmcs(vmx->loaded_vmcs);
 }
 
 
@@ -2517,7 +2518,7 @@ void dump_vmcs(struct kvm_vcpu* vcpu) {
 	if (cpu_has_vmx_ept()) {
 		LogErr("PDPTR0 = 0x%016llx PDPTR1 = 0x%016llx\n",
 			vmcs_read64(GUEST_PDPTR0), vmcs_read64(GUEST_PDPTR1));
-		LogErr("PDPTR2 = 0x%16llx PDPTR3 = 0x%016llx\n",
+		LogErr("PDPTR2 = 0x%016llx PDPTR3 = 0x%016llx\n",
 			vmcs_read64(GUEST_PDPTR2), vmcs_read64(GUEST_PDPTR3));
 	}
 	LogErr("RSP = 0x%016lx RIP = 0x%016lx\n",
@@ -3361,7 +3362,21 @@ void vmx_spec_ctrl_restore_host(struct vcpu_vmx* vmx, unsigned int flags) {
 		vmcs_read32(VM_INSTRUCTION_ERROR);
 
 	if (hardware_entry_failure_reason) {
-		LogErr("hardware entry failure reason: 0x%x\n", hardware_entry_failure_reason);
+		LogErr("KVM: entry failed, hardware error: 0x%x\n", hardware_entry_failure_reason);
 		dump_vmcs(&vmx->vcpu);
 	}
+}
+
+/*
+* Free a VMCS, but before that VMCLEAR it on the CPU where it was last loaded
+*/
+void free_loaded_vmcs(struct loaded_vmcs* loaded_vmcs) {
+	if (!loaded_vmcs->vmcs)
+		return;
+
+	loaded_vmcs_clear(loaded_vmcs);
+	free_vmcs(loaded_vmcs->vmcs);
+	loaded_vmcs->vmcs = NULL;
+	if (loaded_vmcs->msr_bitmap)
+		ExFreePool(loaded_vmcs->msr_bitmap);
 }

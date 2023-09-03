@@ -222,7 +222,7 @@ static void hardware_disable_all(void) {
 }
 
 static void kvm_destroy_vm(struct kvm* kvm) {
-	KeWaitForSingleObject(&kvm->lock, Executive, KernelMode, FALSE, NULL);
+	KeWaitForSingleObject(&kvm_lock, Executive, KernelMode, FALSE, NULL);
 	RemoveEntryList(&kvm->vm_list);
 	KeReleaseMutex(&kvm_lock, FALSE);
 	kvm_arch_pre_destroy_vm(kvm);
@@ -233,8 +233,7 @@ static void kvm_destroy_vm(struct kvm* kvm) {
 }
 
 void kvm_put_kvm(struct kvm* kvm) {
-	UNREFERENCED_PARAMETER(kvm);
-
+	kvm_destroy_vm(kvm);
 }
 
 static void hardware_disable_nolock(void* junk) {
@@ -351,8 +350,17 @@ void vcpu_load(struct kvm_vcpu* vcpu) {
 
 ULONG_PTR RunKvm(ULONG_PTR Arg) {
 	UNREFERENCED_PARAMETER(Arg);
+	KIRQL irql = KeGetCurrentIrql();
+	LogErr("irql: 0x%x\n", irql);
 	int cpu = KeGetCurrentProcessorNumber();
-	int r = kvm_arch_vcpu_ioctl_run(g_kvm->vcpu_array[cpu]);
+	struct kvm_vcpu* vcpu = g_kvm->vcpu_array[cpu];
+	int run_ret = kvm_arch_vcpu_ioctl_run(vcpu);
+	int r = STATUS_SUCCESS;
+	if (run_ret < 0) {
+		// error: kvm run failed
+	}
+	struct kvm_run* run = vcpu->run;
+	r = kvm_arch_handle_exit(vcpu, run);
 	return r;
 }
 
@@ -363,9 +371,11 @@ long kvm_vcpu_ioctl(unsigned int ioctl, PIRP Irp) {
 	{
 		case KVM_RUN:
 		{
-			KeIpiGenericCall(RunKvm, 0);
+			ULONG_PTR r = KeIpiGenericCall(RunKvm, 0);
+			status = (NTSTATUS)r;
 			break;
 		}
+		
 
 		default:
 			break;
@@ -536,4 +546,36 @@ bool kvm_vcpu_block(struct kvm_vcpu* vcpu) {
 	bool waited = FALSE;
 
 	return waited;
+}
+
+int kvm_arch_handle_exit(struct kvm_vcpu* vcpu, struct kvm_run* run) {
+	UNREFERENCED_PARAMETER(vcpu);
+	int ret = STATUS_UNSUCCESSFUL;
+
+	switch (run->exit_reason)
+	{
+		case KVM_EXIT_FAIL_ENTRY:
+			cpu_emergency_vmxoff();
+			break;
+		default:
+			break;
+	}
+
+	return ret;
+}
+
+static void kvm_vcpu_destroy(struct kvm_vcpu* vcpu) {
+	kvm_arch_vcpu_destroy(vcpu);
+
+}
+
+void kvm_destroy_vcpus(struct kvm* kvm) {
+	UNREFERENCED_PARAMETER(kvm);
+	ULONG count = KeGetCurrentProcessorNumber();
+	struct kvm_vcpu* vcpu;
+	for (ULONG i = 0; i < count; i++) {
+		vcpu = g_kvm->vcpu_array[i];
+		kvm_vcpu_destroy(vcpu);
+	}
+	
 }

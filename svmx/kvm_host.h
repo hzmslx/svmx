@@ -1206,6 +1206,8 @@ enum {
 
 // 针对不同硬件架构
 struct kvm_x86_ops {
+	const char* name;
+
 	NTSTATUS (*check_processor_compatibility)(void);
 
 	int (*hardware_enable)(void);
@@ -1915,3 +1917,8 @@ void kvm_vcpu_halt(struct kvm_vcpu* vcpu);
 bool kvm_vcpu_block(struct kvm_vcpu* vcpu);
 void kvm_arch_async_page_present(struct kvm_vcpu* vcpu,
 	struct kvm_async_pf* work);
+
+int kvm_arch_handle_exit(struct kvm_vcpu* vcpu, struct kvm_run* run);
+
+void kvm_destroy_vcpus(struct kvm* kvm);
+void kvm_arch_vcpu_destroy(struct kvm_vcpu* vcpu);

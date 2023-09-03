@@ -1331,3 +1331,5 @@ static inline bool kvm_register_test_and_mark_available(struct kvm_vcpu* vcpu,
 	enum kvm_reg reg) {
 	return _bittestandset((LONG*)&vcpu->arch.regs_avail, reg);
 }
+
+void free_loaded_vmcs(struct loaded_vmcs* loaded_vmcs);

@@ -190,7 +190,18 @@ NTSTATUS DriverDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
 				if (!NT_SUCCESS(status))
 					break;
 			}
-			
+			break;
+		}
+
+		case KVM_RELEASE_VCPU:
+		{
+			kvm_put_kvm(g_kvm);
+			break;
+		}
+
+		case KVM_RELEASE_VM:
+		{
+			kvm_put_kvm(g_kvm);
 			break;
 		}
 		default:
