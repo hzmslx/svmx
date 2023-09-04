@@ -47,6 +47,9 @@ static bool enable_preemption_timer = TRUE;
 
 static bool dump_invalid_vmcs = TRUE;
 
+/*
+* 每个物理逻辑cpu一个链表，表示加载相应cpu上的vmcs
+*/
 LIST_ENTRY* loaded_vmcss_on_cpu;
 
 extern bool enable_apicv;
@@ -466,7 +469,11 @@ static void vmx_hardware_unsetup(void) {
 static int kvm_cpu_vmxon(u64 vmxon_pointer) {
 	// enable the cr4's vmxe bit
 	__writecr4(__readcr4() | X86_CR4_VMXE);
-	__vmx_on(&vmxon_pointer);// open the vmx mode
+	/*
+	* vmptrld指令会检查vmcs指针是否为vmxon指针
+	* open the vmx mode
+	*/
+	__vmx_on(&vmxon_pointer);
 	return 0;
 }
 
@@ -703,7 +710,7 @@ void vmx_set_host_fs_gs(struct vmcs_host_state* host, u16 fs_sel, u16 gs_sel,
  */
 // 加载vcpu的信息，切换到指定cpu，进入到vmx模式
 static void vmx_vcpu_load(struct kvm_vcpu* vcpu, int cpu) {
-
+	
 	vmx_vcpu_load_vmcs(vcpu, cpu, NULL);
 
 }
@@ -1438,7 +1445,10 @@ struct vmcs* alloc_vmcs_cpu(bool shadow,int node) {
 	/* KVM supports Enlightened VMCS v1 only */
 
 
-	// revision id 等于 IA32_VMX_BASIC[31:0]
+	/* 
+	* vmcs区域首DWORD值必须符合VMCS ID
+	* revision id 等于 IA32_VMX_BASIC[31:0]
+	*/ 
 	vmcs->hdr.revision_id = vmcs_config.revision_id;
 
 	if (shadow)
@@ -1447,6 +1457,7 @@ struct vmcs* alloc_vmcs_cpu(bool shadow,int node) {
 	return vmcs;
 }
 
+// 分配一个页面用于vmcs
 struct vmcs* alloc_vmcs(bool shadow) {
 	return alloc_vmcs_cpu(shadow, KeGetCurrentNodeNumber());
 }
@@ -2326,6 +2337,7 @@ ULONG_PTR VmcsClearOnSpecificCore(ULONG_PTR arg) {
 	return 0;
 }
 
+// loaded_vmcs的分配以及初始化
 int alloc_loaded_vmcs(struct loaded_vmcs* loaded_vmcs) {
 	loaded_vmcs->vmcs = alloc_vmcs(FALSE);
 	if (!loaded_vmcs->vmcs)
@@ -2333,6 +2345,7 @@ int alloc_loaded_vmcs(struct loaded_vmcs* loaded_vmcs) {
 
 	NTSTATUS status = STATUS_SUCCESS;
 
+	// 调用 vmclear
 	KeIpiGenericCall(VmcsClearOnSpecificCore, (ULONG_PTR)loaded_vmcs);
 
 	loaded_vmcs->shadow_vmcs = NULL;
@@ -2343,6 +2356,7 @@ int alloc_loaded_vmcs(struct loaded_vmcs* loaded_vmcs) {
 	do
 	{
 		if (cpu_has_vmx_msr_bitmap()) {
+			// 分配msr_bitmap页面
 			unsigned long* msr_bitmap = (unsigned long*)ExAllocatePoolZero(PagedPool, PAGE_SIZE, DRIVER_TAG);
 			if (!msr_bitmap) {
 				status = STATUS_NO_MEMORY;
@@ -2364,9 +2378,9 @@ int alloc_loaded_vmcs(struct loaded_vmcs* loaded_vmcs) {
 
 ULONG_PTR VmcsLoadOnSpecificCore(ULONG_PTR Arg) {
 	struct loaded_vmcs* loaded_vmcs = (struct loaded_vmcs*)Arg;
-	int cpu = KeGetCurrentProcessorNumber();
-	if (cpu == loaded_vmcs->vcpu_id) {
-		// 调用vmptrld
+	int vcpu_id = KeGetCurrentProcessorNumber();
+	if (vcpu_id == loaded_vmcs->vcpu_id) {
+		// 调用vmptrld指令将目标VMCS加载为current-VMCS
 		vmcs_load(loaded_vmcs->vmcs);
 	}
 	return 0;
@@ -2395,21 +2409,26 @@ static ULONG_PTR get_segment_base(ULONG_PTR gdt_base, USHORT selector) {
 
 }
 
-
+// 加载vmcs
 void vmx_vcpu_load_vmcs(struct kvm_vcpu* vcpu, int cpu,
 	struct loaded_vmcs* buddy) {
 	UNREFERENCED_PARAMETER(buddy);
 	// vcpu_vmx 是vcpu的一个运行环境，这个和vcpu是一对一的
 	struct vcpu_vmx* vmx = to_vmx(vcpu);
+	// 是否已经加载
 	bool already_loaded = vmx->loaded_vmcs->cpu == cpu;
 	struct vmcs* prev;
 
 	// 判断是否已经加载
 	if (!already_loaded) {
-		// 清理当前vcpu使用的vmcs,强制初始化为inactive状态
+		/*
+		* 没有加载时，调用vmclear命令，用于对该vmcs区域初始化
+		* 包括将数据填充到vmcs区域和将vmcs状态置为clear
+		*/
 		loaded_vmcs_clear(vmx->loaded_vmcs);
 		// 添加到新cpu的loaded_vmcs链表
 		PLIST_ENTRY pEntry = &loaded_vmcss_on_cpu[cpu];
+		// 插入相应cpu上的loaded_vmcs链表
 		InsertHeadList(&vmx->loaded_vmcs->loaded_vmcss_on_cpu_link,
 			pEntry);
 	}
@@ -2418,11 +2437,13 @@ void vmx_vcpu_load_vmcs(struct kvm_vcpu* vcpu, int cpu,
 	// 当前vcpu正在使用的vmcs和指定cpu的current_vmcs不相等时需要
 	// 进行加载
 	if (prev != vmx->loaded_vmcs->vmcs) {
+		// 赋值cpu的current_vmcs
 		current_vmcs[cpu] = vmx->loaded_vmcs->vmcs;
+		// 加载这个vmcs为current-VMCS
 		KeIpiGenericCall(VmcsLoadOnSpecificCore, (ULONG_PTR)vmx->loaded_vmcs);
 	}
 
-	if (!already_loaded) {
+	if (!already_loaded) { // 未加载时的执行逻辑
 		struct desc_ptr gdt;
 		vmx_sgdt(&gdt);
 		uint16_t sel = vmx_str();
@@ -2434,7 +2455,7 @@ void vmx_vcpu_load_vmcs(struct kvm_vcpu* vcpu, int cpu,
 		vmcs_writel(HOST_TR_BASE, base);
 		vmcs_writel(HOST_GDTR_BASE, gdt.address);
 
-		// 设置cpu
+		// 关联cpu
 		vmx->loaded_vmcs->cpu = cpu;
 	}
 }
@@ -2446,11 +2467,13 @@ RunOnTargetCore(
 	_In_ ULONG_PTR Argument
 ) {
 	struct loaded_vmcs* loaded_vmcs = (struct loaded_vmcs*)Argument;
-	int cpu = KeGetCurrentProcessorNumber();
-	if (cpu != loaded_vmcs->vcpu_id) {
+	int vcpu_id = KeGetCurrentProcessorNumber();
+	if (vcpu_id != loaded_vmcs->vcpu_id) {
 		return 1;
 	}
-	__loaded_vmcs_clear(loaded_vmcs);
+	int cpu = loaded_vmcs->cpu;
+	if (cpu != -1)
+		__loaded_vmcs_clear(loaded_vmcs);
 	return 0;
 }
 

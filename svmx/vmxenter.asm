@@ -103,6 +103,7 @@ Lvmresume:
 	jmp Lvmfail
 
 Lvmlaunch:
+	; 在使用vmlaunch指令进入vm时,current-VMCS的launch状态必须为clear
 	vmlaunch
 
 Lvmfail:

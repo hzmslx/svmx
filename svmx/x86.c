@@ -406,10 +406,12 @@ int kvm_arch_vcpu_create(struct kvm_vcpu* vcpu) {
 
 	vcpu->arch.pat = MSR_IA32_CR_PAT_DEFAULT;
 
-	// 创建vcpu
+	/*
+	* 创建vcpu，对于intel x86来说，调用vmx_vcpu_create
+	*/ 
 	r = kvm_x86_ops.vcpu_create(vcpu);
 
-	// 加载vcpu
+	
 	vcpu_load(vcpu);
 	kvm_vcpu_reset(vcpu, FALSE);
 	kvm_init_mmu(vcpu);
@@ -426,6 +428,7 @@ static void kvm_vcpu_write_tsc_offset(struct kvm_vcpu* vcpu, u64 l1_offset)
 }
 
 void kvm_arch_vcpu_load(struct kvm_vcpu* vcpu, int cpu) {
+	// 加载vcpu信息
 	kvm_x86_ops.vcpu_load(vcpu, cpu);
 	u64 offset = 0;
 	kvm_vcpu_write_tsc_offset(vcpu, offset);

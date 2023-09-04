@@ -279,6 +279,7 @@ static void kvm_vcpu_init(struct kvm_vcpu* vcpu, struct kvm* kvm, unsigned id) {
 	sprintf_s(vcpu->stats_id, sizeof(vcpu->stats_id), "vcpu-%d", id);
 }
 
+// 虚拟机创建vcpu的ioctl调用的入口函数
 int kvm_vm_ioctl_create_vcpu(struct kvm* kvm, u32 id) {
 	int r;
 	struct kvm_vcpu* vcpu = NULL;
@@ -318,7 +319,7 @@ int kvm_vm_ioctl_create_vcpu(struct kvm* kvm, u32 id) {
 		kvm_vcpu_init(vcpu, kvm, id);
 
 
-		// 创建 vcpu 结构, 架构相关
+		// 初始化kvm_vcpu_arch结构体, 架构相关
 		r = kvm_arch_vcpu_create(vcpu);
 		if (r) {
 			break;
@@ -571,7 +572,7 @@ static void kvm_vcpu_destroy(struct kvm_vcpu* vcpu) {
 
 void kvm_destroy_vcpus(struct kvm* kvm) {
 	UNREFERENCED_PARAMETER(kvm);
-	ULONG count = KeGetCurrentProcessorNumber();
+	ULONG count = KeQueryActiveProcessorCount(0);
 	struct kvm_vcpu* vcpu;
 	for (ULONG i = 0; i < count; i++) {
 		vcpu = g_kvm->vcpu_array[i];
