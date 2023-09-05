@@ -31,6 +31,7 @@ static ULONG_PTR ExecuteVmxOff(
 ) {
 	UNREFERENCED_PARAMETER(Argument);
 	__vmx_off();
+	
 	__writecr4(__readcr4() & ~X86_CR4_VMXE);
 	return 0;
 }

@@ -69,7 +69,7 @@ NTSTATUS kvm_dev_ioctl_create_vm(unsigned long type) {
 }
 
 static int __hardware_enable_nolock(void) {
-	int cpu = KeGetCurrentNodeNumber();
+	int cpu = KeGetCurrentProcessorNumber();
 	if (hardware_enabled[cpu])
 		return 0;
 
@@ -199,14 +199,27 @@ static int kvm_suspend(void) {
 	return 0;
 }
 
+static void hardware_disable_nolock(void* junk) {
+	UNREFERENCED_PARAMETER(junk);
+	int cpu = KeGetCurrentProcessorNumber();
+	if (!hardware_enabled[cpu])
+		return;
 
+	/*
+	* Note, hardware_disable_all_nolock() tells all online CPUs to disable
+	* hardware, not just CPUs that successfully enabled hardware!
+	*/
+	kvm_arch_hardware_disable();
+
+	hardware_enabled[cpu] = FALSE;
+}
 
 static void hardware_disable_all_nolock(void) {
 	// 当前虚拟机不再使用,所以减一
 	kvm_usage_count--;
 	// 系统中没有虚拟机时,关闭硬件虚拟化功能
 	if (!kvm_usage_count)
-		kvm_arch_hardware_disable();
+		hardware_disable_nolock(NULL);
 }
 
 static void hardware_disable_all(void) {
@@ -230,14 +243,7 @@ void kvm_put_kvm(struct kvm* kvm) {
 	kvm_destroy_vm(kvm);
 }
 
-static void hardware_disable_nolock(void* junk) {
-	UNREFERENCED_PARAMETER(junk);
-	/*
-	* Note, hardware_disable_all_nolock() tells all online CPUs to disable
-	* hardware, not just CPUs that successfully enabled hardware!
-	*/
-	kvm_arch_hardware_disable();
-}
+
 
 static void kvm_shutdown(void) {
 	/*

@@ -186,16 +186,6 @@ void kvm_arch_hardware_disable(void) {
 	kvm_x86_ops.hardware_disable();
 }
 
-static void hardware_disable_nolock(void* junk) {
-	UNREFERENCED_PARAMETER(junk);
-	/*
-	* Note, hardware_disable_all_nolock() tells all online CPUs to disable
-	* hardware, not just CPUs that successfully enabled hardware!
-	*/
-
-	kvm_arch_hardware_disable();
-}
-
 static bool kvm_vcpu_running(struct kvm_vcpu* vcpu) {
 	return (vcpu->arch.mp_state == KVM_MP_STATE_RUNNABLE &&
 		!vcpu->arch.apf.halted);

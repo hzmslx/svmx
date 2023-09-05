@@ -55,21 +55,16 @@ int kvm_init() {
 		&bytes, NULL)) {
 		ret = GetLastError();
 		Error("Failed to get mmap size");
-		goto release_vcpu;
+		goto release_vm;
 	}
 	 
 	if (!DeviceIoControl(hDevice, KVM_RUN, NULL, 0, NULL, 0, &bytes, NULL)) {
 		ret = GetLastError();
 		Error("Failed to run");
-		goto release_vcpu;
+		goto release_vm;
 	}
 
-release_vcpu:
-	if (!DeviceIoControl(hDevice, KVM_RELEASE_VCPU,NULL, 0, NULL, 0, &bytes, NULL)) {
-		ret = GetLastError();
-		Error("Failed to release vcpu");
-		goto err;
-	}
+
 
 release_vm:
 	if (!DeviceIoControl(hDevice, KVM_RELEASE_VM, NULL, 0, NULL, 0, &bytes, NULL)) {

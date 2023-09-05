@@ -193,12 +193,6 @@ NTSTATUS DriverDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
 			break;
 		}
 
-		case KVM_RELEASE_VCPU:
-		{
-			kvm_put_kvm(g_kvm);
-			break;
-		}
-
 		case KVM_RELEASE_VM:
 		{
 			kvm_put_kvm(g_kvm);
