@@ -567,8 +567,7 @@ static void vmclear_local_loaded_vmcss(void) {
 static void vmx_hardware_disable(void) {
 	vmclear_local_loaded_vmcss();
 
-	if (cpu_vmxoff())
-		NT_ASSERT(FALSE);
+	cpu_vmxoff();
 
 }
 

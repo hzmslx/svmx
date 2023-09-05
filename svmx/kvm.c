@@ -199,20 +199,14 @@ static int kvm_suspend(void) {
 	return 0;
 }
 
-static ULONG_PTR DisableHardware(
-	_In_ ULONG_PTR Argument
-) {
-	UNREFERENCED_PARAMETER(Argument);
-	kvm_arch_hardware_disable();
-	return 0;
-}
+
 
 static void hardware_disable_all_nolock(void) {
 	// 当前虚拟机不再使用,所以减一
 	kvm_usage_count--;
 	// 系统中没有虚拟机时,关闭硬件虚拟化功能
 	if (!kvm_usage_count)
-		KeIpiGenericCall(DisableHardware, 0);
+		kvm_arch_hardware_disable();
 }
 
 static void hardware_disable_all(void) {
@@ -556,7 +550,7 @@ int kvm_arch_handle_exit(struct kvm_vcpu* vcpu, struct kvm_run* run) {
 	switch (run->exit_reason)
 	{
 		case KVM_EXIT_FAIL_ENTRY:
-			cpu_emergency_vmxoff();
+			
 			break;
 		default:
 			break;

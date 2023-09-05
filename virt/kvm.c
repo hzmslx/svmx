@@ -72,7 +72,7 @@ release_vcpu:
 	}
 
 release_vm:
-	if (!DeviceIoControl(hDevice, KVM_RELEASE_VCPU, NULL, 0, NULL, 0, &bytes, NULL)) {
+	if (!DeviceIoControl(hDevice, KVM_RELEASE_VM, NULL, 0, NULL, 0, &bytes, NULL)) {
 		ret = GetLastError();
 		Error("Failed to release vcpu");
 		goto err;
