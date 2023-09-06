@@ -487,6 +487,23 @@ static int vmx_hardware_enable(void) {
 	if (cr4 & X86_CR4_VMXE)
 		return -1;
 
+	/*
+	* vol 3c 24.8 RESTRICTIONS ON VMX OPERATION
+	* 
+	* Ensure bits in CR0 and CR4 are valid in VMX operation:
+	* - Bit X is 1 in _FIXED0: bit X is fixed to 1 in CRx.
+	* - Bit X is 1 in _FIXED1: bit X is fixed to 0 in CRx.
+	*/
+	ULONG_PTR cr0;
+	cr0 = __readcr0();
+	cr0 &= __readmsr(MSR_IA32_VMX_CR0_FIXED1);
+	cr0 |= __readmsr(MSR_IA32_VMX_CR0_FIXED0);
+	__writecr0(cr0);
+
+	cr4 &= __readmsr(MSR_IA32_VMX_CR4_FIXED1);
+	cr4 |= __readmsr(MSR_IA32_VMX_CR4_FIXED0);
+	__writecr4(cr4);
+
 	struct vmcs* vmcs = vmxarea[cpu];
 	// 获取物理地址
 	PHYSICAL_ADDRESS physical = MmGetPhysicalAddress(vmcs);
