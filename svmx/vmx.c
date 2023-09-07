@@ -48,7 +48,7 @@ static bool enable_preemption_timer = TRUE;
 static bool dump_invalid_vmcs = TRUE;
 
 /*
-* 每个物理逻辑cpu一个链表，表示加载相应cpu上的vmcs
+* 每个物理逻辑cpu一个链表，表示相应cpu上加载过的vmcs
 */
 LIST_ENTRY* loaded_vmcss_on_cpu;
 
@@ -559,6 +559,8 @@ static void __loaded_vmcs_clear(void* arg) {
 		current_vmcs[cpu] = NULL;
 	}
 	vmcs_clear(loaded_vmcs->vmcs);
+	if (loaded_vmcs->shadow_vmcs && loaded_vmcs->launched)
+		vmcs_clear(loaded_vmcs->shadow_vmcs);
 
 	RemoveEntryList(&loaded_vmcs->loaded_vmcss_on_cpu_link);
 
@@ -2329,8 +2331,10 @@ NTSTATUS vmx_init() {
 			break;
 		}
 
+		return status;
 	} while (FALSE);
 
+	// error handler
 	if (err_kvm_init) {
 		__vmx_exit();
 	}
@@ -2442,11 +2446,10 @@ void vmx_vcpu_load_vmcs(struct kvm_vcpu* vcpu, int cpu,
 		* 包括将数据填充到vmcs区域和将vmcs状态置为clear
 		*/
 		loaded_vmcs_clear(vmx->loaded_vmcs);
-		// 添加到新cpu的loaded_vmcs链表
-		PLIST_ENTRY pEntry = &loaded_vmcss_on_cpu[cpu];
-		// 插入相应cpu上的loaded_vmcs链表
-		InsertHeadList(&vmx->loaded_vmcs->loaded_vmcss_on_cpu_link,
-			pEntry);
+
+		// 插入到相应cpu上的loaded_vmcs链表
+		InsertHeadList(&loaded_vmcss_on_cpu[cpu], 
+			&vmx->loaded_vmcs->loaded_vmcss_on_cpu_link);
 	}
 
 	prev = current_vmcs[cpu];
