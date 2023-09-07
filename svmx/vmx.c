@@ -1234,6 +1234,7 @@ static int __vmx_handle_exit(struct kvm_vcpu* vcpu, fastpath_t exit_fastpath)
 
 	if (vmx->fail) {
 		dump_vmcs(vcpu);
+		// 让外部感知退出原因
 		vcpu->run->exit_reason = KVM_EXIT_FAIL_ENTRY;
 		vcpu->run->fail_entry.hardware_entry_failure_reason
 			= vmcs_read32(VM_INSTRUCTION_ERROR);
@@ -2768,6 +2769,8 @@ static u32 vmx_vmentry_ctrl(void) {
 	vmentry_ctrl &= ~(VM_ENTRY_LOAD_IA32_PERF_GLOBAL_CTRL |
 		VM_ENTRY_LOAD_IA32_EFER |
 		VM_ENTRY_IA32E_MODE);
+
+
 
 	return vmentry_ctrl;
 }

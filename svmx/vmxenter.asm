@@ -107,6 +107,7 @@ Lvmlaunch:
 	vmlaunch
 
 Lvmfail:
+	; ∑µªÿ 1 ±Ì æ VM-Fail
 	; VM-Fail: set return value to 1
 	mov rbx, 1
 	; Discard @regs.  The register is irrelevant, it just can't be RBX.
