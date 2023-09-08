@@ -2683,6 +2683,8 @@ static u32 vmx_pin_based_exec_ctrl(struct vcpu_vmx* vmx) {
 	pin_based_exec_ctrl &= ~PIN_BASED_VIRTUAL_NMIS;
 
 	pin_based_exec_ctrl &= ~PIN_BASED_VMX_PREEMPTION_TIMER;
+
+	pin_based_exec_ctrl &= ~(PIN_BASED_NMI_EXITING | PIN_BASED_EXT_INTR_MASK);
 	
 	return pin_based_exec_ctrl;
 }
@@ -2728,12 +2730,116 @@ static u32 vmx_exec_control(struct vcpu_vmx* vmx)
 			CPU_BASED_MONITOR_EXITING);
 	if (kvm_hlt_in_guest(vmx->vcpu.kvm))
 		exec_control &= ~CPU_BASED_HLT_EXITING;
+
+	exec_control &= ~(CPU_BASED_MONITOR_EXITING | CPU_BASED_UNCOND_IO_EXITING |
+		CPU_BASED_TPR_SHADOW | CPU_BASED_MWAIT_EXITING | CPU_BASED_RDPMC_EXITING |
+		CPU_BASED_HLT_EXITING | CPU_BASED_USE_TSC_OFFSETTING);
+
+	exec_control |= (CPU_BASED_CR3_LOAD_EXITING | CPU_BASED_MOV_DR_EXITING|
+		CPU_BASED_USE_IO_BITMAPS);
+
+
 	return exec_control;
 }
+
+/*
+ * Adjust a single secondary execution control bit to intercept/allow an
+ * instruction in the guest.  This is usually done based on whether or not a
+ * feature has been exposed to the guest in order to correctly emulate faults.
+ */
+static void vmx_adjust_secondary_exec_control(struct vcpu_vmx* vmx, u32* exec_control,
+	u32 control, bool enabled, bool exiting) {
+	/*
+	* If the control is for an opt-in feature, clear the control if the
+	* feature is not exposed to the guest, i.e. not enabled. If the
+	* control is opt-out, i.e. an exiting control, clear the control if
+	* the feature _is_ exposed to the guest, i.e. exiting/interception is
+	* disabled for the associated instruction. Note, the caller is 
+	* responsible presenting exec_control to set all supported bits.
+	*/
+	if (enabled == exiting)
+		*exec_control &= ~control;
+
+	/*
+	* Update the nested MSR settings so that a nested VMM can/can't set
+	* controls for features that are/aren't exposed to the guest.
+	*/
+	if (nested) {
+		/*
+		* All features that can be added or removed to VMX MSRs must
+		* be supported in the first place for nested virtualization
+		*/
+		if (!(vmcs_config.nested.secondary_ctls_high & control))
+			enabled = FALSE;
+
+		if (enabled)
+			vmx->nested.msrs.secondary_ctls_high |= control;
+		else
+			vmx->nested.msrs.secondary_ctls_low &= ~control;
+	}
+}
+
+/*
+ * Wrapper macro for the common case of adjusting a secondary execution control
+ * based on a single guest CPUID bit, with a dedicated feature bit.  This also
+ * verifies that the control is actually supported by KVM and hardware.
+ */
+#define vmx_adjust_sec_exec_control(vmx, exec_control, name, feat_name, ctrl_name, exiting) \
+({									 \
+	bool __enabled;							 \
+									 \
+	if (cpu_has_vmx_##name()) {					 \
+		__enabled = guest_cpuid_has(&(vmx)->vcpu,		 \
+					    X86_FEATURE_##feat_name);	 \
+		vmx_adjust_secondary_exec_control(vmx, exec_control,	 \
+			SECONDARY_EXEC_##ctrl_name, __enabled, exiting); \
+	}								 \
+})
+
+ /* More macro magic for ENABLE_/opt-in versus _EXITING/opt-out controls. */
+#define vmx_adjust_sec_exec_feature(vmx, exec_control, lname, uname) \
+	vmx_adjust_sec_exec_control(vmx, exec_control, lname, uname, ENABLE_##uname, false)
+
+#define vmx_adjust_sec_exec_exiting(vmx, exec_control, lname, uname) \
+	vmx_adjust_sec_exec_control(vmx, exec_control, lname, uname, uname##_EXITING, true)
 
 static u32 vmx_secondary_exec_control(struct vcpu_vmx* vmx) {
 	UNREFERENCED_PARAMETER(vmx);
 	u32 exec_control = vmcs_config.cpu_based_2nd_exec_ctrl;
+
+	if (vmx->vpid == 0)
+		exec_control &= ~SECONDARY_EXEC_ENABLE_VPID;
+	if (!enable_ept) {
+		exec_control &= ~SECONDARY_EXEC_ENABLE_EPT;
+		enable_unrestricted_guest = 0;
+	}
+	if (!enable_unrestricted_guest)
+		exec_control &= ~SECONDARY_EXEC_UNRESTRICTED_GUEST;
+
+	exec_control &= ~SECONDARY_EXEC_VIRTUALIZE_X2APIC_MODE;
+
+	/*
+	* KVM doesn't support VMFUNC for L1, but the control is set in KVM's
+	* base configuration as KVM emulates VMFUNC[EPTP_SWITCHING] for L2.
+	*/
+	exec_control &= ~SECONDARY_EXEC_ENABLE_VMFUNC;
+
+	/* SECONDARY_EXEC_DESC is enabled/disabled on writes to CR4.UMIP, 
+	 * in vmx_set_cr4. */
+	exec_control &= ~SECONDARY_EXEC_DESC;
+
+	/* SECONDARY_EXEC_SHADOW_VMCS is enabled when L1 executes VMPTRLD 
+		(handle_vmptrld).
+		We can NOT enable shadow_vmcs here because we don't have yet
+		a current VMCS12 
+	*/
+	exec_control &= ~SECONDARY_EXEC_SHADOW_VMCS;
+
+	if (cpu_has_vmx_xsaves()) {
+		
+	}
+
+	
 
 	return exec_control;
 }
@@ -2753,8 +2859,12 @@ static u32 vmx_vmexit_ctrl(void) {
 			VM_EXIT_CLEAR_IA32_RTIT_CTL);
 
 	/* Loading of EFER and PERF_GLOBAL_CTRL are toggled dynamically */
-	return vmexit_ctrl &
-		~(VM_EXIT_LOAD_IA32_PERF_GLOBAL_CTRL | VM_EXIT_LOAD_IA32_EFER);
+	vmexit_ctrl &= ~(VM_EXIT_LOAD_IA32_PERF_GLOBAL_CTRL | VM_EXIT_LOAD_IA32_EFER);
+
+	vmexit_ctrl &= ~(VM_EXIT_LOAD_IA32_PAT | VM_EXIT_ACK_INTR_ON_EXIT |
+		VM_EXIT_SAVE_DEBUG_CONTROLS);
+
+	return vmexit_ctrl;
 }
 
 static u32 vmx_vmentry_ctrl(void) {
@@ -2771,6 +2881,10 @@ static u32 vmx_vmentry_ctrl(void) {
 		VM_ENTRY_LOAD_IA32_EFER |
 		VM_ENTRY_IA32E_MODE);
 
+
+	vmentry_ctrl &= ~(VM_ENTRY_LOAD_IA32_PAT | VM_ENTRY_LOAD_IA32_EFER);
+	
+	vmentry_ctrl |= VM_ENTRY_IA32E_MODE; /* 64-bit guest */
 
 
 	return vmentry_ctrl;
