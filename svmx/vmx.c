@@ -300,6 +300,7 @@ static NTSTATUS setup_vmcs_config(struct vmcs_config* vmcs_conf,
 		{ VM_ENTRY_LOAD_IA32_RTIT_CTL,		VM_EXIT_CLEAR_IA32_RTIT_CTL },
 	};
 
+	// 全部初始化为0
 	memset(vmcs_conf, 0, sizeof(*vmcs_conf));
 
 	// 调整得到所有可用功能
@@ -388,7 +389,7 @@ static NTSTATUS setup_vmcs_config(struct vmcs_config* vmcs_conf,
 	// 获取基本能力
 	rdmsr(MSR_IA32_VMX_BASIC, vmx_msr_low, vmx_msr_high);
 
-	/*IA-32 SDM Vol 3B: VMCS size is never greater than 4kb. */
+	/* IA-32 SDM Vol 3B: VMCS size is never greater than 4kb. */
 	// bits[44:32] (13bits)
 	// VMCS的大小不会大于4KB
 	if ((vmx_msr_high & 0x1fff) > PAGE_SIZE)
