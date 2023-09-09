@@ -97,3 +97,7 @@ int x86_emulate_instruction(struct kvm_vcpu* vcpu, gpa_t cr2_or_gpa,
 static inline void kvm_machine_check(void) {
 	
 }
+
+static inline bool kvm_notify_vmexit_enabled(struct kvm* kvm) {
+	return kvm->arch.notify_vmexit_flags & KVM_X86_NOTIFY_VMEXIT_ENABLED;
+}

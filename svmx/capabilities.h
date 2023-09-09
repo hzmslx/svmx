@@ -112,3 +112,28 @@ static inline bool cpu_has_tertiary_exec_ctrls(void) {
 	return vmcs_config.cpu_based_exec_ctrl &
 		CPU_BASED_ACTIVATE_TERTIARY_CONTROLS;
 }
+
+static inline bool cpu_has_vmx_rdtscp(void) {
+	return vmcs_config.cpu_based_2nd_exec_ctrl &
+		SECONDARY_EXEC_ENABLE_RDTSCP;
+}
+
+static inline bool cpu_has_vmx_invpcid(void) {
+	return vmcs_config.cpu_based_2nd_exec_ctrl &
+		SECONDARY_EXEC_ENABLE_INVPCID;
+}
+
+static inline bool cpu_has_vmx_rdrand(void) {
+	return vmcs_config.cpu_based_2nd_exec_ctrl &
+		SECONDARY_EXEC_RDRAND_EXITING;
+}
+
+static inline bool cpu_has_vmx_rdseed(void) {
+	return vmcs_config.cpu_based_2nd_exec_ctrl &
+		SECONDARY_EXEC_RDSEED_EXITING;
+}
+
+static inline bool cpu_has_vmx_waitpkg(void) {
+	return vmcs_config.cpu_based_2nd_exec_ctrl &
+		SECONDARY_EXEC_ENABLE_USR_WAIT_PAUSE;
+}

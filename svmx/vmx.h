@@ -968,7 +968,7 @@ struct vcpu_vmx {
 			u32 ar;
 		} seg[8];
 	} segment_cache;
-	int vpid;
+	ULONG vpid;
 	bool emulation_required;
 
 	union vmx_exit_reason exit_reason;
@@ -1333,3 +1333,5 @@ static inline bool kvm_register_test_and_mark_available(struct kvm_vcpu* vcpu,
 }
 
 void free_loaded_vmcs(struct loaded_vmcs* loaded_vmcs);
+
+ULONG allocate_vpid(void);

@@ -430,3 +430,6 @@ int kvm_vm_ioctl_create_vcpu(struct kvm* kvm, u32 id);
 
 #define KVM_RUN_X86_BUS_LOCK     (1 << 1)
 
+/* Available with KVM_CAP_X86_NOTIFY_VMEXIT */
+#define KVM_X86_NOTIFY_VMEXIT_ENABLED		(1ULL << 0)
+#define KVM_X86_NOTIFY_VMEXIT_USER		(1ULL << 1)
