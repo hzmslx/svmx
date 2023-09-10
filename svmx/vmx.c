@@ -2450,6 +2450,8 @@ static ULONG_PTR get_segment_base(ULONG_PTR gdt_base, USHORT selector) {
 
 }
 
+
+
 // ¼ÓÔØvmcs
 void vmx_vcpu_load_vmcs(struct kvm_vcpu* vcpu, int cpu,
 	struct loaded_vmcs* buddy) {
@@ -2981,8 +2983,9 @@ static void init_vmcs(struct vcpu_vmx* vmx) {
 	vmcs_write32(PAGE_FAULT_ERROR_CODE_MATCH, 0);
 	vmcs_write32(CR3_TARGET_COUNT, 0); /* 22.2.1 */
 
-	vmcs_write16(HOST_FS_SELECTOR, 0); /* 22.2.4 */
-	vmcs_write16(HOST_GS_SELECTOR, 0); /* 22.2.4 */
+	// RPL and TI have to be zero.
+	vmcs_write16(HOST_FS_SELECTOR, vmx_get_fs() & 0xf8); /* 22.2.4 */
+	vmcs_write16(HOST_GS_SELECTOR, vmx_get_gs() & 0xf8); /* 22.2.4 */
 	vmx_set_constant_host_state(vmx);
 
 	vmcs_writel(HOST_FS_BASE, __readmsr(MSR_FS_BASE)); /* 22.2.4 */
@@ -2992,6 +2995,9 @@ static void init_vmcs(struct vcpu_vmx* vmx) {
 	vmcs_write32(VM_EXIT_MSR_LOAD_COUNT, 0);
 
 	vmcs_write32(VM_ENTRY_MSR_LOAD_COUNT, 0);
+
+	if (vmx->vpid != 0)
+		vmcs_write32(VIRTUAL_PROCESSOR_ID, vmx->vpid);
 
 	if (cpu_has_vmx_xsaves())
 		vmcs_write64(XSS_EXIT_BITMAP, VMX_XSS_EXIT_BITMAP);
@@ -3048,8 +3054,37 @@ static void init_vmcs(struct vcpu_vmx* vmx) {
 	vmcs_writel(GUEST_RIP, Lclear_regs);
 }
 
+#pragma warning(push)
+#pragma warning(disable:4244)
+#pragma warning(disable:4242)
+void set_segment_by_desc(x86_segment_descriptor* desc, struct kvm_segment* var) {
+	var->type = desc->type;
+	var->s = desc->s;
+	var->dpl = desc->dpl;
+	var->present = desc->p;
+	var->l = desc->l;
+	var->db = desc->db;
+	var->g = desc->g;
+	var->avl = desc->avl;
+}
+#pragma warning(pop)
 
+static void get_segment_desc(ULONG_PTR gdt_base, USHORT selector, x86_segment_descriptor* desc) {
+	x86_segment_selector sel = { selector };
 
+	if (sel.ti == LDT_SEL) {
+		x86_segment_selector ldt_sel = { vmx_sldt() };
+		desc = (x86_segment_descriptor*)(gdt_base +
+			ldt_sel.index * sizeof(x86_segment_descriptor));
+		uint32_t ldt_base = x86_segment_base(desc);
+		desc = (x86_segment_descriptor*)(ldt_base +
+			sel.index * sizeof(x86_segment_descriptor));
+	}
+	else {
+		desc = (x86_segment_descriptor*)(gdt_base +
+			sel.index * sizeof(x86_segment_descriptor));
+	}
+}
 
 static void __vmx_vcpu_reset(struct kvm_vcpu* vcpu) {
 	struct vcpu_vmx* vmx = to_vmx(vcpu);
@@ -3063,10 +3098,63 @@ static void __vmx_vcpu_reset(struct kvm_vcpu* vcpu) {
 	ULONG_PTR rflags = __readeflags();
 	vmx_set_rflags(vcpu, (ULONG)rflags);
 
-	struct kvm_segment var;
+	struct kvm_segment var = { 0 };
+	x86_segment_descriptor desc;
 	var.selector = vmx_str();
 	var.base = get_segment_base(dt.address, var.selector);
+	var.limit = GetSegmentLimit(var.selector);
+	get_segment_desc(dt.address, var.selector, &desc);
+	set_segment_by_desc(&desc, &var);
 	vmx_set_segment(vcpu, &var, VCPU_SREG_TR);
+
+	var.selector = vmx_get_es();
+	var.base = get_segment_base(dt.address, var.selector);
+	var.limit = GetSegmentLimit(var.selector);
+	get_segment_desc(dt.address, var.selector, &desc);
+	set_segment_by_desc(&desc, &var);
+	vmx_set_segment(vcpu, &var, VCPU_SREG_ES);
+
+	var.selector = vmx_get_cs();
+	var.base = get_segment_base(dt.address, var.selector);
+	var.limit = GetSegmentLimit(var.selector);
+	get_segment_desc(dt.address, var.selector, &desc);
+	set_segment_by_desc(&desc, &var);
+	vmx_set_segment(vcpu, &var, VCPU_SREG_CS);
+
+	var.selector = vmx_get_ss();
+	var.base = get_segment_base(dt.address, var.selector);
+	var.limit = GetSegmentLimit(var.selector);
+	get_segment_desc(dt.address, var.selector, &desc);
+	set_segment_by_desc(&desc, &var);
+	vmx_set_segment(vcpu, &var, VCPU_SREG_SS);
+
+	var.selector = vmx_get_ds();
+	var.base = get_segment_base(dt.address, var.selector);
+	var.limit = GetSegmentLimit(var.selector);
+	get_segment_desc(dt.address, var.selector, &desc);
+	set_segment_by_desc(&desc, &var);
+	vmx_set_segment(vcpu, &var, VCPU_SREG_DS);
+
+	var.selector = vmx_get_fs();
+	var.base = get_segment_base(dt.address, var.selector);
+	var.limit = GetSegmentLimit(var.selector);
+	get_segment_desc(dt.address, var.selector, &desc);
+	set_segment_by_desc(&desc, &var);
+	vmx_set_segment(vcpu, &var, VCPU_SREG_FS);
+
+	var.selector = vmx_get_gs();
+	var.base = get_segment_base(dt.address, var.selector);
+	var.limit = GetSegmentLimit(var.selector);
+	get_segment_desc(dt.address, var.selector, &desc);
+	set_segment_by_desc(&desc, &var);
+	vmx_set_segment(vcpu, &var, VCPU_SREG_GS);
+
+	var.selector = vmx_sldt();
+	var.base = get_segment_base(dt.address, var.selector);
+	var.limit = GetSegmentLimit(var.selector);
+	get_segment_desc(dt.address, var.selector, &desc);
+	set_segment_by_desc(&desc, &var);
+	vmx_set_segment(vcpu, &var, VCPU_SREG_LDTR);
 
 	init_vmcs(vmx);
 
@@ -3430,17 +3518,21 @@ void vmx_set_constant_host_state(struct vcpu_vmx* vmx) {
 	vmcs_write64(HOST_CR4, cr4); /* 22.2.3, 22.2.5 */
 	vmx->loaded_vmcs->host_state.cr4 = cr4;
 
-
-	vmcs_write16(HOST_CS_SELECTOR, vmx_get_cs());
+	/* 
+	* 27.2.3 Checks on Host Segment and Descriptor-Table Registers
+	* 
+	* In the selector field for each of CS,SS,DS,ES,FS,GS, and TR, 
+	* the RPL(bits 1:0) and the TI flag(bit 2) must be 0.
+	*/
+	vmcs_write16(HOST_CS_SELECTOR, vmx_get_cs() & 0xf8);
 #ifdef _WIN64
-	vmcs_write16(HOST_DS_SELECTOR, vmx_get_ds());
-	vmcs_write16(HOST_ES_SELECTOR, vmx_get_es());
-
+	vmcs_write16(HOST_DS_SELECTOR, vmx_get_ds() & 0xf8);
+	vmcs_write16(HOST_ES_SELECTOR, vmx_get_es() & 0xf8);
 #else
 
 #endif // WIN64
-	vmcs_write16(HOST_SS_SELECTOR, vmx_get_ss()); /* 22.2.4 */
-	vmcs_write16(HOST_TR_SELECTOR, vmx_str()); /* 22.2.4 */
+	vmcs_write16(HOST_SS_SELECTOR, vmx_get_ss() & 0xf8); /* 22.2.4 */
+	vmcs_write16(HOST_TR_SELECTOR, vmx_str() & 0xf8); /* 22.2.4 */
 
 
 	vmcs_writel(HOST_IDTR_BASE, host_idt_base); /* 22.2.4 */
