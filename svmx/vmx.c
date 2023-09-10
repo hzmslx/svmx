@@ -28,10 +28,7 @@ static int flexpriority_enabled = 1;
 
 bool enable_pml = 1;
 
-static unsigned long* vmx_io_bitmap_a_page;
-static unsigned long* vmx_io_bitmap_b_page;
-static unsigned long* vmx_msr_bitmap_legacy_page;
-static unsigned long* vmx_msr_bitmap_longmode_page;
+
 static ULONG* vmx_vpid_bitmap_buf = NULL;
 
 #define DIV_ROUND_UP(x,y)	(((x) + ((y) - 1)) / (y))
@@ -592,6 +589,10 @@ static void vmx_hardware_disable(void) {
 
 	cpu_vmxoff();
 
+	if (vmx_vpid_bitmap_buf) {
+		ExFreePool(vmx_vpid_bitmap_buf);
+		vmx_vpid_bitmap_buf = NULL;
+	}
 }
 
 /*
@@ -2225,6 +2226,11 @@ int cpu_has_vmx_msr_bitmap() {
 	return vmcs_config.cpu_based_exec_ctrl & CPU_BASED_USE_MSR_BITMAPS;
 }
 
+
+int cpu_has_vmx_io_bitmap() {
+	return vmcs_config.cpu_based_exec_ctrl & CPU_BASED_USE_IO_BITMAPS;
+}
+
 int cpu_has_vmx_invept_global() {
 	return !!(vmx_capability.ept & VMX_EPT_EXTENT_GLOBAL_BIT);
 }
@@ -2394,25 +2400,59 @@ int alloc_loaded_vmcs(struct loaded_vmcs* loaded_vmcs) {
 	loaded_vmcs->cpu = -1;
 	loaded_vmcs->launched = 0;
 
+	unsigned long* msr_bitmap = NULL;
+	unsigned long* io_bitmap_a = NULL;
+	unsigned long* io_bitmap_b = NULL;
+
 	do
 	{
 		if (cpu_has_vmx_msr_bitmap()) {
 			// 分配msr_bitmap页面
-			unsigned long* msr_bitmap = (unsigned long*)ExAllocatePoolZero(PagedPool, PAGE_SIZE, DRIVER_TAG);
+			msr_bitmap = (unsigned long*)ExAllocatePoolWithTag(PagedPool, PAGE_SIZE, DRIVER_TAG);
 			if (!msr_bitmap) {
 				status = STATUS_NO_MEMORY;
 				break;
 			}
+			RtlZeroMemory(msr_bitmap, PAGE_SIZE);
 			loaded_vmcs->msr_bitmap = msr_bitmap;
 		}
+		if (cpu_has_vmx_io_bitmap()) {
+			// 分配io_bitmap
+			io_bitmap_a = (unsigned long*)ExAllocatePoolWithTag(PagedPool, PAGE_SIZE, DRIVER_TAG);
+			if (!io_bitmap_a) {
+				status = STATUS_NO_MEMORY;
+				break;
+			}
+			RtlZeroMemory(io_bitmap_a, PAGE_SIZE);
+			loaded_vmcs->io_bitmap_a = io_bitmap_a;
+			io_bitmap_b = (unsigned long*)ExAllocatePoolWithTag(PagedPool, PAGE_SIZE, DRIVER_TAG);
+			if (!io_bitmap_b) {
+				status = STATUS_NO_MEMORY;
+				break;
+			}
+			RtlZeroMemory(io_bitmap_b, PAGE_SIZE);
+			loaded_vmcs->io_bitmap_b = io_bitmap_b;
+		}
+
+		memset(&loaded_vmcs->host_state, 0,
+			sizeof(struct vmcs_host_state));
+		memset(&loaded_vmcs->controls_shadow, 0,
+			sizeof(struct vmcs_controls_shadow));
+
+		InitializeListHead(&loaded_vmcs->loaded_vmcss_on_cpu_link);
+
+		return status;
 	} while (FALSE);
 
-	memset(&loaded_vmcs->host_state, 0,
-		sizeof(struct vmcs_host_state));
-	memset(&loaded_vmcs->controls_shadow, 0,
-		sizeof(struct vmcs_controls_shadow));
-
-	InitializeListHead(&loaded_vmcs->loaded_vmcss_on_cpu_link);
+	if (msr_bitmap) {
+		ExFreePool(msr_bitmap);
+	}
+	if (io_bitmap_a) {
+		ExFreePool(io_bitmap_a);
+	}
+	if (io_bitmap_b) {
+		ExFreePool(io_bitmap_b);
+	}
 
 	return status;
 }
@@ -2756,6 +2796,25 @@ static u32 vmx_exec_control(struct vcpu_vmx* vmx)
 		CPU_BASED_TPR_SHADOW | CPU_BASED_MWAIT_EXITING | CPU_BASED_RDPMC_EXITING |
 		CPU_BASED_HLT_EXITING | CPU_BASED_USE_TSC_OFFSETTING);
 
+	/*
+	* 一、CR3-load exiting
+	* 在vmx non-root operation 中使用mov to cr3指令来写cr3寄存器时,将根据cr3-target value
+	* 与 cr3-target count字段的值来决定是否产生VM-exit
+	* 当前VMX架构支持4个cr3 target value字段，cr3-target count字段值指示前N个cr3 target value
+	* 有效，那么：
+	* 1. 当写入cr3寄存器的值等于这N个cr3-target value字段去其中一个值时，不会产生VM-exit
+	* 2. 当写入cr3寄存器的值不匹配这N个cr3-target value字段中的任何一个值或者cr3-target count
+	*    字段值为0时(N=0)，将产生VM-exit.
+	* 
+	* 二、MOV-DR exiting
+	* 在VMX non-root operation中执行MOV指令对DR寄存器进行访问将产生VM-exit
+	* 
+	* 三、Use I/O bitmap
+	* 需要在I/O bitmap A address以及 I/O bimtap B address这两个字段中提供物理地址作为
+	* 4KB 的IO bitmap. I/O bimap 对应端口0000H到7FFFH, I/O bitmap B对应端口8000到FFFFH
+	* 当使用I/O bitmap，将忽略Unconditional I/O exiting控制位的作用
+	* I/O bitmap的某个bit为1时，访问该位对应的端口将产生VM-exit
+	*/
 	exec_control |= (CPU_BASED_CR3_LOAD_EXITING | CPU_BASED_MOV_DR_EXITING |
 		CPU_BASED_USE_IO_BITMAPS);
 
@@ -2958,6 +3017,18 @@ static void init_vmcs(struct vcpu_vmx* vmx) {
 		vmcs_write64(MSR_BITMAP, phys_addr);
 	}
 
+	if (cpu_has_vmx_io_bitmap()) {
+		// MSR bitmap 的某位为1时，在VMX non-root operation中访问该位对应的MSR
+		// 则产生VM-exit
+		PHYSICAL_ADDRESS physical = MmGetPhysicalAddress(vmx->vmcs01.io_bitmap_a);
+		u64 phys_addr = physical.QuadPart;
+		vmcs_write64(IO_BITMAP_A, phys_addr);
+
+		physical = MmGetPhysicalAddress(vmx->vmcs01.io_bitmap_b);
+		phys_addr = physical.QuadPart;
+		vmcs_write64(IO_BITMAP_B, phys_addr);
+	}
+
 	vmcs_write64(VMCS_LINK_POINTER, INVALID_GPA);
 
 	/* Control */
@@ -3044,11 +3115,11 @@ static void init_vmcs(struct vcpu_vmx* vmx) {
 	vmcs_writel(GUEST_SYSENTER_ESP, __readmsr(MSR_IA32_SYSENTER_ESP));
 	vmcs_writel(GUEST_SYSENTER_EIP, __readmsr(MSR_IA32_SYSENTER_EIP));
 	u64 value = __readmsr(MSR_IA32_DEBUGCTLMSR);
-	value &= 0xFFFFFFFF;
 	vmcs_write64(GUEST_IA32_DEBUGCTL, value);
-	value = __readmsr(MSR_IA32_DEBUGCTLMSR);
-	value >>= 32;
 
+	vmcs_writel(GUEST_ES_BASE, 0);
+	vmcs_writel(GUEST_SS_BASE, 0);
+	vmcs_writel(GUEST_DS_BASE, 0);
 
 
 	vmcs_writel(GUEST_RIP, Lclear_regs);
@@ -3199,23 +3270,21 @@ static void vmx_vcpu_reset(struct kvm_vcpu* vcpu, bool init_event) {
 	vmx->rmode.vm86_active = 0;
 
 	// set guest segment fields
-	seg_setup(VCPU_SREG_CS);
 	vmcs_write16(GUEST_CS_SELECTOR, 0xf000);
-	vmcs_writel(GUEST_CS_BASE, 0xffff0000ul);
+	vmcs_writel(GUEST_CS_BASE, 0);
 
-	seg_setup(VCPU_SREG_DS);
-	seg_setup(VCPU_SREG_ES);
-	seg_setup(VCPU_SREG_FS);
-	seg_setup(VCPU_SREG_GS);
-	seg_setup(VCPU_SREG_SS);
+	struct desc_ptr dt = { 0 };
+	vmx_sgdt(&dt);
 
+	ULONG_PTR base = get_segment_base(dt.address, vmx_str());
 	vmcs_write16(GUEST_TR_SELECTOR, 0);
-	vmcs_writel(GUEST_TR_BASE, 0);
+	vmcs_writel(GUEST_TR_BASE, base);
 	vmcs_write32(GUEST_TR_LIMIT, 0xffff);
 	vmcs_write32(GUEST_TR_AR_BYTES, 0x008b);
 
 	vmcs_write16(GUEST_LDTR_SELECTOR, 0);
-	vmcs_writel(GUEST_LDTR_BASE, 0);
+	base = get_segment_base(dt.address, vmx_sldt());
+	vmcs_writel(GUEST_LDTR_BASE, base);
 	vmcs_write32(GUEST_LDTR_LIMIT, 0xffff);
 	vmcs_write32(GUEST_LDTR_AR_BYTES, 0x00082);
 
@@ -3689,6 +3758,10 @@ void free_loaded_vmcs(struct loaded_vmcs* loaded_vmcs) {
 	loaded_vmcs->vmcs = NULL;
 	if (loaded_vmcs->msr_bitmap)
 		ExFreePool(loaded_vmcs->msr_bitmap);
+	if (loaded_vmcs->io_bitmap_a)
+		ExFreePool(loaded_vmcs->io_bitmap_a);
+	if (loaded_vmcs->io_bitmap_b)
+		ExFreePool(loaded_vmcs->io_bitmap_b);
 }
 
 ULONG allocate_vpid(void) {

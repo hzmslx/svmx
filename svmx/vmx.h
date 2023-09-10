@@ -1217,6 +1217,7 @@ int cpu_has_kvm_support();
 int cpu_has_virtual_nmis();
 int cpu_has_vmx_msr_bitmap();
 int cpu_has_vmx_invept_global();
+int cpu_has_vmx_io_bitmap();
 
 int vmx_disabled_by_bios();
 

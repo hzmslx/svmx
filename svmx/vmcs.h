@@ -55,6 +55,8 @@ struct loaded_vmcs {
 	int soft_vnmi_blocked;
 	s64 vnmi_blocked_time;
 	unsigned long* msr_bitmap;
+	unsigned long* io_bitmap_a;
+	unsigned long* io_bitmap_b;
 	LIST_ENTRY loaded_vmcss_on_cpu_link;/* 这个cpu上的所有 vmcs链表 */
 	struct vmcs_host_state host_state;
 	struct vmcs_controls_shadow controls_shadow;
