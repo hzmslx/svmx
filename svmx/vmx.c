@@ -2407,7 +2407,14 @@ int alloc_loaded_vmcs(struct loaded_vmcs* loaded_vmcs) {
 	do
 	{
 		if (cpu_has_vmx_msr_bitmap()) {
-			// 分配msr_bitmap页面
+			/* 
+			* 分配msr_bitmap页面
+			* MSR bitmap 区域为4K大小，分别对应低半部分和高半部分的读写访问。
+			* (1) 低半部分 MSR read bitmap，对应MSR范围从00000000H到00001FFFH，用来控制这些MSR的读访问 首个1K区域
+			* (2) 高半部分 MSR read bitmap, 对应MSR范围从C0000000H到C0001FFFH，用来控制这些MSR的都访问 第二个1K区域
+			* (3) 低半部分 MSR write bitmap，对应MSR范围从00000000H到00001FFFH，用来控制这些MSR的写访问 第三个1K区域
+			* (4) 高半部分 MSR write bitmap，对应MSR范围从C0000000H到C0001FFFH，用来控制这些MSR的写访问 第四个1K区域
+			*/
 			msr_bitmap = (unsigned long*)ExAllocatePoolWithTag(PagedPool, PAGE_SIZE, DRIVER_TAG);
 			if (!msr_bitmap) {
 				status = STATUS_NO_MEMORY;
@@ -3052,6 +3059,7 @@ static void init_vmcs(struct vcpu_vmx* vmx) {
 
 	vmcs_write32(PAGE_FAULT_ERROR_CODE_MASK, 0);
 	vmcs_write32(PAGE_FAULT_ERROR_CODE_MATCH, 0);
+	// 所有的写cr3都会导致VM-exit
 	vmcs_write32(CR3_TARGET_COUNT, 0); /* 22.2.1 */
 
 	// RPL and TI have to be zero.

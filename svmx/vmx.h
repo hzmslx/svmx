@@ -373,10 +373,35 @@ enum vmcs_field {
   * Definitions of Secondary Processor-Based VM-Execution Controls.
   */
 #define SECONDARY_EXEC_VIRTUALIZE_APIC_ACCESSES VMCS_CONTROL_BIT(VIRT_APIC_ACCESSES)
+/*
+* 启用EPT机制，由此产生GPA和HPA两个概念
+* 由于这两种物理地址的出现，在guest内部的线性地址过程中又产生了与这两种物理地址
+* 相对应的页转换表结构
+* 1. guest paging-structure
+* 2. EPT paging-structure
+* guest-physical address和host-physical address的产生是为了实现CPU的内存虚拟化管理
+*/
 #define SECONDARY_EXEC_ENABLE_EPT               VMCS_CONTROL_BIT(EPT)
+/*
+* VMX non-root operation 内使用LGDT,LIDT,LTR，SGDT，SIDT，SLDT以及STR指令来访问描述
+* 符表寄存器将产生VM-exit
+*/
 #define SECONDARY_EXEC_DESC			VMCS_CONTROL_BIT(DESC_EXITING)
+/*
+* VMX non-root operation内允许使用RDTSCP指令，否则执行RDTSCP指令将产生#UD异常
+*/
 #define SECONDARY_EXEC_ENABLE_RDTSCP		VMCS_CONTROL_BIT(RDTSCP)
 #define SECONDARY_EXEC_VIRTUALIZE_X2APIC_MODE   VMCS_CONTROL_BIT(VIRTUAL_X2APIC)
+/*
+* 允许为线性地址转换cache提供一个VPID值
+* 线性地址转换cache能缓存两类信息：
+* (1) EPT机制未使用时，线性地址转换为物理地址的linear mappings
+* (2) EPT机制使用时，线性地址转换为HPA的combined mappings
+* VPID为每个虚拟处理器定义了一个虚拟处理器域的概念
+* 即每次VM-entry时，为虚拟处理器在virtual processor identifier字段中提供一个VPID值。
+* 这个VPID值将对应该虚拟处理器下的所有线性地址转换cache.
+* INVVPID指令可以用来刷新VPID值对应的所有线性地址转换cache，包括线性映射及合并映射
+*/
 #define SECONDARY_EXEC_ENABLE_VPID              VMCS_CONTROL_BIT(VPID)
 #define SECONDARY_EXEC_WBINVD_EXITING		VMCS_CONTROL_BIT(WBINVD_EXITING)
 #define SECONDARY_EXEC_UNRESTRICTED_GUEST	VMCS_CONTROL_BIT(UNRESTRICTED_GUEST)
@@ -384,6 +409,9 @@ enum vmcs_field {
 #define SECONDARY_EXEC_VIRTUAL_INTR_DELIVERY    VMCS_CONTROL_BIT(VIRT_INTR_DELIVERY)
 #define SECONDARY_EXEC_PAUSE_LOOP_EXITING	VMCS_CONTROL_BIT(PAUSE_LOOP_EXITING)
 #define SECONDARY_EXEC_RDRAND_EXITING		VMCS_CONTROL_BIT(RDRAND_EXITING)
+/*
+* 在VMX non-root operation 中允许执行invpcid指令，否则将产生#UD异常
+*/
 #define SECONDARY_EXEC_ENABLE_INVPCID		VMCS_CONTROL_BIT(INVPCID)
 #define SECONDARY_EXEC_ENABLE_VMFUNC            VMCS_CONTROL_BIT(VMFUNC)
 #define SECONDARY_EXEC_SHADOW_VMCS              VMCS_CONTROL_BIT(SHADOW_VMCS)
@@ -391,6 +419,9 @@ enum vmcs_field {
 #define SECONDARY_EXEC_RDSEED_EXITING		VMCS_CONTROL_BIT(RDSEED_EXITING)
 #define SECONDARY_EXEC_ENABLE_PML               VMCS_CONTROL_BIT(PAGE_MOD_LOGGING)
 #define SECONDARY_EXEC_PT_CONCEAL_VMX		VMCS_CONTROL_BIT(PT_CONCEAL_VMX)
+/*
+* 在VMX non-root operation 中允许执行xsave/xrstors指令，否则将产生#UD异常
+*/
 #define SECONDARY_EXEC_XSAVES			VMCS_CONTROL_BIT(XSAVES)
 #define SECONDARY_EXEC_MODE_BASED_EPT_EXEC	VMCS_CONTROL_BIT(MODE_BASED_EPT_EXEC)
 #define SECONDARY_EXEC_PT_USE_GPA		VMCS_CONTROL_BIT(PT_USE_GPA)
