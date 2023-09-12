@@ -296,6 +296,10 @@ static inline bool is_cr0_pg(struct kvm_mmu* mmu)
 	return mmu->cpu_role.base.level > 0;
 }
 
+static inline bool is_cr4_pae(struct kvm_mmu* mmu) {
+	return !mmu->cpu_role.base.has_4_byte_gpte;
+}
+
 // EPTµÄ³õÊ¼»¯
 static void init_kvm_tdp_mmu(struct kvm_vcpu* vcpu,
 	union kvm_cpu_role cpu_role) {
@@ -439,6 +443,7 @@ static void free_mmu_pages(struct kvm_mmu* mmu) {
 
 int kvm_mmu_create(struct kvm_vcpu* vcpu) {
 	int ret;
+
 
 	vcpu->arch.mmu = &vcpu->arch.root_mmu;
 	vcpu->arch.walk_mmu = &vcpu->arch.root_mmu;

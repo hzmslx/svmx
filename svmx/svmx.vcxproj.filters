@@ -231,6 +231,9 @@
     <ClInclude Include="tdp_mmu.h">
       <Filter>mmu</Filter>
     </ClInclude>
+    <ClInclude Include="paging_tmpl.h">
+      <Filter>mmu</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <MASM Include="vmxenter.asm">

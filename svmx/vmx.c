@@ -1510,6 +1510,13 @@ NTSTATUS alloc_kvm_area() {
 	return STATUS_SUCCESS;
 }
 
+
+static int vmx_get_max_tdp_level(void) {
+	if (cpu_has_vmx_ept_5levels())
+		return 5;
+	return 4;
+}
+
 NTSTATUS hardware_setup() {
 	NTSTATUS status = STATUS_SUCCESS;
 	struct desc_ptr dt;
@@ -1540,6 +1547,13 @@ NTSTATUS hardware_setup() {
 	if (!cpu_has_vmx_ept_ad_bits() || !enable_ept)
 		enable_ept_ad_bits = 0;
 
+	if (!cpu_has_vmx_unrestricted_guest() || !enable_ept)
+		enable_unrestricted_guest = 0;
+
+
+	if (!cpu_has_vmx_tpr_shadow())
+		vmx_x86_ops.update_cr8_intercept = NULL;
+
 	ULONG size = BITS_TO_ULONG(VMX_NR_VPIDS);
 	vmx_vpid_bitmap_buf = ExAllocatePoolWithTag(NonPagedPool, size, DRIVER_TAG);
 	if (!vmx_vpid_bitmap_buf) {
@@ -1550,6 +1564,19 @@ NTSTATUS hardware_setup() {
 	/* 0 is reserved for host */
 	RtlSetBit(&vmx_vpid_bitmap, 0);
 
+
+	if (enable_ept)
+		kvm_mmu_set_ept_masks(enable_ept_ad_bits,
+			cpu_has_vmx_ept_execute_only());
+
+	/*
+	* Setup shadow_me_value/shadow_me_mask to include MKTME KeyID
+	* bits to shadow_zero_check.
+	*/
+	
+
+	kvm_configure_mmu(enable_ept, 0, vmx_get_max_tdp_level(),
+		ept_caps_to_lpage_level(vmx_capability.ept));
 
 	if (!cpu_has_vmx_preemption_timer())
 		enable_preemption_timer = FALSE;
@@ -3556,6 +3583,7 @@ static void vmx_load_mmu_pgd(struct kvm_vcpu* vcpu, hpa_t root_hpa,
 
 	if (enable_ept) {
 		eptp = construct_eptp(vcpu, root_hpa, root_level);
+		// 提供EPT页表结构的指针值
 		vmcs_write64(EPT_POINTER, eptp);
 
 		if (!enable_unrestricted_guest && !is_paging(vcpu))

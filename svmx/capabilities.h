@@ -98,6 +98,10 @@ static inline bool cpu_has_vmx_ept_4levels(void)
 	return vmx_capability.ept & VMX_EPT_PAGE_WALK_4_BIT;
 }
 
+static inline bool cpu_has_vmx_ept_5levels(void) {
+	return vmx_capability.ept & VMX_EPT_PAGE_WALK_5_BIT;
+}
+
 static inline bool cpu_has_vmx_ept_mt_wb(void)
 {
 	return vmx_capability.ept & VMX_EPTP_WB_BIT;
@@ -136,4 +140,17 @@ static inline bool cpu_has_vmx_rdseed(void) {
 static inline bool cpu_has_vmx_waitpkg(void) {
 	return vmcs_config.cpu_based_2nd_exec_ctrl &
 		SECONDARY_EXEC_ENABLE_USR_WAIT_PAUSE;
+}
+
+
+static inline bool cpu_has_vmx_ept_execute_only(void) {
+	return vmx_capability.ept & VMX_EPT_EXECUTE_ONLY_BIT;
+}
+
+static inline int ept_caps_to_lpage_level(u32 ept_caps) {
+	if (ept_caps & VMX_EPT_1GB_PAGE_BIT)
+		return PG_LEVEL_1G;
+	if (ept_caps & VMX_EPT_2MB_PAGE_BIT)
+		return PG_LEVEL_2M;
+	return PG_LEVEL_4K;
 }

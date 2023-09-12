@@ -75,3 +75,5 @@ static inline unsigned long kvm_get_active_pcid(struct kvm_vcpu* vcpu)
 int kvm_mmu_post_init_vm(struct kvm* kvm);
 void kvm_mmu_pre_destroy_vm(struct kvm* kvm);
 
+void kvm_mmu_set_ept_masks(bool has_ad_bits, bool has_exec_only);
+void kvm_mmu_set_mmio_spte_mask(u64 mmio_value, u64 mmio_mask, u64 access_mask);

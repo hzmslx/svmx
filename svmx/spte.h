@@ -17,6 +17,26 @@ extern u64 shadow_accessed_mask;
  * enough that the improved code generation is noticeable in KVM's footprint.
  */
 #define SPTE_MMU_PRESENT_MASK		BIT_ULL(11)
+
+ /*
+  * TDP SPTES (more specifically, EPT SPTEs) may not have A/D bits, and may also
+  * be restricted to using write-protection (for L2 when CPU dirty logging, i.e.
+  * PML, is enabled).  Use bits 52 and 53 to hold the type of A/D tracking that
+  * is must be employed for a given TDP SPTE.
+  *
+  * Note, the "enabled" mask must be '0', as bits 62:52 are _reserved_ for PAE
+  * paging, including NPT PAE.  This scheme works because legacy shadow paging
+  * is guaranteed to have A/D bits and write-protection is forced only for
+  * TDP with CPU dirty logging (PML).  If NPT ever gains PML-like support, it
+  * must be restricted to 64-bit KVM.
+  */
+#define SPTE_TDP_AD_SHIFT		52
+#define SPTE_TDP_AD_MASK		(3ULL << SPTE_TDP_AD_SHIFT)
+#define SPTE_TDP_AD_ENABLED		(0ULL << SPTE_TDP_AD_SHIFT)
+#define SPTE_TDP_AD_DISABLED		(1ULL << SPTE_TDP_AD_SHIFT)
+#define SPTE_TDP_AD_WRPROT_ONLY		(2ULL << SPTE_TDP_AD_SHIFT)
+
+
 /*
  * Returns true if A/D bits are supported in hardware and are enabled by KVM.
  * When enabled, KVM uses A/D bits for all non-nested MMUs.  Because L1 can
@@ -48,3 +68,12 @@ static inline bool is_shadow_present_pte(u64 pte)
 {
 	return !!(pte & SPTE_MMU_PRESENT_MASK);
 }
+
+/*
+ * Low ignored bits are at a premium for EPT, use high ignored bits, taking care
+ * to not overlap the A/D type mask or the saved access bits of access-tracked
+ * SPTEs when A/D bits are disabled.
+ */
+#define EPT_SPTE_HOST_WRITABLE		BIT_ULL(57)
+#define EPT_SPTE_MMU_WRITABLE		BIT_ULL(58)
+
