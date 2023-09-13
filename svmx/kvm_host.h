@@ -383,6 +383,13 @@ enum pmc_type {
 
 
 
+#define PT64_ROOT_MAX_LEVEL 5
+
+struct rsvd_bits_validate {
+	u64 rsvd_bits_mask[2][PT64_ROOT_MAX_LEVEL];
+	u64 bad_mt_xwr;
+};
+
 
 /*
  * kvm_mmu_extended_role complements kvm_mmu_page_role, tracking properties
@@ -756,7 +763,9 @@ struct kvm_mmu {
 	 * bits include not only hardware reserved bits but also
 	 * the bits spte never used.
 	 */
+	struct rsvd_bits_validate shadow_zero_check;
 
+	struct rsvd_bits_validate guest_rsvd_check;
 
 	u64 pdptrs[4]; /* pae */
 };
@@ -1922,3 +1931,7 @@ int kvm_arch_handle_exit(struct kvm_vcpu* vcpu, struct kvm_run* run);
 
 void kvm_destroy_vcpus(struct kvm* kvm);
 void kvm_arch_vcpu_destroy(struct kvm_vcpu* vcpu);
+
+static inline gpa_t gfn_to_gpa(gfn_t gfn) {
+	return (gpa_t)gfn << PAGE_SHIFT;
+}

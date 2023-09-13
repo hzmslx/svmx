@@ -61,6 +61,22 @@ struct kvm_mmu_role_regs {
 	const u64 efer;
 };
 
+#define PTE_PREFETCH_NUM		8
+
+
+#define PTTYPE 64
+#include "paging_tmpl.h"
+#undef PTTYPE
+
+#define PTTYPE 32
+#include "paging_tmpl.h"
+#undef PTTYPE
+
+#define PTTYPE_EPT 18 /* arbitrary */
+#define PTTYPE PTTYPE_EPT
+#include "paging_tmpl.h"
+#undef PTTYPE
+
 NTSTATUS kvm_mmu_module_init() {
 	NTSTATUS status = STATUS_SUCCESS;
 	do
@@ -320,6 +336,8 @@ static void init_kvm_tdp_mmu(struct kvm_vcpu* vcpu,
 
 	if (!is_cr0_pg(context))
 		context->gva_to_gpa = nonpaging_gva_to_gpa;
+	else if (is_cr4_pae(context))
+		context->gva_to_gpa = paging64_gva_to_gpa;
 
 }
 

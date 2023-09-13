@@ -9,6 +9,7 @@
 #define PT_PWT_MASK (1ULL << 3)
 #define PT_PCD_MASK (1ULL << 4)
 #define PT_ACCESSED_SHIFT 5
+#define PT_DIRTY_SHIFT 6
 #define PT_ACCESSED_MASK (1ULL << PT_ACCESSED_SHIFT)
 #define PT_DIRTY_MASK (1ULL << 6)
 #define PT_PAGE_SIZE_MASK (1ULL << 7)
@@ -25,6 +26,8 @@
 			       X86_CR4_SMEP | X86_CR4_SMAP | X86_CR4_PKE)
 
 #define KVM_MMU_CR0_ROLE_BITS (X86_CR0_PG | X86_CR0_WP)
+
+#define PAGE_MASK		(~(PAGE_SIZE-1))
 
 void kvm_init_mmu(struct kvm_vcpu* vcpu);
 

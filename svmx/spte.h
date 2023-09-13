@@ -77,3 +77,19 @@ static inline bool is_shadow_present_pte(u64 pte)
 #define EPT_SPTE_HOST_WRITABLE		BIT_ULL(57)
 #define EPT_SPTE_MMU_WRITABLE		BIT_ULL(58)
 
+static inline bool __is_bad_mt_xwr(struct rsvd_bits_validate* rsvd_check,
+	u64 pte) {
+	return rsvd_check->bad_mt_xwr & BIT_ULL(pte & 0x3f);
+}
+
+static inline u64 get_rsvd_bits(struct rsvd_bits_validate* rsvd_check, u64 pte,
+	int level) {
+	int bit7 = (pte >> 7) & 1;
+
+	return rsvd_check->rsvd_bits_mask[bit7][level - 1];
+}
+
+static inline bool __is_rsvd_bits_set(struct rsvd_bits_validate* rsvd_check,
+	u64 pte, int level) {
+	return pte & get_rsvd_bits(rsvd_check, pte, level);
+}
