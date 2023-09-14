@@ -1809,7 +1809,7 @@ kvm_pfn_t __gfn_to_pfn_memslot(const struct kvm_memory_slot* slot, gfn_t gfn,
 	bool atomic, bool interruptible, bool* async,
 	bool write_fault, bool* writable, hva_t* hva);
 
-static inline unsigned long
+static inline ULONG_PTR
 __gfn_to_hva_memslot(const struct kvm_memory_slot* slot, gfn_t gfn)
 {
 	/*
@@ -1818,7 +1818,7 @@ __gfn_to_hva_memslot(const struct kvm_memory_slot* slot, gfn_t gfn)
 	 * table walks, do not let the processor speculate loads outside
 	 * the guest's registered memslots.
 	 */
-	unsigned long offset = gfn - slot->base_gfn;
+	ULONG_PTR offset = gfn - slot->base_gfn;
 	
 	return slot->userspace_addr + offset * PAGE_SIZE;
 }

@@ -29,6 +29,8 @@
 
 #define PAGE_MASK		(~(PAGE_SIZE-1))
 
+
+
 void kvm_init_mmu(struct kvm_vcpu* vcpu);
 
 int kvm_mmu_load(struct kvm_vcpu* vcpu);

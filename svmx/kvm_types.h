@@ -12,21 +12,21 @@
  *  hfn - host frame number
  */
 
-typedef unsigned long  gva_t;
-typedef u64            gpa_t;
-typedef unsigned long  gfn_t;
+typedef ULONG_PTR  gva_t;
+typedef u64        gpa_t;
+typedef ULONG_PTR  gfn_t;
 
-typedef unsigned long  hva_t;
-typedef u64            hpa_t;
-typedef unsigned long  hfn_t;
+typedef ULONG_PTR  hva_t;
+typedef u64        hpa_t;
+typedef ULONG_PTR  hfn_t;
 
 typedef hfn_t kvm_pfn_t;
 
 struct gfn_to_hva_cache {
 	u64 generation;
 	gpa_t gpa;
-	unsigned long hva;
-	unsigned long len;
+	ULONG_PTR hva;
+	ULONG_PTR len;
 	struct kvm_memory_slot* memslot;
 };
 

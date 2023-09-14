@@ -1,4 +1,3 @@
-#pragma once
 
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
@@ -26,51 +25,51 @@
 
 
 #if PTTYPE == 64
-#define pt_element_t u64
-#define guest_walker guest_walker64
-#define FNAME(name)	paging##64_##name
-#define PT_LEVEL_BITS 9
-#define PT_GUEST_DIRTY_SHIFT PT_DIRTY_SHIFT
-#define PT_GUEST_ACCESSED_SHIFT PT_ACCESSED_SHIFT
-#define PT_HAVE_ACCESSED_DIRTY(mmu)	TRUE
+	#define pt_element_t u64
+	#define guest_walker guest_walker64
+	#define FNAME(name)	paging##64_##name
+	#define PT_LEVEL_BITS 9
+	#define PT_GUEST_DIRTY_SHIFT PT_DIRTY_SHIFT
+	#define PT_GUEST_ACCESSED_SHIFT PT_ACCESSED_SHIFT
+	#define PT_HAVE_ACCESSED_DIRTY(mmu)	TRUE
 #ifdef AMD64
-#define PT_MAX_FULL_LEVELS PT64_ROOT_MAX_LEVEL
+	#define PT_MAX_FULL_LEVELS PT64_ROOT_MAX_LEVEL
 #else
-#define PT_MAX_FULL_LEVELS 2
+	#define PT_MAX_FULL_LEVELS 2
 #endif
 #elif PTTYPE == 32
-#define pt_element_t u32
-#define guest_walker guest_walker32
-#define FNAME(name) paging##32_##name
-#define PT_LEVEL_BITS 10
-#define PT_MAX_FULL_LEVELS	2
-#define PT_GUEST_DIRTY_SHIFT PT_DIRTY_SHIFT
-#define PT_GUEST_ACCESSED_SHIFT	PT_ACCESSED_SHIFT
-#define PT_HAVE_ACCESSED_DIRTY(mmu) TRUE
+	#define pt_element_t u32
+	#define guest_walker guest_walker32
+	#define FNAME(name) paging##32_##name
+	#define PT_LEVEL_BITS 10
+	#define PT_MAX_FULL_LEVELS	2
+	#define PT_GUEST_DIRTY_SHIFT PT_DIRTY_SHIFT
+	#define PT_GUEST_ACCESSED_SHIFT	PT_ACCESSED_SHIFT
+	#define PT_HAVE_ACCESSED_DIRTY(mmu) TRUE
 
-#define PT32_DIR_PSE36_SIZE 4
-#define PT32_DIR_PSE36_SHIFT 13
-#define PT32_DIR_PSE36_MASK \
+	#define PT32_DIR_PSE36_SIZE 4
+	#define PT32_DIR_PSE36_SHIFT 13
+	#define PT32_DIR_PSE36_MASK \
 		(((1ULL << PT32_DIR_PSE36_SIZE) - 1) << PT32_DIR_PSE36_SHIFT)	
 #elif PTTYPE == PTTYPE_EPT
-#define pt_element_t u64
-#define guest_walker guest_walkerEPT
-#define FNAME(name)	ept_##name
-#define PT_LEVEL_BITS 9
-#define PT_GUEST_DIRTY_SHIFT 9
-#define PT_GUEST_ACCESSED_SHIFT 8
-#define PT_HAVE_ACCESSED_DIRTY(mmu) (!(mmu)->cpu_role.base.ad_disabled)
-#define PT_MAX_FULL_LEVELS	PT64_ROOT_MAX_LEVEL
+	#define pt_element_t u64
+	#define guest_walker guest_walkerEPT
+	#define FNAME(name)	ept_##name
+	#define PT_LEVEL_BITS 9
+	#define PT_GUEST_DIRTY_SHIFT 9
+	#define PT_GUEST_ACCESSED_SHIFT 8
+	#define PT_HAVE_ACCESSED_DIRTY(mmu) (!(mmu)->cpu_role.base.ad_disabled)
+	#define PT_MAX_FULL_LEVELS	PT64_ROOT_MAX_LEVEL
 #else
-#error Invalid PTTYPE value
+	#error Invalid PTTYPE value
 #endif
 
 
 /* Common logic, but per-type values. These also need to be undefined. */
-#define PT_BASE_ADDR_MASK	((pt_element_t)(((1ULL<<52)-1) & ~(u64)(PAGE_SIZE-1)))
-#define PT_LVL_ADDR_MASK(lvl)	__PT_LVL_ADDR_MASK(PT_BASE_ADDR_MASK,lvl,PT_LEVEL_BITS)
-#define PT_LVL_OFFSET_MASK(lvl)	__PT_LVL_OFFSET_MASK(PT_BASE_ADDR_MASK,lvl,PT_LEVEL_BITS)
-#define PT_INDEX(addr,lvl)	_PT_INDEX(addr,lvl,PT_LEVEL_BITS)
+#define PT_BASE_ADDR_MASK	((pt_element_t)(((1ULL << 52) - 1) & ~(u64)(PAGE_SIZE - 1)))
+#define PT_LVL_ADDR_MASK(lvl)	__PT_LVL_ADDR_MASK(PT_BASE_ADDR_MASK, lvl, PT_LEVEL_BITS)
+#define PT_LVL_OFFSET_MASK(lvl)	__PT_LVL_OFFSET_MASK(PT_BASE_ADDR_MASK, lvl, PT_LEVEL_BITS)
+#define PT_INDEX(addr, lvl)	__PT_INDEX(addr, lvl, PT_LEVEL_BITS)
 
 #define PT_GUEST_DIRTY_MASK		(1 << PT_GUEST_DIRTY_SHIFT)
 #define PT_GUEST_ACCESSED_MASK	(1 << PT_GUEST_ACCESSED_SHIFT)
@@ -103,13 +102,16 @@ static inline gfn_t pse36_gfn_delta(u32 gpte)
 {
 	int shift = 32 - PT32_DIR_PSE36_SHIFT - PAGE_SHIFT;
 
-	return (gpta & PT32_DIR_PSE36_MASK) << shift;
+	return (gpte & PT32_DIR_PSE36_MASK) << shift;
 }
 #endif
 
+#pragma warning(push)
+#pragma warning(disable:4310)
 static gfn_t gpte_to_gfn_lvl(pt_element_t gpte, int lvl) {
 	return (gpte & PT_LVL_ADDR_MASK(lvl)) >> PAGE_SHIFT;
 }
+#pragma warning(pop)
 
 static inline void FNAME(protect_clean_gpte)(struct kvm_mmu* mmu, unsigned* access,
 	unsigned gpte) {

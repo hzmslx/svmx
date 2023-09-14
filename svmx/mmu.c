@@ -10,6 +10,8 @@
 #include "smm.h"
 #include "tdp_mmu.h"
 
+
+
 int nx_huge_pages = -1;
 
 /*
@@ -76,6 +78,7 @@ struct kvm_mmu_role_regs {
 #define PTTYPE PTTYPE_EPT
 #include "paging_tmpl.h"
 #undef PTTYPE
+
 
 NTSTATUS kvm_mmu_module_init() {
 	NTSTATUS status = STATUS_SUCCESS;
@@ -338,6 +341,8 @@ static void init_kvm_tdp_mmu(struct kvm_vcpu* vcpu,
 		context->gva_to_gpa = nonpaging_gva_to_gpa;
 	else if (is_cr4_pae(context))
 		context->gva_to_gpa = paging64_gva_to_gpa;
+	else
+		context->gva_to_gpa = paging32_gva_to_gpa;
 
 }
 
