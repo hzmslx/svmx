@@ -85,6 +85,9 @@
     <ClCompile Include="tdp_mmu.c">
       <Filter>mmu</Filter>
     </ClCompile>
+    <ClCompile Include="mtrr.c">
+      <Filter>kvm</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="pch.h">
