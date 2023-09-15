@@ -5,6 +5,11 @@
 #include "vmcs.h"
 #include "x86.h"
 
+#define VMX_EPT_EXTENT_INDIVIDUAL_ADDR		0
+#define VMX_EPT_EXTENT_CONTEXT			1
+#define VMX_EPT_EXTENT_GLOBAL			2
+#define VMX_EPT_EXTENT_SHIFT			24
+
 static ULONG_PTR vmcs_readl(ULONG_PTR field) {
 	ULONG_PTR value;
 	__vmx_vmread(field, &value);
@@ -78,3 +83,7 @@ static void vmcs_load(struct vmcs* vmcs) {
 	*/
 	__vmx_vmptrld(&phys_addr);
 }
+
+void vmx_invept(ULONG_PTR ext,PVOID operand);
+
+void ept_sync_context(u64 eptp);

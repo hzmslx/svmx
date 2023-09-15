@@ -309,7 +309,10 @@ vmx_set_cr2 PROC
 vmx_set_cr2 ENDP
 
 
-
+vmx_invept PROC
+	invept rcx,oword ptr [rdx]
+	ret
+vmx_invept ENDP
 
 
 END

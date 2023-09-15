@@ -194,7 +194,7 @@ int get_ept_level();
 u64 vmx_get_mt_mask(struct kvm_vcpu* vcpu, gfn_t gfn, bool is_mmio);
 bool vmx_gb_page_enable();
 
-
+void vmx_flush_tlb_current(struct kvm_vcpu* vcpu);
 
 /*
 * Reads an msr value (of 'msr_index') into 'pdata'.
@@ -1372,6 +1372,9 @@ static struct kvm_x86_ops vmx_x86_ops = {
 	.get_gdt = vmx_get_gdt,
 
 
+	.flush_tlb_current = vmx_flush_tlb_current,
+
+
 	.vcpu_pre_run = vmx_vcpu_pre_run,
 	.vcpu_run = vmx_vcpu_run,
 	.handle_exit = vmx_handle_exit,
@@ -1577,6 +1580,16 @@ NTSTATUS hardware_setup() {
 
 	kvm_configure_mmu(enable_ept, 0, vmx_get_max_tdp_level(),
 		ept_caps_to_lpage_level(vmx_capability.ept));
+
+	/*
+	* Only enable PML when hardware supports PML feature, and both EPT
+	* and EPT A/D bit features are enabled -- PML depends on them to work.
+	*/
+	if (!enable_ept || !enable_ept_ad_bits || !cpu_has_vmx_pml())
+		enable_pml = 0;
+
+	if (!enable_pml)
+		vmx_x86_ops.cpu_dirty_log_size = 0;
 
 	if (!cpu_has_vmx_preemption_timer())
 		enable_preemption_timer = FALSE;
@@ -2263,11 +2276,11 @@ int cpu_has_vmx_invept_global() {
 }
 
 void ept_sync_global() {
-	if (cpu_has_vmx_invept_global()) {
-
-	}
-
-
+	struct {
+		u64 eptp, gpa;
+	} operand = { 0, 0 };
+	
+	vmx_invept(VMX_EPT_EXTENT_GLOBAL, &operand);
 }
 
 static void vmx_cleanup_l1d_flush(void) {
@@ -3813,4 +3826,29 @@ ULONG allocate_vpid(void) {
 		vpid = 0;
 
 	return vpid;
+}
+
+void vmx_flush_tlb_current(struct kvm_vcpu* vcpu) {
+	struct kvm_mmu* mmu = vcpu->arch.mmu;
+	u64 root_hpa = mmu->root.hpa;
+
+	/* No flush required if the current context is invalid. */
+	if (!VALID_PAGE(root_hpa))
+		return;
+
+	if (enable_ept)
+		ept_sync_context(construct_eptp(vcpu, root_hpa,
+			mmu->root_role.level));
+}
+
+void ept_sync_context(u64 eptp) {
+	struct {
+		u64 eptp, gpa;
+	}operand = { eptp,0 };
+
+	if (cpu_has_vmx_invept_context()) {
+		vmx_invept(VMX_EPT_EXTENT_CONTEXT, &operand);
+	}
+	else
+		ept_sync_global();
 }

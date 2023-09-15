@@ -460,9 +460,7 @@ enum vmcs_field {
 
 #define VM_ENTRY_ALWAYSON_WITHOUT_TRUE_MSR	0x000011ff
 
-#define VMX_EPT_EXTENT_INDIVIDUAL_ADDR		0
-#define VMX_EPT_EXTENT_CONTEXT			1
-#define VMX_EPT_EXTENT_GLOBAL			2
+
 
 #define VMX_EPT_EXECUTE_ONLY_BIT		(1ull)
 #define VMX_EPT_PAGE_WALK_4_BIT			(1ull << 6)

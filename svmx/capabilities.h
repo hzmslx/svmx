@@ -154,3 +154,11 @@ static inline int ept_caps_to_lpage_level(u32 ept_caps) {
 		return PG_LEVEL_2M;
 	return PG_LEVEL_4K;
 }
+
+static inline bool cpu_has_vmx_pml(void) {
+	return vmcs_config.cpu_based_2nd_exec_ctrl & SECONDARY_EXEC_ENABLE_PML;
+}
+
+static inline bool cpu_has_vmx_invept_context(void) {
+	return vmx_capability.ept & VMX_EPT_EXTENT_CONTEXT_BIT;
+}

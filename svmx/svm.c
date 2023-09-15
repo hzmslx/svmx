@@ -696,8 +696,8 @@ int svm_set_tss_addr(struct kvm* kvm, unsigned int addr) {
 }
 
 int get_npt_level() {
-#ifdef  _WIN64
-	return PT64_ROOT_LEVEL;
+#ifdef  AMD64
+	return PT64_ROOT_4LEVEL;
 #else
 	return PT32E_ROOT_LEVEL;
 #endif //  _WIN64

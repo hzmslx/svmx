@@ -319,6 +319,78 @@ static inline bool is_cr4_pae(struct kvm_mmu* mmu) {
 	return !mmu->cpu_role.base.has_4_byte_gpte;
 }
 
+static int is_cpuid_PSE36(void) {
+	return 1;
+}
+
+static void __reset_rsvds_bits_mask(struct rsvd_bits_validate* rsvd_check,
+	u64 pa_bits_rsvd, int level, bool nx, bool gbpages, bool pse, bool amd) {
+	u64 gbpages_bit_rsvd = 0;
+	u64 nonleaf_bit8_rsvd = 0;
+	u64 high_bits_rsvd;
+
+	rsvd_check->bad_mt_xwr = 0;
+
+	if (!gbpages)
+		gbpages_bit_rsvd = rsvd_bits(7, 7);
+
+	if (level == PT32E_ROOT_LEVEL)
+		high_bits_rsvd = pa_bits_rsvd & rsvd_bits(0, 62);
+	else
+		high_bits_rsvd = pa_bits_rsvd & rsvd_bits(0, 51);
+
+	/* Note, NX doesn't exist in PDPTEs, this is handled below. */
+	if (!nx)
+		high_bits_rsvd |= rsvd_bits(63, 63);
+
+	/*
+	* Non-leaf PML4Es and PDPEs reserve bit 8 (which would be the G bit for
+	* leaf entries) on AMD CPUs only.
+	*/
+	if (amd)
+		nonleaf_bit8_rsvd = rsvd_bits(8, 8);
+
+	switch (level)
+	{
+		case PT32_ROOT_LEVEL:
+			/* no rsvd bits for 2 level 4K page table entries */
+			rsvd_check->rsvd_bits_mask[0][1] = 0;
+			rsvd_check->rsvd_bits_mask[0][0] = 0;
+			rsvd_check->rsvd_bits_mask[1][0] =
+				rsvd_check->rsvd_bits_mask[0][0];
+
+			if (!pse) {
+				rsvd_check->rsvd_bits_mask[1][1] = 0;
+				break;
+			}
+
+			if (is_cpuid_PSE36())
+				/* 36bits PSE 4MB page */
+				rsvd_check->rsvd_bits_mask[1][1] = rsvd_bits(17, 21);
+			else
+				/* 32 bits PSE 4MB page */
+				rsvd_check->rsvd_bits_mask[1][1] = rsvd_bits(13, 21);
+			break;
+		default:
+			break;
+	}
+}
+
+static void reset_guest_rsvds_bits_mask(struct kvm_vcpu* vcpu,
+	struct kvm_mmu* context) {
+	UNREFERENCED_PARAMETER(vcpu);
+	UNREFERENCED_PARAMETER(context);
+}
+
+static void reset_guest_paging_metadata(struct kvm_vcpu* vcpu,
+	struct kvm_mmu* mmu) {
+	UNREFERENCED_PARAMETER(vcpu);
+	if (!is_cr0_pg(mmu))
+		return;
+
+	reset_guest_paging_metadata(vcpu, mmu);
+}
+
 // EPTµÄ³õÊ¼»¯
 static void init_kvm_tdp_mmu(struct kvm_vcpu* vcpu,
 	union kvm_cpu_role cpu_role) {
@@ -344,6 +416,7 @@ static void init_kvm_tdp_mmu(struct kvm_vcpu* vcpu,
 	else
 		context->gva_to_gpa = paging32_gva_to_gpa;
 
+	
 }
 
 void kvm_init_mmu(struct kvm_vcpu* vcpu) {
@@ -532,9 +605,34 @@ static void __shadow_walk_next(struct kvm_shadow_walk_iterator* iterator,
 
 
 static int mmu_alloc_direct_roots(struct kvm_vcpu* vcpu) {
-	UNREFERENCED_PARAMETER(vcpu);
+	struct kvm_mmu* mmu = vcpu->arch.mmu;
+	u8 shadow_root_level = (u8)mmu->root_role.level;
+	hpa_t root;
+	unsigned i;
+	int r = 0;
 
-	return 0;
+	if (tdp_mmu_enabled) {
+		root = kvm_tdp_mmu_get_vcpu_root_hpa(vcpu);
+	}
+	else if (shadow_root_level >= PT64_ROOT_4LEVEL) {
+		
+	}
+	else if (shadow_root_level == PT32E_ROOT_LEVEL) {
+
+
+		for (i = 0; i < 4; ++i) {
+
+		}
+
+	}
+	else {
+
+	}
+
+	/* root.pgd is ignored for direct MMUs. */
+	mmu->root.pgd = 0;
+
+	return r;
 }
 
 static int mmu_first_shadow_root_alloc(struct kvm* kvm) {

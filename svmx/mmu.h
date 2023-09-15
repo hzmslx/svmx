@@ -18,9 +18,11 @@
 #define PT64_NX_SHIFT 63
 #define PT64_NX_MASK (1ULL << PT64_NX_SHIFT)
 
-#define PT64_ROOT_LEVEL 4
+#define PT64_ROOT_5LEVEL 5
+#define PT64_ROOT_4LEVEL 4
 #define PT32_ROOT_LEVEL 2
 #define PT32E_ROOT_LEVEL 3
+
 
 #define KVM_MMU_CR4_ROLE_BITS (X86_CR4_PSE | X86_CR4_PAE | X86_CR4_LA57 | \
 			       X86_CR4_SMEP | X86_CR4_SMAP | X86_CR4_PKE)
@@ -81,4 +83,12 @@ int kvm_mmu_post_init_vm(struct kvm* kvm);
 void kvm_mmu_pre_destroy_vm(struct kvm* kvm);
 
 void kvm_mmu_set_ept_masks(bool has_ad_bits, bool has_exec_only);
-void kvm_mmu_set_mmio_spte_mask(u64 mmio_value, u64 mmio_mask, u64 access_mask);
+void kvm_mmu_set_mmio_spte_mask(u64 mmio_value, u64 mmio_mask, 
+	u64 access_mask);
+
+static u64 rsvd_bits(int s, int e) {
+	if (e < s)
+		return 0;
+
+	return ((2ULL << (e - s)) - 1) << s;
+}
