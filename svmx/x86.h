@@ -101,3 +101,5 @@ static inline void kvm_machine_check(void) {
 static inline bool kvm_notify_vmexit_enabled(struct kvm* kvm) {
 	return kvm->arch.notify_vmexit_flags & KVM_X86_NOTIFY_VMEXIT_ENABLED;
 }
+
+void kvm_vcpu_mtrr_init(struct kvm_vcpu* vcpu);

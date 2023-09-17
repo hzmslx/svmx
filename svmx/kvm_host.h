@@ -9,6 +9,7 @@
 #include "types.h"
 #include "kvm_page_track.h"
 #include "pgtable_types.h"
+#include "mtrr.h"
 
 
 #define KVM_GUEST_CR0_MASK_UNRESTRICTED_GUEST				\
@@ -143,6 +144,15 @@ typedef enum exit_fastpath_completion fastpath_t;
 
 
 
+
+
+
+
+
+
+#define KVM_NR_FIXED_MTRR_REGION 88
+
+#define KVM_NR_VAR_MTRR 8
 
 #define KVM_NR_DB_REGS	4
 
@@ -871,6 +881,20 @@ struct kvm_memory_slot {
 	u16 as_id;
 };
 
+struct kvm_mtrr_range {
+	u64 base;
+	u64 mask;
+	LIST_ENTRY node;
+};
+
+struct kvm_mtrr {
+	struct kvm_mtrr_range var_ranges[KVM_NR_VAR_MTRR];
+	mtrr_type fixed_ranges[KVM_NR_FIXED_MTRR_REGION];
+	u64 deftype;
+
+	LIST_ENTRY head;
+};
+
 struct kvm_vcpu_arch {
 	/*
 	 * rip and regs accesses must go through
@@ -1039,7 +1063,7 @@ struct kvm_vcpu_arch {
 	bool smi_pending;    /* SMI queued after currently running handler */
 	u8 handling_intr_from_guest;
 
-
+	struct kvm_mtrr mtrr_state;
 	u64 pat;
 
 	unsigned switch_db_regs;

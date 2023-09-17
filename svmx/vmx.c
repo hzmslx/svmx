@@ -3688,6 +3688,7 @@ void ept_save_pdptrs(struct kvm_vcpu* vcpu)
 }
 
 u64 construct_eptp(struct kvm_vcpu* vcpu, hpa_t root_hpa, int root_level) {
+	// 当前只支持 UC(值 0) 和WB(值 6)类型. 29.3.7.1
 	u64 eptp = VMX_EPTP_MT_WB;
 
 	eptp |= (root_level == 5) ? VMX_EPTP_PWL_5 : VMX_EPTP_PWL_4;

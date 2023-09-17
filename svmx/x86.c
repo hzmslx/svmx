@@ -401,7 +401,7 @@ int kvm_arch_vcpu_create(struct kvm_vcpu* vcpu) {
 	*/ 
 	r = kvm_x86_ops.vcpu_create(vcpu);
 
-	
+	kvm_vcpu_mtrr_init(vcpu);
 	vcpu_load(vcpu);
 	kvm_vcpu_reset(vcpu, FALSE);
 	kvm_init_mmu(vcpu);
