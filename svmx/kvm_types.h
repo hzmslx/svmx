@@ -49,3 +49,22 @@ struct kvm_vcpu_stat_generic {
 #define KVM_STATS_NAME_SIZE	48
 
 #define INVALID_GPA	(~(gpa_t)0)
+
+#define KVM_ARCH_NR_OBJS_PER_MEMORY_CACHE 40
+
+/*
+* Memory caches are used to preallocate memory ahead of various MMU flows,
+* e.g. page fault handlers. Gracefully handling allocation failures deep in
+* MMU flows is problematic, as is triggering reclaim, I/O, etc... while
+* holding MMU locks.
+* 
+* The @capacity field and @objects array are lazily initialized when the cache
+* is topped up (__kvm_mmu_topup_memory_cache()).
+*/
+struct kvm_mmu_memory_cache {
+	MEMORY_CACHING_TYPE cache_type;
+	PVOID kmem_cache;
+	int capacity;
+	int nobjs;
+	void** objects;
+};

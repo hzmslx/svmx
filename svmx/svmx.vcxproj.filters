@@ -43,7 +43,7 @@
     <ClCompile Include="vmx.c">
       <Filter>vmx</Filter>
     </ClCompile>
-    <ClCompile Include="kvm.c">
+    <ClCompile Include="kvm_main.c">
       <Filter>kvm</Filter>
     </ClCompile>
     <ClCompile Include="x86.c">

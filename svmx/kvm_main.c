@@ -580,3 +580,16 @@ void kvm_destroy_vcpus(struct kvm* kvm) {
 	}
 	
 }
+
+int kvm_mmu_topup_memory_cache(struct kvm_mmu_memory_cache* mc, int min) {
+	return __kvm_mmu_topup_memory_cache(mc, 
+		KVM_ARCH_NR_OBJS_PER_MEMORY_CACHE, min);
+}
+
+int __kvm_mmu_topup_memory_cache(struct kvm_mmu_memory_cache* mc, int capacity, int min){
+	UNREFERENCED_PARAMETER(mc);
+	UNREFERENCED_PARAMETER(capacity);
+	UNREFERENCED_PARAMETER(min);
+
+	return 0;
+}

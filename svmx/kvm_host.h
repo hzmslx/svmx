@@ -1959,3 +1959,6 @@ void kvm_arch_vcpu_destroy(struct kvm_vcpu* vcpu);
 static inline gpa_t gfn_to_gpa(gfn_t gfn) {
 	return (gpa_t)gfn << PAGE_SHIFT;
 }
+
+int kvm_mmu_topup_memory_cache(struct kvm_mmu_memory_cache* mc, int min);
+int __kvm_mmu_topup_memory_cache(struct kvm_mmu_memory_cache* mc, int capacity, int min);

@@ -178,7 +178,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="cpuid.c" />
-    <ClCompile Include="kvm.c" />
+    <ClCompile Include="kvm_main.c" />
     <ClCompile Include="lapic.c" />
     <ClCompile Include="Logging.c" />
     <ClCompile Include="mmu.c" />

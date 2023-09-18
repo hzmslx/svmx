@@ -256,12 +256,44 @@ void kvm_configure_mmu(bool enable_tdp, int tdp_forced_root_level,
 		max_huge_page_level = PG_LEVEL_2M;
 }
 
-int kvm_mmu_load(struct kvm_vcpu* vcpu) {
+static int mmu_topup_memory_caches(struct kvm_vcpu* vcpu,
+	bool maybe_indirect) {
+	int r = 0;
+	UNREFERENCED_PARAMETER(vcpu);
+
+	/* 1 rmap, 1 parent PTE per level, and the prefetched rmaps. */
 	
 
-	kvm_mmu_load_pgd(vcpu);
+	if (maybe_indirect) {
 
-	return 0;
+	}
+
+	return r;
+}
+
+int kvm_mmu_load(struct kvm_vcpu* vcpu) {
+	int r = 0;
+
+	do
+	{
+		r = mmu_topup_memory_caches(vcpu, !vcpu->arch.mmu->root_role.direct);
+		if (r)
+			break;
+		
+		kvm_mmu_load_pgd(vcpu);
+
+		/*
+		* Flush any TLB entries for the new root, the provenance of  the root
+		* is unknown. Even if KVM ensures there are no stale TLB entries
+		* for a freed root, in theory hypervisor could have left 
+		* stale entries. Flusing on alloc also allows KVM to skip the TLB
+		* flush when freeing a root (see kvm_tdp_mmu_put_root())
+		*/
+		kvm_x86_ops.flush_tlb_current(vcpu);
+	} while (FALSE);
+	
+
+	return r;
 }
 
 static inline int kvm_mmu_get_tdp_level(struct kvm_vcpu* vcpu)
@@ -472,12 +504,7 @@ int kvm_tdp_page_fault(struct kvm_vcpu* vcpu, struct kvm_page_fault* fault) {
 	return direct_page_fault(vcpu, fault);
 }
 
-static int mmu_topup_memory_caches(struct kvm_vcpu* vcpu, 
-	bool maybe_indirect) {
-	UNREFERENCED_PARAMETER(vcpu);
-	UNREFERENCED_PARAMETER(maybe_indirect);
-	return 0;
-}
+
 
 /*
  * Returns one of RET_PF_INVALID, RET_PF_FIXED or RET_PF_SPURIOUS.
