@@ -259,16 +259,97 @@ void kvm_configure_mmu(bool enable_tdp, int tdp_forced_root_level,
 static int mmu_topup_memory_caches(struct kvm_vcpu* vcpu,
 	bool maybe_indirect) {
 	int r = 0;
-	UNREFERENCED_PARAMETER(vcpu);
 
 	/* 1 rmap, 1 parent PTE per level, and the prefetched rmaps. */
-	
+	r = kvm_mmu_topup_memory_cache(&vcpu->arch.mmu_pte_list_desc_cache,
+		1 + PT64_ROOT_MAX_LEVEL + PTE_PREFETCH_NUM);
+	if (r)
+		return r;
+	r = kvm_mmu_topup_memory_cache(&vcpu->arch.mmu_shadow_page_cache,
+		PT64_ROOT_MAX_LEVEL);
+	if (r)
+		return r;
+
 
 	if (maybe_indirect) {
-
+		r = kvm_mmu_topup_memory_cache(&vcpu->arch.mmu_shadowed_info_cache,
+			PT64_ROOT_MAX_LEVEL);
+		if (r)
+			return r;
 	}
 
-	return r;
+	return kvm_mmu_topup_memory_cache(&vcpu->arch.mmu_page_header_cache,
+		PT64_ROOT_MAX_LEVEL);
+}
+
+static int mmu_alloc_special_roots(struct kvm_vcpu* vcpu) {
+	struct kvm_mmu* mmu = vcpu->arch.mmu;
+	bool need_pml5 = mmu->root_role.level > PT64_ROOT_4LEVEL;
+	u64* pml5_root = NULL;
+	u64* pml4_root = NULL;
+	u64* pae_root = NULL;
+
+	/*
+	* When shadowing 32-bit or PAE NPT with 64-bit NPT, the PML4 and PDP
+	* tables are allocated and initialized at root creation as there is no
+	* equivalent level in the guest's NPT to shadow. Allocate the tables
+	* on demand, as running a 32-bit L1 VMM on 64-bit KVM is very rare.
+	*/
+	if (mmu->root_role.direct ||
+		mmu->cpu_role.base.level >= PT64_ROOT_4LEVEL ||
+		mmu->root_role.level < PT64_ROOT_4LEVEL)
+		return 0;
+
+	/*
+	* NPT, the only paging mode that uses this horror, uses a fixed number
+	* of levels for the shadow page tables, e.g. all MMUs are 4-level or
+	* all MMUs are 5-level. Thus, this can safely require that pml5_root
+	* is allocated if the other roots are valid and pml5 is needed, as any
+	* prior MMU would also have required pml5.
+	*/
+	if (mmu->pae_root && mmu->pml4_root && (!need_pml5 || mmu->pml5_root))
+		return 0;
+
+	/*
+	* The special roots should always be allocated in correct. Yell and
+	* bail if KVM ends up in a state where only one of the roots is valid.
+	*/
+	if (!tdp_enabled || mmu->pae_root || mmu->pml4_root ||
+		(need_pml5 && mmu->pml5_root))
+		return STATUS_IO_DEVICE_ERROR;
+
+	/*
+	* Unlike 32-bit NPT, the PDP table doesn't need to be in low mem, and
+	* doesn't need to be decrypted.
+	*/
+	pae_root = ExAllocatePoolWithTag(NonPagedPool, PAGE_SIZE, DRIVER_TAG);
+	if (!pae_root)
+		return STATUS_NO_MEMORY;
+	RtlZeroMemory(pae_root, PAGE_SIZE);
+	
+	pml4_root = ExAllocatePoolWithTag(NonPagedPool, PAGE_SIZE, DRIVER_TAG);
+	if (!pml4_root)
+		goto err_pml4;
+	RtlZeroMemory(pml4_root, PAGE_SIZE);
+	
+	if (need_pml5) {
+		pml5_root = ExAllocatePoolWithTag(NonPagedPool, PAGE_SIZE, DRIVER_TAG);
+		if (!pml5_root)
+			goto err_pml5;
+		RtlZeroMemory(pml5_root, PAGE_SIZE);
+	}
+
+	mmu->pae_root = pae_root;
+	mmu->pml4_root = pml4_root;
+	mmu->pml5_root = pml5_root;
+
+	return STATUS_SUCCESS;
+
+err_pml5:
+	ExFreePool(pml4_root);
+err_pml4:
+	ExFreePool(pae_root);
+	return STATUS_NO_MEMORY;
 }
 
 int kvm_mmu_load(struct kvm_vcpu* vcpu) {
@@ -276,9 +357,11 @@ int kvm_mmu_load(struct kvm_vcpu* vcpu) {
 
 	do
 	{
+		// ·ÖÅämmu_pte_list_desc_cacheºÍmmu_page_header_cacheµÈ
 		r = mmu_topup_memory_caches(vcpu, !vcpu->arch.mmu->root_role.direct);
 		if (r)
 			break;
+		
 		
 		kvm_mmu_load_pgd(vcpu);
 

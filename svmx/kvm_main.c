@@ -586,10 +586,39 @@ int kvm_mmu_topup_memory_cache(struct kvm_mmu_memory_cache* mc, int min) {
 		KVM_ARCH_NR_OBJS_PER_MEMORY_CACHE, min);
 }
 
-int __kvm_mmu_topup_memory_cache(struct kvm_mmu_memory_cache* mc, int capacity, int min){
+static void* mmu_memory_cache_alloc_obj(struct kvm_mmu_memory_cache* mc) {
 	UNREFERENCED_PARAMETER(mc);
-	UNREFERENCED_PARAMETER(capacity);
-	UNREFERENCED_PARAMETER(min);
+	return ExAllocatePoolWithTag(NonPagedPool, PAGE_SIZE, DRIVER_TAG);
+}
 
-	return 0;
+int __kvm_mmu_topup_memory_cache(struct kvm_mmu_memory_cache* mc, int capacity, int min){
+	void* obj;
+
+	if (mc->nobjs >= min)
+		return STATUS_SUCCESS;
+
+	if (!mc->objects) {
+		if (!capacity)
+			return STATUS_IO_DEVICE_ERROR;
+
+		mc->objects = ExAllocatePoolWithTag(NonPagedPool, 
+			sizeof(void*) * capacity,DRIVER_TAG);
+		if (!mc->objects)
+			return STATUS_NO_MEMORY;
+
+		mc->capacity = capacity;
+	}
+
+	/* It is illegal to request a different capacity across topups. */
+	if (mc->capacity != capacity)
+		return STATUS_IO_DEVICE_ERROR;
+
+	while (mc->nobjs < mc->capacity) {
+		obj = mmu_memory_cache_alloc_obj(mc);
+		if (!obj)
+			return mc->nobjs >= min ? STATUS_SUCCESS : STATUS_NO_MEMORY;
+		mc->objects[mc->nobjs++] = obj;
+	}
+
+	return STATUS_SUCCESS;
 }
