@@ -68,3 +68,8 @@ struct kvm_mmu_memory_cache {
 	int nobjs;
 	void** objects;
 };
+
+struct kvm_vm_stat_generic {
+	u64 remote_tlb_flush;
+	u64 remote_tlb_flush_requests;
+};

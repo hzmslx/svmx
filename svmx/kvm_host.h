@@ -150,8 +150,14 @@ typedef enum exit_fastpath_completion fastpath_t;
 
 
 
+#define KVM_MEMSLOT_PAGES_TO_MMU_PAGES_RATIO 50
+#define KVM_MIN_ALLOC_MMU_PAGES 64UL
+#define KVM_MMU_HASH_SHIFT 12
+#define KVM_NUM_MMU_PAGES (1 << KVM_MMU_HASH_SHIFT)
+#define KVM_MIN_FREE_MMU_PAGES 5
+#define KVM_REFILL_PAGES 25
+#define KVM_MAX_CPUID_ENTRIES 256
 #define KVM_NR_FIXED_MTRR_REGION 88
-
 #define KVM_NR_VAR_MTRR 8
 
 #define KVM_NR_DB_REGS	4
@@ -778,6 +784,28 @@ struct kvm_mmu {
 	struct rsvd_bits_validate guest_rsvd_check;
 
 	u64 pdptrs[4]; /* pae */
+};
+
+struct kvm_vm_stat {
+	struct kvm_vm_stat_generic generic;
+	u64 mmu_shadow_zapped;
+	u64 mmu_pte_write;
+	u64 mmu_pde_zapped;
+	u64 mmu_flooded;
+	u64 mmu_recycled;
+	u64 mmu_cache_miss;
+	u64 mmu_unsync;
+	union {
+		struct {
+			LONG64 volatile pages_4k;
+			LONG64 volatile pages_2m;
+			LONG64 volatile pages_1g;
+		};
+		LONG64 volatile pages[KVM_NR_PAGE_SIZES];
+	};
+	u64 nx_lpage_splits;
+	u64 max_mmu_page_hash_collisions;
+	u64 max_mmu_rmap_size;
 };
 
 struct kvm_vcpu_stat {
@@ -1464,12 +1492,13 @@ int kvm_set_memory_region(struct kvm* kvm,
 int __kvm_set_memory_region(struct kvm* kvm,
 	const struct kvm_userspace_memory_region* mem);
 struct kvm_arch {
-	unsigned long n_used_mmu_pages;
-	unsigned long n_requested_mmu_pages;
-	unsigned long n_max_mmu_pages;
+	ULONG n_used_mmu_pages;
+	ULONG n_requested_mmu_pages;
+	ULONG n_max_mmu_pages;
 	unsigned int indirect_shadow_pages;
 	u8 mmu_valid_gen;
-
+	LIST_ENTRY active_mmu_pages;
+	LIST_ENTRY zapped_obsolete_pages;
 	/*
 	 * A list of kvm_mmu_page structs that, if zapped, could possibly be
 	 * replaced by an NX huge page.  A shadow page is on this list if its
@@ -1481,7 +1510,7 @@ struct kvm_arch {
 	 * guest attempts to execute from the region then KVM obviously can't
 	 * create an NX huge page (without hanging the guest).
 	 */
-
+	LIST_ENTRY possible_nx_huge_pages;
 	/*
 	 * Protects marking pages unsync during page faults, as TDP MMU page
 	 * faults only take mmu_lock for read.  For simplicity, the unsync
@@ -1716,9 +1745,9 @@ struct kvm {
 
 	KMUTEX lock;
 
+	struct kvm_vm_stat stat;
 	// host arch 的一些参数
 	struct kvm_arch arch;
-	struct kvm_vcpu_stat stat;
 	char stats_id[KVM_STATS_NAME_SIZE];
 
 

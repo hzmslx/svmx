@@ -352,6 +352,92 @@ err_pml4:
 	return STATUS_NO_MEMORY;
 }
 
+static ULONG kvm_mmu_available_pages(struct kvm* kvm) {
+	if (kvm->arch.n_max_mmu_pages > kvm->arch.n_used_mmu_pages)
+		return kvm->arch.n_max_mmu_pages -
+		kvm->arch.n_used_mmu_pages;
+
+	return 0;
+}
+
+static ULONG kvm_mmu_zap_oldest_mmu_pages(struct kvm* kvm,
+	ULONG nr_to_zap) {
+	UNREFERENCED_PARAMETER(nr_to_zap);
+	ULONG total_zapped = 0;
+	//struct kvm_mmu_page* sp, * tmp;
+
+	//LIST_ENTRY invalid_list;
+	//bool unstable;
+	//int nr_zapped;
+
+	if (IsListEmpty(&kvm->arch.active_mmu_pages))
+		return 0;
+
+	/*PLIST_ENTRY pListHead = &kvm->arch.active_mmu_pages;
+	PLIST_ENTRY pEntry = pListHead->Flink;
+	while (pEntry != pListHead) {
+
+	}*/
+
+	kvm->stat.mmu_recycled += total_zapped;
+	return total_zapped;
+}
+
+static int make_mmu_pages_available(struct kvm_vcpu* vcpu) {
+	ULONG avail = kvm_mmu_available_pages(vcpu->kvm);
+	if (avail >= KVM_MIN_FREE_MMU_PAGES)
+		return 0;
+
+	
+	
+	return 0;
+}
+
+static int mmu_alloc_direct_roots(struct kvm_vcpu* vcpu) {
+	struct kvm_mmu* mmu = vcpu->arch.mmu;
+	u8 shadow_root_level = (u8)mmu->root_role.level;
+	hpa_t root;
+	unsigned i;
+	int r = 0;
+
+	
+
+	if (tdp_mmu_enabled) {
+		root = kvm_tdp_mmu_get_vcpu_root_hpa(vcpu);
+	}
+	else if (shadow_root_level >= PT64_ROOT_4LEVEL) {
+
+	}
+	else if (shadow_root_level == PT32E_ROOT_LEVEL) {
+
+
+		for (i = 0; i < 4; ++i) {
+
+		}
+
+	}
+	else {
+
+	}
+
+	/* root.pgd is ignored for direct MMUs. */
+	mmu->root.pgd = 0;
+
+	return r;
+}
+
+static int mmu_alloc_shadow_roots(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+	//struct kvm_mmu* mmu = vcpu->arch.mmu;
+	//u64 pdptrs[4], pm_mask;
+	//gfn_t root_gfn, root_pgd;
+	//int quadrant, i;
+	int r = 0;
+	//hpa_t root;
+
+	return r;
+}
+
 int kvm_mmu_load(struct kvm_vcpu* vcpu) {
 	int r = 0;
 
@@ -361,7 +447,13 @@ int kvm_mmu_load(struct kvm_vcpu* vcpu) {
 		r = mmu_topup_memory_caches(vcpu, !vcpu->arch.mmu->root_role.direct);
 		if (r)
 			break;
-		
+		r = mmu_alloc_special_roots(vcpu);
+		if (r)
+			break;
+		if (vcpu->arch.mmu->root_role.direct)
+			r = mmu_alloc_direct_roots(vcpu);
+		else
+			r = mmu_alloc_shadow_roots(vcpu);
 		
 		kvm_mmu_load_pgd(vcpu);
 
@@ -714,36 +806,7 @@ static void __shadow_walk_next(struct kvm_shadow_walk_iterator* iterator,
 }
 
 
-static int mmu_alloc_direct_roots(struct kvm_vcpu* vcpu) {
-	struct kvm_mmu* mmu = vcpu->arch.mmu;
-	u8 shadow_root_level = (u8)mmu->root_role.level;
-	hpa_t root;
-	unsigned i;
-	int r = 0;
 
-	if (tdp_mmu_enabled) {
-		root = kvm_tdp_mmu_get_vcpu_root_hpa(vcpu);
-	}
-	else if (shadow_root_level >= PT64_ROOT_4LEVEL) {
-		
-	}
-	else if (shadow_root_level == PT32E_ROOT_LEVEL) {
-
-
-		for (i = 0; i < 4; ++i) {
-
-		}
-
-	}
-	else {
-
-	}
-
-	/* root.pgd is ignored for direct MMUs. */
-	mmu->root.pgd = 0;
-
-	return r;
-}
 
 static int mmu_first_shadow_root_alloc(struct kvm* kvm) {
 	UNREFERENCED_PARAMETER(kvm);
