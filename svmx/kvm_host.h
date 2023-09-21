@@ -606,7 +606,7 @@ struct kvm_mmu_page {
 	 * Note, "link" through "spt" fit in a single 64 byte cache line on
 	 * 64-bit kernels, keep it that way unless there's a reason not to.
 	 */
-
+	LIST_ENTRY link;
 
 	bool tdp_mmu_page;
 	bool unsync;
@@ -623,7 +623,7 @@ struct kvm_mmu_page {
 	 * The following two entries are used to key the shadow page in the
 	 * hash table.
 	 */
-
+	union kvm_mmu_page_role role;
 	gfn_t gfn;
 
 	u64* spt;
@@ -643,7 +643,10 @@ struct kvm_mmu_page {
 	u64* shadowed_translation;
 
 	/* Currently serving as active root */
-
+	union {
+		LONG root_count;
+		LONG volatile tdp_mmu_root_count;
+	};
 	unsigned int unsync_children;
 
 

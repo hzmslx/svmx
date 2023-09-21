@@ -360,24 +360,123 @@ static ULONG kvm_mmu_available_pages(struct kvm* kvm) {
 	return 0;
 }
 
+
+#define KVM_PAGE_ARRAY_NR 16
+
+struct kvm_mmu_pages {
+	struct mmu_page_and_offset {
+		struct kvm_mmu_page* sp;
+		UINT idx;
+	}page[KVM_PAGE_ARRAY_NR];
+	UINT nr;
+};
+
+struct mmu_page_path {
+	struct kvm_mmu_page* parent[PT64_ROOT_MAX_LEVEL];
+	UINT idx[PT64_ROOT_MAX_LEVEL];
+};
+
+static int mmu_pages_add(struct kvm_mmu_pages* pvec, struct kvm_mmu_page* sp,
+	int idx) {
+	UINT i;
+
+	if (sp->unsync)
+		for (i = 0; i < pvec->nr; i++)
+			if (pvec->page[i].sp == sp)
+				return 0;
+
+	pvec->page[pvec->nr].sp = sp;
+	pvec->page[pvec->nr].idx = idx;
+	pvec->nr++;
+	return (pvec->nr == KVM_PAGE_ARRAY_NR);
+}
+
+static int __mmu_unsync_walk(struct kvm_mmu_page* sp,
+	struct kvm_mmu_pages* pvec) {
+	UNREFERENCED_PARAMETER(pvec);
+	UNREFERENCED_PARAMETER(sp);
+	//int i, ret;
+	int nr_unsync_leaf = 0;
+
+	
+
+	return nr_unsync_leaf;
+}
+
+#define INVALID_INDEX (-1)
+
+static int mmu_unsync_walk(struct kvm_mmu_page* sp,
+	struct kvm_mmu_pages* pvec) {
+	pvec->nr = 0;
+	if (!sp->unsync_children)
+		return 0;
+
+	mmu_pages_add(pvec, sp, INVALID_INDEX);
+	return __mmu_unsync_walk(sp, pvec);
+}
+
+static int mmu_zap_unsync_children(struct kvm* kvm,
+	struct kvm_mmu_page* parent,
+	PLIST_ENTRY invalid_list) {
+	UNREFERENCED_PARAMETER(invalid_list);
+	UNREFERENCED_PARAMETER(kvm);
+	// int i;
+	int zapped = 0;
+	//struct mmu_page_path parents;
+	//struct kvm_mmu_pages pages;
+
+	if (parent->role.level == PG_LEVEL_4K)
+		return 0;
+
+	
+	return zapped;
+}
+
+static bool __kvm_mmu_prepare_zap_page(struct kvm* kvm,
+	struct kvm_mmu_page* sp,
+	PLIST_ENTRY invalid_list,
+	int* nr_zapped) {
+	UNREFERENCED_PARAMETER(nr_zapped);
+	UNREFERENCED_PARAMETER(sp);
+	UNREFERENCED_PARAMETER(invalid_list);
+	//bool list_unstable;
+	bool zapped_root = FALSE;
+
+	++kvm->stat.mmu_shadow_zapped;
+	
+	return zapped_root;
+}
+
 static ULONG kvm_mmu_zap_oldest_mmu_pages(struct kvm* kvm,
 	ULONG nr_to_zap) {
 	UNREFERENCED_PARAMETER(nr_to_zap);
 	ULONG total_zapped = 0;
-	//struct kvm_mmu_page* sp, * tmp;
+	struct kvm_mmu_page* sp;
 
-	//LIST_ENTRY invalid_list;
-	//bool unstable;
-	//int nr_zapped;
+	LIST_ENTRY invalid_list;
+	bool unstable;
+	int nr_zapped;
 
 	if (IsListEmpty(&kvm->arch.active_mmu_pages))
 		return 0;
 
-	/*PLIST_ENTRY pListHead = &kvm->arch.active_mmu_pages;
-	PLIST_ENTRY pEntry = pListHead->Flink;
+	PLIST_ENTRY pListHead = &kvm->arch.active_mmu_pages;
+	PLIST_ENTRY pEntry = pListHead->Blink;
 	while (pEntry != pListHead) {
+		sp = CONTAINING_RECORD(pEntry, struct kvm_mmu_page, link);
+		/*
+		* Don't zap active root pages, the page itself can't be freed
+		* and zapping it will just force vCPUs to realloc and reload.
+		*/
+		if (sp->root_count)
+			continue;
 
-	}*/
+		unstable = __kvm_mmu_prepare_zap_page(kvm, sp, &invalid_list,
+			&nr_zapped);
+
+	}
+
+	
 
 	kvm->stat.mmu_recycled += total_zapped;
 	return total_zapped;
