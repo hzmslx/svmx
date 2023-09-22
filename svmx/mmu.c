@@ -395,9 +395,16 @@ static int __mmu_unsync_walk(struct kvm_mmu_page* sp,
 	struct kvm_mmu_pages* pvec) {
 	UNREFERENCED_PARAMETER(pvec);
 	UNREFERENCED_PARAMETER(sp);
-	//int i, ret;
+	int i = 0;
+	// int ret;
 	int nr_unsync_leaf = 0;
-
+	ULONG idx = 0xFFFFFFFF;
+	do
+	{
+		idx = RtlFindSetBits(&sp->unsync_child_bitmap, 1, i);
+		i = idx + 1;
+	} while (idx != 0xFFFFFFFF);
+	
 	
 
 	return nr_unsync_leaf;

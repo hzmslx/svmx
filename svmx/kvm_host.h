@@ -649,6 +649,14 @@ struct kvm_mmu_page {
 	};
 	unsigned int unsync_children;
 
+	union {
+		RTL_BITMAP unsync_child_bitmap;
+		struct {
+
+			void* tdp_mmu_async_data;
+		};
+	};
+
 
 	/*
 	 * Tracks shadow pages that, if zapped, would allow KVM to create an NX
