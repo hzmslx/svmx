@@ -9,6 +9,12 @@
 
 extern u64 shadow_accessed_mask;
 
+
+#define SPTE_LEVEL_BITS			9
+#define SPTE_LEVEL_SHIFT(level)		__PT_LEVEL_SHIFT(level, SPTE_LEVEL_BITS)
+#define SPTE_INDEX(address, level)	__PT_INDEX(address, level, SPTE_LEVEL_BITS)
+#define SPTE_ENT_PER_PAGE		__PT_ENT_PER_PAGE(SPTE_LEVEL_BITS)
+
 /*
  * A MMU present SPTE is backed by actual memory and may or may not be present
  * in hardware.  E.g. MMIO SPTEs are not considered present.  Use bit 11, as it
@@ -77,6 +83,15 @@ static inline bool is_shadow_present_pte(u64 pte)
 #define EPT_SPTE_HOST_WRITABLE		BIT_ULL(57)
 #define EPT_SPTE_MMU_WRITABLE		BIT_ULL(58)
 
+ /*
+  * {DEFAULT,EPT}_SPTE_{HOST,MMU}_WRITABLE are used to keep track of why a given
+  * SPTE is write-protected. See is_writable_pte() for details.
+  */
+
+  /* Bits 9 and 10 are ignored by all non-EPT PTEs. */
+#define DEFAULT_SPTE_HOST_WRITABLE	BIT_ULL(9)
+#define DEFAULT_SPTE_MMU_WRITABLE	BIT_ULL(10)
+
 static inline bool __is_bad_mt_xwr(struct rsvd_bits_validate* rsvd_check,
 	u64 pte) {
 	return rsvd_check->bad_mt_xwr & BIT_ULL(pte & 0x3f);
@@ -93,3 +108,32 @@ static inline bool __is_rsvd_bits_set(struct rsvd_bits_validate* rsvd_check,
 	u64 pte, int level) {
 	return pte & get_rsvd_bits(rsvd_check, pte, level);
 }
+
+static inline struct kvm_mmu_page* to_shadow_page(hpa_t shadow_page) {
+	PHYSICAL_ADDRESS physical_addr = {0};
+	physical_addr.QuadPart = shadow_page;
+	return MmGetVirtualForPhysical(physical_addr);
+}
+
+static struct kvm_mmu_page* spte_to_child_sp(u64 spte) {
+	return to_shadow_page(spte & SPTE_BASE_ADDR_MASK);
+}
+
+static inline bool is_mmio_spte(u64 pte) {
+	return !!(pte & SPTE_MMU_PRESENT_MASK);
+}
+
+void kvm_mmu_reset_all_pte_masks(void);
+
+
+/*
+ * The SPTE MMIO mask must NOT overlap the MMIO generation bits or the
+ * MMU-present bit.  The generation obviously co-exists with the magic MMIO
+ * mask/value, and MMIO SPTEs are considered !MMU-present.
+ *
+ * The SPTE MMIO mask is allowed to use hardware "present" bits (i.e. all EPT
+ * RWX bits), all physical address bits (legal PA bits are used for "fast" MMIO
+ * and so they're off-limits for generation; additional checks ensure the mask
+ * doesn't overlap legal PA bits), and bit 63 (carved out for future usage).
+ */
+#define SPTE_MMIO_ALLOWED_MASK (BIT_ULL(63) | GENMASK_ULL(51, 12) | GENMASK_ULL(2, 0))

@@ -24,6 +24,9 @@ u64 shadow_nonpresent_or_rsvd_lower_gfn_mask;
 
 u8 shadow_phys_bits;
 
+bool enable_mmio_caching = TRUE;
+static bool allow_mmio_caching;
+
 void kvm_mmu_set_ept_masks(bool has_ad_bits, bool has_exec_only) {
 	shadow_user_mask = VMX_EPT_READABLE_MASK;
 	shadow_accessed_mask = has_ad_bits ? VMX_EPT_ACCESS_BIT : 0ull;
@@ -52,7 +55,78 @@ void kvm_mmu_set_ept_masks(bool has_ad_bits, bool has_exec_only) {
 }
 
 void kvm_mmu_set_mmio_spte_mask(u64 mmio_value, u64 mmio_mask, u64 access_mask) {
-	UNREFERENCED_PARAMETER(mmio_value);
-	UNREFERENCED_PARAMETER(mmio_mask);
-	UNREFERENCED_PARAMETER(access_mask);
+	/*
+	* Reset to the original module param value to honor userspace's desire
+	* to disallow MMIO caching. Update the param itself so that
+	* userspace can see whether or not KVM is actually using MMIO caching.
+	*/
+	enable_mmio_caching = allow_mmio_caching;
+	if (!enable_mmio_caching)
+		mmio_value = 0;
+
+	/*
+	* The mask must contain only bits that are carved out specifically for
+	* the MMIO SPTE mask, e.g. to ensure there's no overlap with the MMIO
+	* generation.
+	*/
+	if (mmio_mask & ~SPTE_MMIO_ALLOWED_MASK)
+		mmio_value = 0;
+
+	shadow_mmio_value = mmio_value;
+	shadow_mmio_mask = mmio_mask;
+	shadow_mmio_access_mask = access_mask;
+}
+
+void kvm_mmu_reset_all_pte_masks(void) {
+	// u8 low_phys_bits;
+	u64 mask;
+
+	shadow_phys_bits = kvm_get_shadow_phys_bits();
+
+	/*
+	* If the CPU has 46 or less physical address bits, then set an
+	* appropriate mask to gurad against L1TF attacks. Otherwise, it it
+	* assumed that the CPU is not vulnerable to L1TF.
+	* 
+	* Some Intel CPUs address the L1 cache using more PA bits than are
+	* reported by cpuid. Use the PA width of the L1 cache when possible
+	* to achieve more effective mitigation, e.g. if system RAM overlaps
+	* the most significant bits of legal physical address space.
+	* 
+	*/
+	shadow_nonpresent_or_rsvd_mask = 0;
+	
+	shadow_user_mask = PT_USER_MASK;
+	shadow_accessed_mask = PT_ACCESSED_MASK;
+	shadow_dirty_mask = PT_DIRTY_MASK;
+	shadow_nx_mask = PT64_NX_MASK;
+	shadow_x_mask = 0;
+	shadow_present_mask = PT_PRESENT_MASK;
+
+	/*
+	* For shadow paging and NTP, KVM uses PAT entry '0' to encode WB
+	* memtype in the SPTEs, i.e. relies on host MTRRs to provide the
+	* correct memtype (WB is the "weakest" memtype).
+	*/
+	shadow_memtype_mask = 0;
+	shadow_acc_track_mask = 0;
+	shadow_me_mask = 0;
+	shadow_me_value = 0;
+
+	shadow_host_writable_mask = DEFAULT_SPTE_HOST_WRITABLE;
+	shadow_mmu_writable_mask = DEFAULT_SPTE_MMU_WRITABLE;
+
+	/*
+	* Set a reserved PA bit in MMIO SPTEs to generate page faults with
+	* PFEC.RSVD=1 on MMIO accesses. 64-bit PTEs (PAE,x86-64, and EPT
+	* paging) support a maximum of 52 bits of PA, i.e. if the cpu supports
+	* 52-bit physical addresses then there are no reserved PA bits in the 
+	* PTEs and so the reserved PA approach must be disabled.
+	*/
+	if (shadow_phys_bits < 52)
+		mask = BIT_ULL(51) | PT_PRESENT_MASK;
+	else
+		mask = 0;
+
+	kvm_mmu_set_mmio_spte_mask(mask, mask, ACC_WRITE_MASK | ACC_USER_MASK);
 }

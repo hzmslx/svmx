@@ -3349,12 +3349,17 @@ static void vmx_vcpu_reset(struct kvm_vcpu* vcpu, bool init_event) {
 }
 
 void vmx_ept_load_pdptrs(struct kvm_vcpu* vcpu) {
-	UNREFERENCED_PARAMETER(vcpu);
-	// struct kvm_mmu* mmu = vcpu->arch.walk_mmu;
+	struct kvm_mmu* mmu = vcpu->arch.walk_mmu;
 
+	if (!kvm_register_is_dirty(vcpu, VCPU_EXREG_PDPTR))
+		return;
 
-
-
+	if (is_pae_paging(vcpu)) {
+		vmcs_write64(GUEST_PDPTR0, mmu->pdptrs[0]);
+		vmcs_write64(GUEST_PDPTR1, mmu->pdptrs[1]);
+		vmcs_write64(GUEST_PDPTR2, mmu->pdptrs[2]);
+		vmcs_write64(GUEST_PDPTR3, mmu->pdptrs[3]);
+	}
 
 }
 
@@ -3594,6 +3599,7 @@ static void vmx_load_mmu_pgd(struct kvm_vcpu* vcpu, hpa_t root_hpa,
 	ULONG_PTR guest_cr3 = 0;
 	u64 eptp;
 
+	// 开启ept
 	if (enable_ept) {
 		eptp = construct_eptp(vcpu, root_hpa, root_level);
 		// 提供EPT页表结构的指针值
@@ -3610,7 +3616,7 @@ static void vmx_load_mmu_pgd(struct kvm_vcpu* vcpu, hpa_t root_hpa,
 	else {
 		guest_cr3 = (unsigned long)(root_hpa | kvm_get_active_pcid(vcpu));
 	}
-
+	// 设置虚拟机的cr3寄存器
 	if (update_guest_cr3)
 		vmcs_writel(GUEST_CR3, guest_cr3);
 }

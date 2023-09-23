@@ -34,11 +34,11 @@ struct kvm_rmap_desc {
 	struct kvm_rmap_desc* more;
 };
 
-static PMDL pte_chain_cache_mdl;
+static PMDL pte_list_desc_cache_mdl;
 static PMDL rmap_desc_cache_mdl;
 static PMDL mmu_page_header_mdl;
 
-static PVOID pte_chain_cache;
+static PVOID pte_list_desc_cache;
 static PVOID rmap_desc_cache;
 static PVOID mmu_page_header_cache;
 
@@ -79,41 +79,76 @@ struct kvm_mmu_role_regs {
 #include "paging_tmpl.h"
 #undef PTTYPE
 
+/* make pte_list_desc fit well in cache lines */
+#define PTE_LIST_EXT 14
 
-NTSTATUS kvm_mmu_module_init() {
-	NTSTATUS status = STATUS_SUCCESS;
+/*
+ * struct pte_list_desc is the core data structure used to implement a custom
+ * list for tracking a set of related SPTEs, e.g. all the SPTEs that map a
+ * given GFN when used in the context of rmaps.  Using a custom list allows KVM
+ * to optimize for the common case where many GFNs will have at most a handful
+ * of SPTEs pointing at them, i.e. allows packing multiple SPTEs into a small
+ * memory footprint, which in turn improves runtime performance by exploiting
+ * cache locality.
+ *
+ * A list is comprised of one or more pte_list_desc objects (descriptors).
+ * Each individual descriptor stores up to PTE_LIST_EXT SPTEs.  If a descriptor
+ * is full and a new SPTEs needs to be added, a new descriptor is allocated and
+ * becomes the head of the list.  This means that by definitions, all tail
+ * descriptors are full.
+ *
+ * Note, the meta data fields are deliberately placed at the start of the
+ * structure to optimize the cacheline layout; accessing the descriptor will
+ * touch only a single cacheline so long as @spte_count<=6 (or if only the
+ * descriptors metadata is accessed).
+ */
+struct pte_list_desc {
+	struct pte_list_desc* more;
+	/* The number of PTEs stored in _this_ descriptor. */
+	u32 spte_count;
+	/* The number of PTEs stored in all tails of this descriptor. */
+	u32 tail_count;
+	u64* sptes[PTE_LIST_EXT];
+};
+
+static void mmu_destroy_caches(void) {
+	if (pte_list_desc_cache != NULL) {
+		MmUnmapLockedPages(pte_list_desc_cache, pte_list_desc_cache_mdl);
+	}
+	if (pte_list_desc_cache_mdl != NULL) {
+		IoFreeMdl(pte_list_desc_cache_mdl);
+	}
+	if (mmu_page_header_cache != NULL) {
+		MmUnmapLockedPages(mmu_page_header_cache, mmu_page_header_mdl);
+	}
+	if (mmu_page_header_mdl != NULL) {
+		IoFreeMdl(mmu_page_header_mdl);
+	}
+}
+
+/*
+* The bluk of the MMU initialization is deferred until the vendor module is
+* loaded as many of the masks/values may be modified by VMX or SVM, i.e. need
+* to be reset when a potentially different vendor module is loaded.
+*/
+int kvm_mmu_vendor_module_init(void) {
+	NTSTATUS status = STATUS_NO_MEMORY;
+
+	kvm_mmu_reset_all_pte_masks();
+
 	do
 	{
-		
-		pte_chain_cache_mdl = IoAllocateMdl(NULL, sizeof(struct kvm_pte_chain),
+		pte_list_desc_cache_mdl = IoAllocateMdl(NULL, sizeof(struct pte_list_desc),
 			FALSE, FALSE, NULL);
-		if (!pte_chain_cache_mdl)
+		if (!pte_list_desc_cache_mdl)
 			break;
-		pte_chain_cache = MmMapLockedPagesSpecifyCache(pte_chain_cache_mdl,
+		pte_list_desc_cache = MmMapLockedPagesSpecifyCache(pte_list_desc_cache_mdl,
 			KernelMode,
 			MmNonCached,
 			NULL,
 			FALSE,
 			NormalPagePriority);
-		if (!pte_chain_cache) {
-			status = STATUS_NO_MEMORY;
-			break;
-		}
-		
-		rmap_desc_cache_mdl = IoAllocateMdl(NULL, sizeof(struct kvm_rmap_desc),
-			FALSE, FALSE, NULL);
-		if (!rmap_desc_cache_mdl) {
-			status = STATUS_NO_MEMORY;
-			break;
-		}
-		rmap_desc_cache = MmMapLockedPagesSpecifyCache(rmap_desc_cache_mdl,
-			KernelMode,
-			MmNonCached,
-			NULL,
-			FALSE,
-			NormalPagePriority);
-		if (!rmap_desc_cache) {
-			status = STATUS_NO_MEMORY;
+		if (!pte_list_desc_cache) {
 			break;
 		}
 
@@ -137,29 +172,8 @@ NTSTATUS kvm_mmu_module_init() {
 		return STATUS_SUCCESS;
 	} while (FALSE);
 
-	if (!NT_SUCCESS(status)) {
-		if (pte_chain_cache_mdl != NULL) {
-			if (pte_chain_cache != NULL) {
-				MmUnmapLockedPages(pte_chain_cache, pte_chain_cache_mdl);
-			}
-			IoFreeMdl(pte_chain_cache_mdl);
-		}
-		
-		if (rmap_desc_cache_mdl != NULL) {
-			if (rmap_desc_cache != NULL) {
-				MmUnmapLockedPages(rmap_desc_cache, rmap_desc_cache_mdl);
-			}
-			IoFreeMdl(rmap_desc_cache_mdl);
-		}
 
-		if (mmu_page_header_mdl != NULL) {
-			if (mmu_page_header_cache != NULL) {
-				MmUnmapLockedPages(mmu_page_header_cache, mmu_page_header_mdl);
-			}
-			IoFreeMdl(mmu_page_header_mdl);
-		}
-	}
-
+	mmu_destroy_caches();
 	return status;
 }
 
@@ -391,19 +405,59 @@ static int mmu_pages_add(struct kvm_mmu_pages* pvec, struct kvm_mmu_page* sp,
 	return (pvec->nr == KVM_PAGE_ARRAY_NR);
 }
 
+static void clear_unsync_child_bit(struct kvm_mmu_page* sp, int idx) {
+	--sp->unsync_children;
+	RtlClearBit(&sp->unsync_child_bitmap, idx);
+}
+
 static int __mmu_unsync_walk(struct kvm_mmu_page* sp,
 	struct kvm_mmu_pages* pvec) {
-	UNREFERENCED_PARAMETER(pvec);
-	UNREFERENCED_PARAMETER(sp);
-	int i = 0;
-	// int ret;
+	int i = 0xFFFFFFFF;
+	int ret;
 	int nr_unsync_leaf = 0;
-	ULONG idx = 0xFFFFFFFF;
+	ULONG idx = 0;
+
 	do
 	{
-		idx = RtlFindSetBits(&sp->unsync_child_bitmap, 1, i);
-		i = idx + 1;
-	} while (idx != 0xFFFFFFFF);
+		i = RtlFindSetBits(&sp->unsync_child_bitmap, 1, idx);
+		if (0xFFFFFFFF == i)
+			break;
+		idx = i + 1;
+
+		struct kvm_mmu_page* child;
+		u64 ent = sp->spt[i];
+
+		if (!is_shadow_present_pte(ent) || is_large_pte(ent)) {
+			clear_unsync_child_bit(sp, i);
+			continue;
+		}
+		
+		child = spte_to_child_sp(ent);
+
+		if (child->unsync_children) {
+			if (mmu_pages_add(pvec, child, i))
+				return STATUS_NO_MEMORY;
+
+			ret = __mmu_unsync_walk(child, pvec);
+			if (!ret) {
+				clear_unsync_child_bit(sp, i);
+				continue;
+			}
+			else if (ret > 0) {
+				nr_unsync_leaf += ret;
+			}
+			else
+				return ret;
+		}
+		else if (child->unsync) {
+			nr_unsync_leaf++;
+			if (mmu_pages_add(pvec, child, i))
+				return STATUS_NO_MEMORY;
+		}
+		else
+			clear_unsync_child_bit(sp, i);
+
+	} while (TRUE);
 	
 	
 
@@ -422,37 +476,176 @@ static int mmu_unsync_walk(struct kvm_mmu_page* sp,
 	return __mmu_unsync_walk(sp, pvec);
 }
 
+
+
+static int mmu_pages_next(struct kvm_mmu_pages* pvec,
+	struct mmu_page_path* parents,
+	int i) {
+	UINT n;
+
+	for (n = i + 1; n < pvec->nr; n++) {
+		struct kvm_mmu_page* sp = pvec->page[n].sp;
+		UINT idx = pvec->page[n].idx;
+		int level = sp->role.level;
+
+		parents->idx[level - 1] = idx;
+		if (level == PG_LEVEL_4K)
+			break;
+
+		parents->parent[level - 2] = sp;
+	}
+
+	return n;
+}
+
+static int mmu_pages_first(struct kvm_mmu_pages* pvec,
+	struct mmu_page_path* parents) {
+	struct kvm_mmu_page* sp;
+	int level;
+
+	if (pvec->nr == 0)
+		return 0;
+
+	sp = pvec->page[0].sp;
+	level = sp->role.level;
+
+	parents->parent[level - 2] = sp;
+
+	/*
+	* Also set up a sentinel. Futher entries in pvec are all
+	* children of sp, so this element is never overwritten.
+	*/
+	parents->parent[level - 1] = NULL;
+	return mmu_pages_next(pvec, parents, 0);
+}
+
+#define for_each_sp(pvec, sp, parents, i)			\
+		for (i = mmu_pages_first(&pvec, &parents);	\
+			i < pvec.nr;	\
+			i = mmu_pages_next(&pvec, &parents, i))
+
+static void mmu_pages_clear_parents(struct mmu_page_path* parents) {
+	struct kvm_mmu_page* sp;
+	UINT level = 0;
+
+	do
+	{
+		UINT idx = parents->idx[level];
+		sp = parents->parent[level];
+		if (!sp)
+			return;
+
+		clear_unsync_child_bit(sp, idx);
+		level++;
+	} while (!sp->unsync_children);
+}
+
+
+
+
+
+static bool kvm_mmu_prepare_zap_page(struct kvm* kvm, struct kvm_mmu_page* sp,
+	PLIST_ENTRY invalid_list) {
+	int nr_zapped;
+
+	__kvm_mmu_prepare_zap_page(kvm, sp, invalid_list, &nr_zapped);
+	return nr_zapped;
+}
+
 static int mmu_zap_unsync_children(struct kvm* kvm,
 	struct kvm_mmu_page* parent,
 	PLIST_ENTRY invalid_list) {
-	UNREFERENCED_PARAMETER(invalid_list);
-	UNREFERENCED_PARAMETER(kvm);
-	// int i;
+	UINT i;
 	int zapped = 0;
-	//struct mmu_page_path parents;
-	//struct kvm_mmu_pages pages;
+	struct mmu_page_path parents;
+	struct kvm_mmu_pages pages;
 
 	if (parent->role.level == PG_LEVEL_4K)
 		return 0;
 
-	
+	while (mmu_unsync_walk(parent, &pages)) {
+		struct kvm_mmu_page* sp;
+
+		for_each_sp(pages, sp, parents, i) {
+			sp = pages.page[i].sp;
+			kvm_mmu_prepare_zap_page(kvm, sp, invalid_list);
+			mmu_pages_clear_parents(&parents);
+			zapped++;
+		}
+	}
+
+
 	return zapped;
 }
 
-static bool __kvm_mmu_prepare_zap_page(struct kvm* kvm,
+/* Returns the number of zapped non-leaf child shadow pages. */
+static int mmu_page_zap_pte(struct kvm* kvm, struct kvm_mmu_page* sp,
+	u64* spte, PLIST_ENTRY invalid_list) {
+	u64 pte;
+	struct kvm_mmu_page* child;
+
+	pte = *spte;
+	if (is_shadow_present_pte(pte)) {
+		if (is_last_spte(pte, sp->role.level)) {
+
+		}
+		else {
+			child = spte_to_child_sp(pte);
+			
+			/*
+			* Recursively zap nested TDP SPs, parentless SPs are
+			* unlikely to be used again in the near future. This
+			* avoids retaining a large number of stale nested SPs.
+			*/
+			if (tdp_enabled && invalid_list &&
+				child->role.guest_mode) {
+				return kvm_mmu_prepare_zap_page(kvm, child,
+					invalid_list);
+			}
+		}
+	}
+	else if (is_mmio_spte(pte)) {
+
+	}
+	return 0;
+}
+
+static int kvm_mmu_page_unlink_children(struct kvm* kvm,
+	struct kvm_mmu_page* sp,
+	PLIST_ENTRY invalid_list) {
+	int zapped = 0;
+
+	for (int i = 0; i < SPTE_ENT_PER_PAGE; ++i) {
+		zapped += mmu_page_zap_pte(kvm, sp, sp->spt + i, invalid_list);
+	}
+
+	return zapped;
+}
+
+bool __kvm_mmu_prepare_zap_page(struct kvm* kvm,
 	struct kvm_mmu_page* sp,
 	PLIST_ENTRY invalid_list,
 	int* nr_zapped) {
-	UNREFERENCED_PARAMETER(nr_zapped);
-	UNREFERENCED_PARAMETER(sp);
-	UNREFERENCED_PARAMETER(invalid_list);
-	//bool list_unstable;
-	bool zapped_root = FALSE;
+	bool list_unstable;
+	// bool zapped_root = FALSE;
 
 	++kvm->stat.mmu_shadow_zapped;
+	*nr_zapped = mmu_zap_unsync_children(kvm, sp, invalid_list);
+	*nr_zapped += kvm_mmu_page_unlink_children(kvm, sp, invalid_list);
 	
-	return zapped_root;
+
+	/* Zapping children means active_mmu_pages has become unstable. */
+	list_unstable = *nr_zapped;
+
+	/*
+	* Make the request to free obsolete roots after marking the root
+	* invalid, otherwise other vCPUs may not see it as invalid.
+	*/
+
+	return list_unstable;
 }
+
+
 
 static ULONG kvm_mmu_zap_oldest_mmu_pages(struct kvm* kvm,
 	ULONG nr_to_zap) {
@@ -501,33 +694,44 @@ static int make_mmu_pages_available(struct kvm_vcpu* vcpu) {
 
 static int mmu_alloc_direct_roots(struct kvm_vcpu* vcpu) {
 	struct kvm_mmu* mmu = vcpu->arch.mmu;
-	u8 shadow_root_level = (u8)mmu->root_role.level;
+	UINT shadow_root_level = mmu->root_role.level;
 	hpa_t root;
 	unsigned i;
 	int r = 0;
 
-	
+	do
+	{
+		r = make_mmu_pages_available(vcpu);
+		if (r < 0)
+			break;
 
-	if (tdp_mmu_enabled) {
-		root = kvm_tdp_mmu_get_vcpu_root_hpa(vcpu);
-	}
-	else if (shadow_root_level >= PT64_ROOT_4LEVEL) {
+		// 根据当前vcpu的分页模式建立ept顶层页表的管理结构
+		if (tdp_mmu_enabled) {
+			root = kvm_tdp_mmu_get_vcpu_root_hpa(vcpu);
+			// 影子页表页物理地址, 即 EPTP
+			mmu->root.hpa = root;
+		}
+		else if (shadow_root_level >= PT64_ROOT_4LEVEL) {
 
-	}
-	else if (shadow_root_level == PT32E_ROOT_LEVEL) {
+		}
+		else if (shadow_root_level == PT32E_ROOT_LEVEL) {
 
 
-		for (i = 0; i < 4; ++i) {
+			for (i = 0; i < 4; ++i) {
+
+			}
+
+		}
+		else {
 
 		}
 
-	}
-	else {
+		/* root.pgd is ignored for direct MMUs. */
+		mmu->root.pgd = 0;
 
-	}
-
-	/* root.pgd is ignored for direct MMUs. */
-	mmu->root.pgd = 0;
+	} while (FALSE);
+	
+	
 
 	return r;
 }
@@ -560,7 +764,10 @@ int kvm_mmu_load(struct kvm_vcpu* vcpu) {
 			r = mmu_alloc_direct_roots(vcpu);
 		else
 			r = mmu_alloc_shadow_roots(vcpu);
+		if (r)
+			break;
 		
+		// 加载pgd,即cr3
 		kvm_mmu_load_pgd(vcpu);
 
 		/*
@@ -833,6 +1040,15 @@ static int __kvm_mmu_create(struct kvm_vcpu* vcpu, struct kvm_mmu* mmu) {
 
 	mmu->pae_root = page;
 
+	/*
+	* CR3 is only 32 bits when PAE paging is used, thus it's impossible to
+	* get the CPU to treat the PDPTEs as encrypted. Decrypt the page so
+	* that KVM's writes and the CPU's reads get along. Note, this is
+	* only necessary when using shadow paging, as 64-bit NPT can get at
+	* the C-bit even when shadowing 32-bit NPT, and SME isn't supported
+	* by 32-bit kernels (when KVM itself uses 32-bit NPT).
+	*/
+
 	for (i = 0; i < 4; ++i)
 		mmu->pae_root[i] = INVALID_PAE_ROOT;
 
@@ -848,6 +1064,9 @@ static void free_mmu_pages(struct kvm_mmu* mmu) {
 int kvm_mmu_create(struct kvm_vcpu* vcpu) {
 	int ret;
 
+	vcpu->arch.mmu_pte_list_desc_cache.kmem_cache = pte_list_desc_cache;
+	
+	vcpu->arch.mmu_page_header_cache.kmem_cache = mmu_page_header_cache;
 
 	vcpu->arch.mmu = &vcpu->arch.root_mmu;
 	vcpu->arch.walk_mmu = &vcpu->arch.root_mmu;
@@ -1004,4 +1223,73 @@ int kvm_mmu_post_init_vm(struct kvm* kvm) {
 
 void kvm_mmu_pre_destroy_vm(struct kvm* kvm) {
 	UNREFERENCED_PARAMETER(kvm);
+}
+
+void kvm_mmu_destroy(struct kvm_vcpu* vcpu) {
+	kvm_mmu_unload(vcpu);
+
+}
+
+void kvm_mmu_unload(struct kvm_vcpu* vcpu) {
+	struct kvm* kvm = vcpu->kvm;
+	UNREFERENCED_PARAMETER(kvm);
+	
+}
+
+static void mmu_free_root_page(struct kvm* kvm, hpa_t* root_hpa,
+	PLIST_ENTRY invalid_list) {
+	UNREFERENCED_PARAMETER(kvm);
+	UNREFERENCED_PARAMETER(invalid_list);
+
+	struct kvm_mmu_page* sp;
+	if (!VALID_PAGE(*root_hpa))
+		return;
+
+	/*
+	* The "root" may be a special root, e.g. a PAE entry, treat it as a
+	* SPTE to ensure any non-PA bits are dropped.
+	*/
+	sp = spte_to_child_sp(*root_hpa);
+	if (!sp)
+		return;
+
+	/*if (is_tdp_mmu_page(sp))
+		kvm_tdp_mmu_put_root(kvm, sp, FALSE);
+	else if (!--sp->root_count && sp->role.invalid)
+		kvm_mmu_prepare_zap_page(kvm, sp, invalid_list);*/
+
+	*root_hpa = INVALID_PAGE;
+}
+
+void kvm_mmu_free_roots(struct kvm* kvm, struct kvm_mmu* mmu,
+	ULONG roots_to_free) {
+	int i;
+	bool free_active_root;
+	LIST_ENTRY invalid_list;
+
+	InitializeListHead(&invalid_list);
+
+	/* Before acquiring the MMU lock, see if we need 
+		to do any real work. */
+	free_active_root = (roots_to_free & KVM_MMU_ROOT_CURRENT)
+		&& VALID_PAGE(mmu->root.hpa);
+
+	if (!free_active_root) {
+		for (i = 0; i < KVM_MMU_NUM_PREV_ROOTS; i++)
+			if ((roots_to_free & KVM_MMU_ROOT_PREVIOUS(i)) &&
+				VALID_PAGE(mmu->prev_roots[i].hpa))
+				break;
+
+		if (i == KVM_MMU_NUM_PREV_ROOTS)
+			return;
+	}
+	
+	// write lock
+
+
+	for (i = 0; i < KVM_MMU_NUM_PREV_ROOTS; i++) {
+		if (roots_to_free & KVM_MMU_ROOT_PREVIOUS(i))
+			mmu_free_root_page(kvm, &mmu->prev_roots[i].hpa,
+				&invalid_list);
+	}
 }

@@ -622,3 +622,13 @@ int __kvm_mmu_topup_memory_cache(struct kvm_mmu_memory_cache* mc, int capacity, 
 
 	return STATUS_SUCCESS;
 }
+
+void* kvm_mmu_memory_cache_alloc(struct kvm_mmu_memory_cache* mc) {
+	void* p;
+
+	if (!mc->nobjs)
+		p = mmu_memory_cache_alloc_obj(mc);
+	else
+		p = mc->objects[--mc->nobjs];
+	return p;
+}

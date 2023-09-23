@@ -1,5 +1,5 @@
 #pragma once
-
+#include "perf_event.h"
 
 struct kvm_pmu_ops {
 	bool (*hw_event_available)(struct kvm_pmc* pmc);
@@ -24,3 +24,20 @@ struct kvm_pmu_ops {
 
 extern struct kvm_pmu_ops intel_pmu_ops;
 extern struct kvm_pmu_ops amd_pmu_ops;
+
+extern bool enable_pmu;
+extern struct x86_pmu_capability kvm_pmu_cap;
+
+static void kvm_init_pmu_capability(const struct kvm_pmu_ops* pmu_ops) {
+
+
+	if (!enable_pmu) {
+		memset(&kvm_pmu_cap, 0, sizeof(kvm_pmu_cap));
+		return;
+	}
+
+	kvm_pmu_cap.version = min(kvm_pmu_cap.version, 2);
+	kvm_pmu_cap.num_counters_gp = min(kvm_pmu_cap.num_counters_gp,
+		pmu_ops->MAX_NR_GP_COUNTERS);
+
+}

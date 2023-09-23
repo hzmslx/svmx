@@ -12,6 +12,7 @@
 #include "mtrr.h"
 
 
+
 #define KVM_GUEST_CR0_MASK_UNRESTRICTED_GUEST				\
 	(X86_CR0_WP | X86_CR0_NE | X86_CR0_NW | X86_CR0_CD)
 #define KVM_GUEST_CR0_MASK						\
@@ -407,6 +408,10 @@ struct rsvd_bits_validate {
 };
 
 
+#define KVM_MMU_ROOT_CURRENT		BIT(0)
+#define KVM_MMU_ROOT_PREVIOUS(i)	BIT(1+i)
+#define KVM_MMU_ROOTS_ALL		(BIT(1 + KVM_MMU_NUM_PREV_ROOTS) - 1)
+
 /*
  * kvm_mmu_extended_role complements kvm_mmu_page_role, tracking properties
  * relevant to the current MMU configuration.   When loading CR0, CR4, or EFER,
@@ -648,7 +653,9 @@ struct kvm_mmu_page {
 		LONG volatile tdp_mmu_root_count;
 	};
 	unsigned int unsync_children;
-
+	union {
+		u64* ptep;
+	};
 	union {
 		RTL_BITMAP unsync_child_bitmap;
 		struct {
@@ -665,7 +672,7 @@ struct kvm_mmu_page {
 	 * e.g. because KVM is shadowing a PTE at the same gfn, the memslot
 	 * isn't properly aligned, etc...
 	 */
-
+	LIST_ENTRY possible_nx_huge_page_link;
 #ifndef AMD64
 	 /*
 	  * Used out of the mmu-lock to avoid reading spte values while an
@@ -1630,9 +1637,9 @@ struct kvm_arch {
 
 
 
-#ifdef _WIN64
+#ifdef AMD64
 	/* The number of TDP MMU pages across all roots. */
-
+	LONG64 volatile tdp_mmu_pages;
 
 	/*
 	 * List of struct kvm_mmu_pages being used as roots.
@@ -1652,7 +1659,7 @@ struct kvm_arch {
 	 * count to zero should removed the root from the list and clean
 	 * it up, freeing the root after an RCU grace period.
 	 */
-
+	LIST_ENTRY tdp_mmu_roots;
 
 	/*
 	 * Protects accesses to the following fields when the MMU lock
@@ -1805,7 +1812,7 @@ void kvm_get_cs_db_l_bits(struct kvm_vcpu* vcpu, int* db, int* l);
 
 
 NTSTATUS kvm_mmu_module_init();
-
+int kvm_mmu_vendor_module_init(void);
 
 void kvm_arch_check_processor_compat();
 
@@ -1890,6 +1897,7 @@ __gfn_to_hva_memslot(const struct kvm_memory_slot* slot, gfn_t gfn)
 	return slot->userspace_addr + offset * PAGE_SIZE;
 }
 
+void kvm_mmu_destroy(struct kvm_vcpu* vcpu);
 // 初始化MMU的函数
 int kvm_mmu_create(struct kvm_vcpu* vcpu);
 
@@ -2005,3 +2013,7 @@ static inline gpa_t gfn_to_gpa(gfn_t gfn) {
 
 int kvm_mmu_topup_memory_cache(struct kvm_mmu_memory_cache* mc, int min);
 int __kvm_mmu_topup_memory_cache(struct kvm_mmu_memory_cache* mc, int capacity, int min);
+void* kvm_mmu_memory_cache_alloc(struct kvm_mmu_memory_cache* mc);
+
+void kvm_mmu_free_roots(struct kvm* kvm, struct kvm_mmu* mmu,
+	ULONG roots_to_free);

@@ -1,5 +1,6 @@
 #pragma once
 #include "kvm_cache_regs.h"
+#include "cpuid.h"
 
 #define PT_WRITABLE_SHIFT 1
 
@@ -35,6 +36,7 @@
 
 void kvm_init_mmu(struct kvm_vcpu* vcpu);
 
+void kvm_mmu_unload(struct kvm_vcpu* vcpu);
 int kvm_mmu_load(struct kvm_vcpu* vcpu);
 
 static inline int kvm_mmu_reload(struct kvm_vcpu* vcpu)
@@ -62,6 +64,7 @@ static inline void kvm_mmu_load_pgd(struct kvm_vcpu* vcpu) {
 
 	if (!VALID_PAGE(root_hpa))
 		return;
+
 
 	kvm_x86_ops.load_mmu_pgd(vcpu, root_hpa,
 		vcpu->arch.mmu->root_role.level);
@@ -91,4 +94,13 @@ static u64 rsvd_bits(int s, int e) {
 		return 0;
 
 	return ((2ULL << (e - s)) - 1) << s;
+}
+
+bool __kvm_mmu_prepare_zap_page(struct kvm* kvm,
+	struct kvm_mmu_page* sp,
+	PLIST_ENTRY invalid_list,
+	int* nr_zapped);
+
+static inline u8 kvm_get_shadow_phys_bits(void) {
+	return cpuid_eax(0x80000008) & 0xff;
 }

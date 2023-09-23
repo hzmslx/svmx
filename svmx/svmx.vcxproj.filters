@@ -237,6 +237,9 @@
     <ClInclude Include="paging_tmpl.h">
       <Filter>mmu</Filter>
     </ClInclude>
+    <ClInclude Include="perf_event.h">
+      <Filter>asm</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <MASM Include="vmxenter.asm">

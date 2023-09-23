@@ -225,6 +225,7 @@
     <ClInclude Include="ntexapi.h" />
     <ClInclude Include="paging_tmpl.h" />
     <ClInclude Include="pch.h" />
+    <ClInclude Include="perf_event.h" />
     <ClInclude Include="pgtable_types.h" />
     <ClInclude Include="pmu.h" />
     <ClInclude Include="posted_intr.h" />

@@ -62,7 +62,6 @@ struct kvm_vcpu_stat_generic {
 * is topped up (__kvm_mmu_topup_memory_cache()).
 */
 struct kvm_mmu_memory_cache {
-	MEMORY_CACHING_TYPE cache_type;
 	PVOID kmem_cache;
 	int capacity;
 	int nobjs;

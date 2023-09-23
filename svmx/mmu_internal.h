@@ -29,7 +29,7 @@
 #define INVALID_PAE_ROOT	0
 #define IS_VALID_PAE_ROOT(x)	(!!(x))
 
-
+typedef u64* tdp_ptep_t;
 
 /*
  * Return values of handle_mmio_page_fault(), mmu.page_fault(), fast_page_fault(),
@@ -111,3 +111,10 @@ static inline int kvm_mmu_do_page_fault(struct kvm_vcpu* vcpu, gpa_t cr2_or_gpa,
 }
 
 
+static inline int kvm_mmu_role_as_id(union kvm_mmu_page_role role) {
+	return role.smm ? 1 : 0;
+}
+
+static inline int kvm_mmu_page_as_id(struct kvm_mmu_page* sp) {
+	return kvm_mmu_role_as_id(sp->role);
+}

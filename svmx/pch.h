@@ -24,6 +24,13 @@
 #define BIT(nr)		(UL(1) << (nr))
 #define BIT_ULL(nr)		(ULL(1) << (nr))
 
+#ifndef BITS_PER_LONG_LONG
+#define BITS_PER_LONG_LONG 64
+#endif
+
+#define GENMASK_ULL(h, l) \
+	(((~0ULL) << (l))& (~0ULL >> (BITS_PER_LONG_LONG - 1 - (h))))
+
 #include "kvm_host.h"
 #include "virtext.h"
 #include "msr.h"

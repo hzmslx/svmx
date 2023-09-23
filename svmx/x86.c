@@ -4,6 +4,7 @@
 #include "kvm_para.h"
 #include "mmu.h"
 #include "kvm_cache_regs.h"
+#include "pmu.h"
 
 /* EFER defaults:
 * - enable syscall per default because its emulated by KVM
@@ -22,6 +23,8 @@ KMUTEX vendor_module_lock;
 
 u64 host_efer;
 
+u64 host_xss;
+
 bool enable_vmware_backdoor = FALSE;
 
 static u64 cr4_reserved_bits = CR4_RESERVED_BITS;
@@ -29,6 +32,9 @@ static u64 cr4_reserved_bits = CR4_RESERVED_BITS;
 bool enable_apicv = TRUE;
 
 u32 kvm_nr_uret_msrs;
+
+/* Enable/disable PMU virtualization */
+bool  enable_pmu = FALSE;
 
 /*
  * List of msr numbers which we expose to userspace through KVM_GET_MSRS
@@ -123,6 +129,7 @@ static ULONG_PTR CheckCpuCompat(
 
 NTSTATUS __kvm_x86_vendor_init(struct kvm_x86_init_ops* ops) {
 	u64 host_pat;
+	int r;
 	NTSTATUS status = STATUS_SUCCESS;
 
 	if (kvm_x86_ops.hardware_enable) {
@@ -139,11 +146,20 @@ NTSTATUS __kvm_x86_vendor_init(struct kvm_x86_init_ops* ops) {
 	*/
 	host_pat = __readmsr(MSR_IA32_CR_PAT);
 	
-	host_efer = __readmsr(MSR_EFER);
-
+	kvm_nr_uret_msrs = 0;
 	bool out_mmu_exit = FALSE;
+
 	do
 	{
+		r = kvm_mmu_vendor_module_init();
+		if (r)
+			break;
+
+		host_efer = __readmsr(MSR_EFER);
+
+		
+		kvm_init_pmu_capability(ops->pmu_ops);
+
 		status = ops->hardware_setup();
 		if (!NT_SUCCESS(status)) {
 			out_mmu_exit = TRUE;
@@ -154,11 +170,14 @@ NTSTATUS __kvm_x86_vendor_init(struct kvm_x86_init_ops* ops) {
 
 		KeIpiGenericCall(CheckCpuCompat, 0);
 
+		return STATUS_SUCCESS;
 	} while (FALSE);
+	
 	
 	if (out_mmu_exit) {
 		
 	}
+
 	
 	return status;
 }
@@ -388,6 +407,7 @@ int kvm_arch_vcpu_create(struct kvm_vcpu* vcpu) {
 
 	vcpu->arch.mp_state = KVM_MP_STATE_RUNNABLE;
 
+	// ´´½¨mmu
 	r = kvm_mmu_create(vcpu);
 	if (r < 0)
 		return r;
