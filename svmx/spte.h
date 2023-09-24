@@ -123,6 +123,7 @@ static inline bool is_mmio_spte(u64 pte) {
 	return !!(pte & SPTE_MMU_PRESENT_MASK);
 }
 
+void kvm_mmu_spte_module_init(void);
 void kvm_mmu_reset_all_pte_masks(void);
 
 
@@ -137,3 +138,4 @@ void kvm_mmu_reset_all_pte_masks(void);
  * doesn't overlap legal PA bits), and bit 63 (carved out for future usage).
  */
 #define SPTE_MMIO_ALLOWED_MASK (BIT_ULL(63) | GENMASK_ULL(51, 12) | GENMASK_ULL(2, 0))
+

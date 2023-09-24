@@ -1805,6 +1805,7 @@ extern struct kvm_x86_ops kvm_x86_ops;
 int kvm_init(unsigned vcpu_size, unsigned vcpu_align);
 void kvm_exit(void);
 
+
 int kvm_arch_hardware_enable(void);
 
 void kvm_get_cs_db_l_bits(struct kvm_vcpu* vcpu, int* db, int* l);

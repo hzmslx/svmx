@@ -2,7 +2,7 @@
 #include "kvm_host.h"
 #include "kvm.h"
 #include "kvm_mm.h"
-
+#include "x86.h"
 
 /*
 * Kernel-based Virtual Machine driver for Windows
@@ -40,6 +40,8 @@ int kvm_init(unsigned vcpu_size, unsigned vcpu_align) {
 
 	KeInitializeMutex(&kvm_lock, 0);
 	InitializeListHead(&vm_list);
+
+	
 
 	return status;
 }
@@ -307,6 +309,7 @@ int kvm_vm_ioctl_create_vcpu(struct kvm* kvm, u32 id) {
 			r = STATUS_NO_MEMORY;
 			break;
 		}
+		RtlZeroMemory(vcpu, s_vcpu_size);
 
 		page = ExAllocatePoolWithTag(NonPagedPool, PAGE_SIZE, DRIVER_TAG);
 		if (!page) {

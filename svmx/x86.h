@@ -103,3 +103,4 @@ static inline bool kvm_notify_vmexit_enabled(struct kvm* kvm) {
 }
 
 void kvm_vcpu_mtrr_init(struct kvm_vcpu* vcpu);
+int kvm_x86_init(void);

@@ -5,7 +5,9 @@
 /* Initializes the TDP MMU for the VM, if enabled. */
 int kvm_mmu_init_tdp_mmu(struct kvm* kvm)
 {
-	UNREFERENCED_PARAMETER(kvm);
+	// work queue
+
+	InitializeListHead(&kvm->arch.tdp_mmu_roots);
 	
 	return 1;
 }

@@ -104,3 +104,5 @@ bool __kvm_mmu_prepare_zap_page(struct kvm* kvm,
 static inline u8 kvm_get_shadow_phys_bits(void) {
 	return cpuid_eax(0x80000008) & 0xff;
 }
+
+void kvm_mmu_x86_module_init(void);

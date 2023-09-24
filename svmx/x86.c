@@ -132,6 +132,8 @@ NTSTATUS __kvm_x86_vendor_init(struct kvm_x86_init_ops* ops) {
 	int r;
 	NTSTATUS status = STATUS_SUCCESS;
 
+	kvm_x86_init();
+
 	if (kvm_x86_ops.hardware_enable) {
 		LogErr("Already loaeded vendor module\n");
 		return STATUS_UNSUCCESSFUL;
@@ -1031,4 +1033,9 @@ void kvm_arch_async_page_present(struct kvm_vcpu* vcpu,
 
 void kvm_arch_vcpu_destroy(struct kvm_vcpu* vcpu) {
 	kvm_x86_ops.vcpu_free(vcpu);
+}
+
+int kvm_x86_init(void) {
+	kvm_mmu_x86_module_init();
+	return 0;
 }

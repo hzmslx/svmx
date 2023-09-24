@@ -51,8 +51,8 @@ static u64 shadow_user_mask;
 u64 shadow_accessed_mask;
 static u64 shadow_dirty_mask;
 
-static bool tdp_mmu_allowed;
-#ifdef _WIN64
+static bool tdp_mmu_allowed = TRUE;
+#ifdef AMD64
 bool tdp_mmu_enabled = TRUE;
 #endif // 
 
@@ -1292,4 +1292,16 @@ void kvm_mmu_free_roots(struct kvm* kvm, struct kvm_mmu* mmu,
 			mmu_free_root_page(kvm, &mmu->prev_roots[i].hpa,
 				&invalid_list);
 	}
+}
+
+void kvm_mmu_x86_module_init(void) {
+
+	/*
+	* Snapshot userspac's desire to enable the TDP MMU. Whether or not
+	* the TDP MMU is actually enabled is determined in kvm_configure_mmu()
+	* when the vendor module is loaded.
+	*/
+	tdp_mmu_allowed = tdp_mmu_enabled;
+
+
 }
