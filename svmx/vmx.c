@@ -174,7 +174,7 @@ void vmx_get_gdt(struct kvm_vcpu* vcpu, struct desc_ptr* dt);
 void vmx_set_gdt(struct kvm_vcpu* vcpu, struct desc_ptr* dt);
 void vmx_cache_reg(struct kvm_vcpu* vcpu, enum kvm_reg reg);
 ULONG_PTR vmx_get_rflags(struct kvm_vcpu* vcpu);
-void vmx_set_rflags(struct kvm_vcpu* vcpu, unsigned long rflags);
+void vmx_set_rflags(struct kvm_vcpu* vcpu, ULONG_PTR rflags);
 void vmx_flush_tlb(struct kvm_vcpu* vcpu);
 void skip_emulated_instruction(struct kvm_vcpu* vcpu);
 void vmx_set_interrupt_shadow(struct kvm_vcpu* vcpu, int mask);
@@ -625,7 +625,6 @@ static int vmx_vcpu_precreate(struct kvm* kvm) {
 }
 
 static NTSTATUS vmx_vcpu_create(struct kvm_vcpu* vcpu) {
-	UNREFERENCED_PARAMETER(vcpu);
 	NTSTATUS status;
 	struct vcpu_vmx* vmx;
 
@@ -857,10 +856,28 @@ static fastpath_t vmx_vcpu_run(struct kvm_vcpu* vcpu) {
 	struct vcpu_vmx* vmx = to_vmx(vcpu);
 	ULONG_PTR cr3, cr4;
 
-	if (kvm_register_is_dirty(vcpu, VCPU_REGS_RSP))
-		vmcs_writel(GUEST_RSP, vcpu->arch.regs[VCPU_REGS_RSP]);
-	if (kvm_register_is_dirty(vcpu, VCPU_REGS_RIP))
-		vmcs_writel(GUEST_RIP, vcpu->arch.regs[VCPU_REGS_RIP]);
+	/*
+	* Don't enter VMX if guest state is invalid, let the exit handler
+	* start emulation until we arrive back to a valid state.  Synthesize a
+	* consistencty check VM-Exit due to invalid guest state and bail.
+	*/
+	if (vmx->emulation_required) {
+		vmx->fail = 0;
+
+		vmx->exit_reason.full = EXIT_REASON_INVALID_STATE;
+		vmx->exit_reason.failed_vmentry = 1;
+		kvm_register_mark_available(vcpu, VCPU_EXREG_EXIT_INFO_1);
+		vmx->exit_qualification = ENTRY_FAIL_DEFAULT;
+		kvm_register_mark_available(vcpu, VCPU_EXREG_EXIT_INFO_2);
+		vmx->exit_intr_info = 0;
+		return EXIT_FASTPATH_NONE;
+	}
+
+
+	//if (kvm_register_is_dirty(vcpu, VCPU_REGS_RSP))
+	//	vmcs_writel(GUEST_RSP, vcpu->arch.regs[VCPU_REGS_RSP]);
+	//if (kvm_register_is_dirty(vcpu, VCPU_REGS_RIP))
+	//	vmcs_writel(GUEST_RIP, vcpu->arch.regs[VCPU_REGS_RIP]);
 	vcpu->arch.regs_dirty = 0;
 
 	/*
@@ -1360,17 +1377,18 @@ static struct kvm_x86_ops vmx_x86_ops = {
 	.vcpu_load = vmx_vcpu_load,
 	.vcpu_put = vmx_vcpu_put,
 
+	.get_segment_base = vmx_get_segment_base,
 	.set_cr0 = vmx_set_cr0,
 	.set_cr4 = vmx_set_cr4,
 	.set_efer = vmx_set_efer,
-	.set_dr7 = vmx_set_dr7,
-	.cache_reg = vmx_cache_reg,
-	.get_segment_base = vmx_get_segment_base,
 	.set_idt = vmx_set_idt,
 	.get_idt = vmx_get_idt,
 	.set_gdt = vmx_set_gdt,
 	.get_gdt = vmx_get_gdt,
-
+	.set_dr7 = vmx_set_dr7,
+	.cache_reg = vmx_cache_reg,
+	.get_rflags = vmx_get_rflags,
+	.set_rflags = vmx_set_rflags,
 
 	.flush_tlb_current = vmx_flush_tlb_current,
 
@@ -1985,7 +2003,7 @@ ULONG_PTR vmx_get_rflags(struct kvm_vcpu* vcpu) {
 	return rflags;
 }
 
-void vmx_set_rflags(struct kvm_vcpu* vcpu, unsigned long rflags) {
+void vmx_set_rflags(struct kvm_vcpu* vcpu, ULONG_PTR rflags) {
 	struct vcpu_vmx* vmx = to_vmx(vcpu);
 	ULONG_PTR old_rflags;
 
@@ -3144,6 +3162,8 @@ static void init_vmcs(struct vcpu_vmx* vmx) {
 	vmx->vcpu.arch.cr0_guest_owned_bits = vmx_l1_guest_owned_cr0_bits();
 	vmcs_writel(CR0_GUEST_HOST_MASK, ~vmx->vcpu.arch.cr0_guest_owned_bits);
 
+	set_cr4_guest_host_mask(vmx);
+
 	if (vmx_pt_mode_is_host_guest()) {
 		memset(&vmx->pt_desc, 0, sizeof(vmx->pt_desc));
 		/* Bit[6~0] are forced to 1, writes are ignored. */
@@ -3318,7 +3338,7 @@ static void vmx_vcpu_reset(struct kvm_vcpu* vcpu, bool init_event) {
 	vmx->rmode.vm86_active = 0;
 
 	// set guest segment fields
-	vmcs_write16(GUEST_CS_SELECTOR, 0xf000);
+	vmcs_write16(GUEST_CS_SELECTOR, vmx_get_cs());
 	vmcs_writel(GUEST_CS_BASE, 0);
 
 	struct desc_ptr dt = { 0 };
@@ -3616,7 +3636,10 @@ static void vmx_load_mmu_pgd(struct kvm_vcpu* vcpu, hpa_t root_hpa,
 	else {
 		guest_cr3 = (unsigned long)(root_hpa | kvm_get_active_pcid(vcpu));
 	}
+
+	
 	// ÉèÖÃÐéÄâ»úµÄcr3¼Ä´æÆ÷
+	guest_cr3 = __readcr3();
 	if (update_guest_cr3)
 		vmcs_writel(GUEST_CR3, guest_cr3);
 }

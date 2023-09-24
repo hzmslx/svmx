@@ -102,7 +102,7 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath) 
 			IoDeleteDevice(DeviceObject);
 			return status;
 		}
-		RtlZeroMemory(vmxarea, size);
+		RtlZeroMemory(current_vmcs, size);
 		// module initialize
 		status = vmx_init();
 		if (NT_SUCCESS(status))

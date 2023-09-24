@@ -526,7 +526,15 @@ enum vmx_l1d_flush_state {
 	VMENTER_L1D_FLUSH_NOT_REQUIRED,
 };
 
-
+/*
+ * Exit Qualifications for entry failure during or after loading guest state
+ */
+enum vm_entry_failure_code {
+	ENTRY_FAIL_DEFAULT = 0,
+	ENTRY_FAIL_PDPTE = 2,
+	ENTRY_FAIL_NMI = 3,
+	ENTRY_FAIL_VMCS_LINK_PTR = 4,
+};
 
 
 #define VMX_VPID_INVVPID_BIT                    (1ull << 0) /* (32 - 32) */

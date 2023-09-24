@@ -266,6 +266,8 @@ static int vcpu_enter_guest(struct kvm_vcpu* vcpu)
 	*/
 	if (vcpu->arch.switch_db_regs & KVM_DEBUGREG_WONT_EXIT) {
 		
+
+		kvm_update_dr7(vcpu);
 	}
 
 	/*
@@ -596,6 +598,7 @@ void kvm_vcpu_reset(struct kvm_vcpu* vcpu, bool init_event) {
 	ULONG_PTR old_cr0 = kvm_read_cr0(vcpu);
 	ULONG_PTR new_cr0;
 
+	vcpu->arch.dr6 = DR6_ACTIVE_LOW;
 	vcpu->arch.dr7 = DR7_FIXED_1;
 	kvm_update_dr7(vcpu);
 
@@ -610,6 +613,11 @@ void kvm_vcpu_reset(struct kvm_vcpu* vcpu, bool init_event) {
 
 	kvm_x86_ops.vcpu_reset(vcpu, init_event);
 
+	kvm_set_rflags(vcpu, X86_EFLAGS_FIXED);
+	
+
+	vcpu->arch.cr3 = 0;
+	kvm_register_mark_dirty(vcpu, VCPU_EXREG_CR3);
 	/*
 	* CR0.CD/NW are set on RESET, preserved on INIT.  Note, some versions
 	* of Intel's SDM list CD/NW as being set on INIT, but they contradict
@@ -620,10 +628,9 @@ void kvm_vcpu_reset(struct kvm_vcpu* vcpu, bool init_event) {
 		new_cr0 |= (old_cr0 & (X86_CR0_NW | X86_CR0_CD));
 	else
 		new_cr0 |= X86_CR0_NW | X86_CR0_CD;
-	new_cr0 = X86_CR0_ET;
 
 	kvm_x86_ops.set_cr0(vcpu, new_cr0);
-	kvm_x86_ops.set_cr4(vcpu, 0);
+	kvm_x86_ops.set_cr4(vcpu, __readcr4());
 	kvm_x86_ops.set_efer(vcpu, 0);
 
 }

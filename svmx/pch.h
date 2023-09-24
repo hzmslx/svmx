@@ -22,6 +22,7 @@
 #define ULL(x)		(_ULL(x))
 
 #define BIT(nr)		(UL(1) << (nr))
+
 #define BIT_ULL(nr)		(ULL(1) << (nr))
 
 #ifndef BITS_PER_LONG_LONG
