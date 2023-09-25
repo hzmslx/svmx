@@ -168,7 +168,7 @@ Lvmfail:
 __vmx_vcpu_run ENDP
 
 vmx_get_es PROC
-	mov ax,fs
+	mov ax,es
 	ret
 vmx_get_es ENDP
 

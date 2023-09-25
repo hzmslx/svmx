@@ -414,7 +414,7 @@ static NTSTATUS setup_vmcs_config(struct vmcs_config* vmcs_conf,
 	// 得到vmcs区域和vmxon区域的大小
 	vmcs_conf->size = vmx_msr_high & 0x1fff;
 	vmcs_conf->basic_cap = vmx_msr_high & ~0x1fff;
-
+	// Write a VMCS revision identifier
 	vmcs_conf->revision_id = vmx_msr_low;
 
 	vmcs_conf->pin_based_exec_ctrl = _pin_based_exec_control;
@@ -688,11 +688,11 @@ void vmx_prepare_switch_to_guest(struct kvm_vcpu* vcpu) {
 	 */
 
 #ifdef _WIN64
-	fs_sel = vmx_get_fs();
-	gs_sel = vmx_get_gs();
+	fs_sel = vmx_get_fs() & 0xf8;
+	gs_sel = vmx_get_gs() & 0xf8;
 
-	fs_base = _readfsbase_u64();
-	gs_base = _readgsbase_u64();
+	fs_base = __readmsr(MSR_FS_BASE);
+	gs_base = __readmsr(MSR_GS_BASE);
 #else
 
 
@@ -713,10 +713,10 @@ void vmx_set_host_fs_gs(struct vmcs_host_state* host, u16 fs_sel, u16 gs_sel,
 	}
 	if (gs_sel != host->gs_sel) {
 		if (!(gs_sel & 7)) {
-			vmcs_write16(HOST_FS_SELECTOR, fs_sel);
+			vmcs_write16(HOST_GS_SELECTOR, gs_sel);
 		}
 		else
-			vmcs_write16(HOST_FS_SELECTOR, 0);
+			vmcs_write16(HOST_GS_SELECTOR, 0);
 	}
 	if (fs_base != host->fs_base) {
 		vmcs_writel(HOST_FS_BASE, fs_base);
@@ -2593,7 +2593,7 @@ void vmx_vcpu_load_vmcs(struct kvm_vcpu* vcpu, int cpu,
 	if (!already_loaded) { // 未加载时的执行逻辑
 		struct desc_ptr gdt;
 		vmx_sgdt(&gdt);
-		uint16_t sel = vmx_str();
+		USHORT sel = vmx_str();
 		ULONG_PTR base = get_segment_base(gdt.address, sel);
 		/*
 		 * per-cpu TSS and GDT ?, so set these when switching
@@ -2685,14 +2685,15 @@ void dump_vmcs(struct kvm_vcpu* vcpu) {
 		vmcs_readl(GUEST_CR4), vmcs_readl(CR4_READ_SHADOW),
 		vmcs_readl(CR4_GUEST_HOST_MASK));
 	LogErr("CR3 = 0x%016lx\n", vmcs_readl(GUEST_CR3));
+	LogErr("IA32 Sysenter Debug Ctl = 0x%016lx\n", vmcs_readl(GUEST_IA32_DEBUGCTL));
 	if (cpu_has_vmx_ept()) {
 		LogErr("PDPTR0 = 0x%016llx PDPTR1 = 0x%016llx\n",
 			vmcs_read64(GUEST_PDPTR0), vmcs_read64(GUEST_PDPTR1));
 		LogErr("PDPTR2 = 0x%016llx PDPTR3 = 0x%016llx\n",
 			vmcs_read64(GUEST_PDPTR2), vmcs_read64(GUEST_PDPTR3));
 	}
-	LogErr("RSP = 0x%016lx RIP = 0x%016lx\n",
-		vmcs_readl(GUEST_RIP), vmcs_readl(GUEST_RIP));
+	LogErr("RSP = 0x%p RIP = 0x%p\n",
+		vmcs_readl(GUEST_RSP), vmcs_readl(GUEST_RIP));
 	LogErr("RFLAGS=0x%08lx		DR7 = 0x%016lx\n",
 		vmcs_readl(GUEST_RFLAGS), vmcs_readl(GUEST_DR7));
 	LogErr("Sysenter RSP=%016lx CS:RIP=%04x:%016lx\n",
@@ -2723,17 +2724,17 @@ void dump_vmcs(struct kvm_vcpu* vcpu) {
 
 
 	LogErr("*** Host State ***\n");
-	LogErr("RIP = 0x%016lx RSP = 0x%016lx\n",
+	LogErr("RIP = 0x%p RSP = 0x%p\n",
 		vmcs_readl(HOST_RIP), vmcs_readl(HOST_RSP));
 	LogErr("CS=%04x SS=%04x DS=%04x ES=%04x FS=%04x GS=%04x TR=%04x\n",
 		vmcs_read16(HOST_CS_SELECTOR), vmcs_read16(HOST_SS_SELECTOR),
 		vmcs_read16(HOST_DS_SELECTOR), vmcs_read16(HOST_ES_SELECTOR),
 		vmcs_read16(HOST_FS_SELECTOR), vmcs_read16(HOST_GS_SELECTOR),
 		vmcs_read16(HOST_TR_SELECTOR));
-	LogErr("FSBase=%016lx GSBase=%016lx TRBase=%016lx\n",
+	LogErr("FSBase=0x%p GSBase=0x%p TRBase=0x%p\n",
 		vmcs_readl(HOST_FS_BASE), vmcs_readl(HOST_GS_BASE),
 		vmcs_readl(HOST_TR_BASE));
-	LogErr("GDTBase=%016lx IDTBase=%016lx\n",
+	LogErr("GDTBase=0x%p IDTBase=0x%p\n",
 		vmcs_readl(HOST_GDTR_BASE), vmcs_readl(HOST_IDTR_BASE));
 	LogErr("CR0=%016lx CR3=%016lx CR4=%016lx\n",
 		vmcs_readl(HOST_CR0), vmcs_readl(HOST_CR3),
@@ -3821,7 +3822,6 @@ void vmx_spec_ctrl_restore_host(struct vcpu_vmx* vmx, unsigned int flags) {
 
 	if (hardware_entry_failure_reason) {
 		LogErr("KVM: entry failed, hardware error: 0x%x\n", hardware_entry_failure_reason);
-		dump_vmcs(&vmx->vcpu);
 	}
 }
 
