@@ -1331,6 +1331,24 @@ USHORT vmx_sldt();
 #define GDT_SEL     0
 #define LDT_SEL     1
 
+/*
+* - 32-Bit Mode: LDT
+* - IA-32e Mode: LDT
+*/
+#define SEGMENT_DESCRIPTOR_TYPE_LDT 0x00000002
+
+/*
+* - 32 bit Mode: 32-bit TSS (Busy)
+* - IA-32e Mode: 64-bit TSS (Busy)
+*/
+#define SEGMENT_DESCRIPTOR_TYPE_TSS_BUSY 0x0000000B
+
+/*
+* - 32 bit Mode: 32-bit TSS (Available)
+* - IA-32e Mode: 64-bit TSS (Available)
+*/
+#define SEGMENT_DESCRIPTOR_TYPE_TSS_AVAILABLE 0x00000009
+
 #include <pshpack1.h>
 typedef struct x86_segment_selector {
 	union {
@@ -1359,7 +1377,27 @@ typedef struct x86_segment_descriptor {
 	uint64_t    base2 : 8;
 }x86_segment_descriptor;
 
+typedef struct x86_call_gate {
+	uint64_t offset0 : 16;
+	uint64_t selector : 16;
+	uint64_t param_count : 4;
+	uint64_t reserved : 3;
+	uint64_t type : 4;
+	uint64_t dpl : 1;
+	uint64_t p : 1;
+	uint64_t offset1 : 16;
+}x86_call_gate;
+
 #include <poppack.h>
+
+#ifdef _WIN64
+// LDT or TSS descriptor in the GDT. 16 bytes.
+struct segment_descriptor_64 {
+	struct x86_segment_descriptor desc;
+	u32 base_higher;
+	u32 pad_zero;
+};
+#endif
 
 void vmx_vmexit(void);
 

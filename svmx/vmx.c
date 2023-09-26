@@ -2532,8 +2532,29 @@ ULONG_PTR VmcsLoadOnSpecificCore(ULONG_PTR Arg) {
 	return 0;
 }
 
-static uint32_t x86_segment_base(x86_segment_descriptor* desc) {
-	return (uint32_t)((desc->base2 << 24) | (desc->base1 << 16) | desc->base0);
+static uint32_t x86_call_gate_offset(x86_call_gate* gate) {
+	return (uint32_t)((gate->offset1 << 16) | gate->offset0);
+}
+
+static ULONG_PTR x86_segment_base(x86_segment_descriptor* desc) {
+	ULONG_PTR base = ((desc->base2 << 24) | (desc->base1 << 16) | desc->base0);
+#ifdef  _WIN64
+	/* vol3 3.5.2 Segment Descriptor Tables in IA-32e Mode */
+	if (!desc->s && ((desc->type == SEGMENT_DESCRIPTOR_TYPE_TSS_AVAILABLE)
+		|| (desc->type == SEGMENT_DESCRIPTOR_TYPE_TSS_BUSY)
+		|| (desc->type == SEGMENT_DESCRIPTOR_TYPE_LDT))) {
+		/*
+		* System descriptors are expanded to 16 byte descriptors
+		* which can hold 64-bit address, we must include the
+		* upper address segment
+		*/
+		struct segment_descriptor_64* desc64 = (struct segment_descriptor_64*)desc;
+		u64 base_higher = desc64->base_higher;
+		base |= (base_higher << 32);
+	}
+#endif //  _WIN64
+
+	return base;
 }
 
 static ULONG_PTR get_segment_base(ULONG_PTR gdt_base, USHORT selector) {
@@ -2543,7 +2564,7 @@ static ULONG_PTR get_segment_base(ULONG_PTR gdt_base, USHORT selector) {
 		x86_segment_selector ldt_sel = { vmx_sldt() };
 		x86_segment_descriptor* desc = (x86_segment_descriptor*)(gdt_base +
 			ldt_sel.index * sizeof(x86_segment_descriptor));
-		uint32_t ldt_base = x86_segment_base(desc);
+		ULONG_PTR ldt_base = x86_segment_base(desc);
 		desc = (x86_segment_descriptor*)(ldt_base + sel.index * sizeof(x86_segment_descriptor));
 		return x86_segment_base(desc);
 	}
@@ -3216,7 +3237,7 @@ static void get_segment_desc(ULONG_PTR gdt_base, USHORT selector, x86_segment_de
 		x86_segment_selector ldt_sel = { vmx_sldt() };
 		desc = (x86_segment_descriptor*)(gdt_base +
 			ldt_sel.index * sizeof(x86_segment_descriptor));
-		uint32_t ldt_base = x86_segment_base(desc);
+		ULONG_PTR ldt_base = x86_segment_base(desc);
 		desc = (x86_segment_descriptor*)(ldt_base +
 			sel.index * sizeof(x86_segment_descriptor));
 	}
