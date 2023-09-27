@@ -87,3 +87,5 @@ static void vmcs_load(struct vmcs* vmcs) {
 void vmx_invept(ULONG_PTR ext,PVOID operand);
 
 void ept_sync_context(u64 eptp);
+
+void Lclear_regs();

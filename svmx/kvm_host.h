@@ -1989,16 +1989,16 @@ void kvm_arch_vcpu_postcreate(struct kvm_vcpu* vcpu);
 #define EMULTYPE_WRITE_PF_TO_SP	    (1 << 8)
 
 void kvm_update_dr7(struct kvm_vcpu* vcpu);
-long kvm_arch_vcpu_ioctl(unsigned int ioctl, unsigned long arg);
+long kvm_arch_vcpu_ioctl(unsigned int ioctl, ULONG_PTR arg);
 
-void kvm_set_rflags(struct kvm_vcpu* vcpu, unsigned long rflags);
-bool kvm_is_linear_rip(struct kvm_vcpu* vcpu, unsigned long linear_rip);
+void kvm_set_rflags(struct kvm_vcpu* vcpu, ULONG_PTR rflags);
+bool kvm_is_linear_rip(struct kvm_vcpu* vcpu, ULONG_PTR linear_rip);
 ULONG_PTR kvm_get_linear_rip(struct kvm_vcpu* vcpu);
 void kvm_set_segment(struct kvm_vcpu* vcpu, struct kvm_segment* var, int seg);
 int kvm_arch_vcpu_ioctl_set_sregs(struct kvm_vcpu* vcpu,
 	struct kvm_sregs* sregs);
 int kvm_arch_vcpu_ioctl_set_regs(struct kvm_vcpu* vcpu, struct kvm_regs* regs);
-int kvm_arch_init_vm(struct kvm* kvm, unsigned long type);
+int kvm_arch_init_vm(struct kvm* kvm, ULONG_PTR type);
 int kvm_mmu_init_vm(struct kvm* kvm);
 void kvm_mmu_uninit_vm(struct kvm* kvm);
 int kvm_arch_post_init_vm(struct kvm* kvm);

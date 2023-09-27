@@ -849,7 +849,6 @@ static fastpath_t vmx_exit_handlers_fastpath(struct kvm_vcpu* vcpu) {
 	}
 }
 
-extern ULONG_PTR Lclear_regs;
 
 // 运行虚拟机，进入guest模式，即non root 模式
 static fastpath_t vmx_vcpu_run(struct kvm_vcpu* vcpu) {
@@ -2656,7 +2655,7 @@ void loaded_vmcs_clear(struct loaded_vmcs* loaded_vmcs) {
 }
 
 static void vmx_dump_sel(char* name, uint32_t sel) {
-	LogErr("%s sel=0x%04x, attr=0x%05x, limit=0x%08x, base=0x%016lx\n",
+	LogErr("%s sel=0x%04x, attr=0x%05x, limit=0x%08x, base=0x%p\n",
 		name, vmcs_read16(sel),
 		vmcs_read32(sel + GUEST_ES_AR_BYTES - GUEST_ES_SELECTOR),
 		vmcs_read32(sel + GUEST_ES_LIMIT - GUEST_ES_SELECTOR),
@@ -2664,7 +2663,7 @@ static void vmx_dump_sel(char* name, uint32_t sel) {
 }
 
 static void vmx_dump_dtsel(char* name, uint32_t limit) {
-	LogErr("%s				limit=0x%08x, base=0x%016lx\n",
+	LogErr("%s				limit=0x%08x, base=0x%p\n",
 		name, vmcs_read32(limit),
 		vmcs_readl(limit + GUEST_GDTR_BASE - GUEST_GDTR_LIMIT));
 }
@@ -3212,7 +3211,7 @@ static void init_vmcs(struct vcpu_vmx* vmx) {
 	vmcs_writel(GUEST_DS_BASE, 0);
 
 
-	vmcs_writel(GUEST_RIP, Lclear_regs);
+	vmcs_writel(GUEST_RIP, (ULONG_PTR)Lclear_regs);
 }
 
 #pragma warning(push)
@@ -3366,17 +3365,21 @@ static void vmx_vcpu_reset(struct kvm_vcpu* vcpu, bool init_event) {
 	struct desc_ptr dt = { 0 };
 	vmx_sgdt(&dt);
 
-	ULONG_PTR base = get_segment_base(dt.address, vmx_str());
-	vmcs_write16(GUEST_TR_SELECTOR, 0);
-	vmcs_writel(GUEST_TR_BASE, base);
-	vmcs_write32(GUEST_TR_LIMIT, 0xffff);
-	vmcs_write32(GUEST_TR_AR_BYTES, 0x008b);
+	struct kvm_segment var = { 0 };
+	x86_segment_descriptor desc;
+	var.selector = vmx_str();
+	var.base = get_segment_base(dt.address, var.selector);
+	var.limit = GetSegmentLimit(var.selector);
+	get_segment_desc(dt.address, var.selector, &desc);
+	set_segment_by_desc(&desc, &var);
+	vmx_set_segment(vcpu, &var, VCPU_SREG_TR);
 
-	vmcs_write16(GUEST_LDTR_SELECTOR, 0);
-	base = get_segment_base(dt.address, vmx_sldt());
-	vmcs_writel(GUEST_LDTR_BASE, base);
-	vmcs_write32(GUEST_LDTR_LIMIT, 0xffff);
-	vmcs_write32(GUEST_LDTR_AR_BYTES, 0x00082);
+	var.selector = vmx_sldt();
+	var.base = get_segment_base(dt.address, var.selector);
+	var.limit = GetSegmentLimit(var.selector);
+	get_segment_desc(dt.address, var.selector, &desc);
+	set_segment_by_desc(&desc, &var);
+	vmx_set_segment(vcpu, &var, VCPU_SREG_LDTR);
 
 	vmcs_write64(GUEST_FS_BASE, __readmsr(MSR_FS_BASE));
 	vmcs_write64(GUEST_GS_BASE, __readmsr(MSR_GS_BASE));

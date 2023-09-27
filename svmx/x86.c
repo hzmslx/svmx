@@ -613,7 +613,8 @@ void kvm_vcpu_reset(struct kvm_vcpu* vcpu, bool init_event) {
 
 	kvm_x86_ops.vcpu_reset(vcpu, init_event);
 
-	kvm_set_rflags(vcpu, X86_EFLAGS_FIXED);
+	ULONG_PTR rflags = __readeflags();
+	kvm_set_rflags(vcpu, rflags);
 	
 
 	vcpu->arch.cr3 = 0;
@@ -859,7 +860,7 @@ void kvm_update_dr7(struct kvm_vcpu* vcpu) {
 		vcpu->arch.switch_db_regs |= KVM_DEBUGREG_BP_ENABLED;
 }
 
-long kvm_arch_vcpu_ioctl(unsigned int ioctl, unsigned long arg) {
+long kvm_arch_vcpu_ioctl(unsigned int ioctl, ULONG_PTR arg) {
 	UNREFERENCED_PARAMETER(arg);
 	switch (ioctl)
 	{
@@ -895,12 +896,12 @@ ULONG_PTR kvm_get_linear_rip(struct kvm_vcpu* vcpu)
 		kvm_rip_read(vcpu));
 }
 
-bool kvm_is_linear_rip(struct kvm_vcpu* vcpu, unsigned long linear_rip)
+bool kvm_is_linear_rip(struct kvm_vcpu* vcpu, ULONG_PTR linear_rip)
 {
 	return kvm_get_linear_rip(vcpu) == linear_rip;
 }
 
-static void __kvm_set_rflags(struct kvm_vcpu* vcpu, unsigned long rflags)
+static void __kvm_set_rflags(struct kvm_vcpu* vcpu, ULONG_PTR rflags)
 {
 	if (vcpu->guest_debug & KVM_GUESTDBG_SINGLESTEP &&
 		kvm_is_linear_rip(vcpu, vcpu->arch.singlestep_rip))
@@ -908,7 +909,7 @@ static void __kvm_set_rflags(struct kvm_vcpu* vcpu, unsigned long rflags)
 	kvm_x86_ops.set_rflags(vcpu, rflags);
 }
 
-void kvm_set_rflags(struct kvm_vcpu* vcpu, unsigned long rflags) {
+void kvm_set_rflags(struct kvm_vcpu* vcpu, ULONG_PTR rflags) {
 	__kvm_set_rflags(vcpu, rflags);
 }
 
@@ -965,7 +966,7 @@ int kvm_arch_vcpu_ioctl_set_regs(struct kvm_vcpu* vcpu, struct kvm_regs* regs) {
 	return 0;
 }
 
-int kvm_arch_init_vm(struct kvm* kvm, unsigned long type) {
+int kvm_arch_init_vm(struct kvm* kvm, ULONG_PTR type) {
 	int ret = 0;
 
 	if (type)

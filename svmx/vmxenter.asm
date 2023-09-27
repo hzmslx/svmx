@@ -1,6 +1,5 @@
-PUBLIC vmx_get_cs
 PUBLIC Lclear_regs
-
+PUBLIC vmx_vmexit
 .data
 
 EXTERN vmx_update_host_rsp :PROC
@@ -105,6 +104,93 @@ Lvmresume:
 Lvmlaunch:
 	; 在使用vmlaunch指令进入vm时,current-VMCS的launch状态必须为clear
 	vmlaunch
+	jmp Lvmfail
+
+vmx_vmexit label proc
+
+	; Temporarily save guest's RAX.
+	push rax
+
+	; Reload @regs to RAX.
+	mov rax,[rsp]
+
+	; Save all guest registers, including RAX from the stack
+	pop VCPU_RAX
+	mov VCPU_RCX,rcx
+	mov VCPU_RDX,rdx
+	mov VCPU_RBX,rbx
+	mov VCPU_RBP,rbp
+	mov VCPU_RSI,rsi
+	mov VCPU_RDI,rdi
+	mov VCPU_R8,r8
+	mov VCPU_R9,r9
+	mov VCPU_R10,r10
+	mov VCPU_R11,r11
+	mov VCPU_R12,r12
+	mov VCPU_R13,r13
+	mov VCPU_R14,r14
+	mov VCPU_R15,r15
+
+	; Clear return value to indicate VM-Exit (as opposed to VM-Fail).
+	xor ebx,ebx
+
+Lclear_regs label proc
+	; Discard @regs. The register is irrelevant, it just can't be RBX.
+	pop rax
+
+	;
+	; Clear all general purpose register except RSP and RBX to prevent
+	; speculative use of the guest's values, even those that are reloadoed
+	; via the stack. In theory, an L1 cache miss when restoring registers
+	; could lead to speculative execution with the guest's values.
+	; Zeroing XORs are dirt cheap, i.e. the extra paranoia is essentially
+	; free. RSP and RBX are exempt as RSP is restored by hardware during
+	; VM-Exit and RBX is explicitly loaded with 0 or 1 to hold the return
+	; value.
+	;
+	xor eax,eax
+	xor ecx,ecx
+	xor edx,edx
+	xor ebp,ebp
+	xor esi,esi
+	xor edi,edi
+	xor r8d,r8d
+	xor r9d,r9d
+	xor r10d,r10d
+	xor r11d,r11d
+	xor r12d,r12d
+	xor r13d,r13d
+	xor r14d,r14d
+	xor r15d,r15d
+
+	;
+	; IMPORTANT: RSB filling and SPEC_CTRL handling must be done before
+	; the first unbalanced RET after vmexit!
+	;
+	; For retpoline or IBRS, RSB filling is needed to prevent poisoned RSB
+	; entries and (in some cases) RSB underflow.
+	;
+	; eIBRS has its own protection against poisoned RSB, so it doesn't
+	; need the RSB filling sequence.  But it does need to be enabled, and a
+	; single call to retire, before the first unbalanced RET.
+	;
+
+	pop rdx		; @flags
+	pop rcx 	; @vmx
+
+	call vmx_spec_ctrl_restore_host
+
+	; Put return value in AX
+	mov rax,rbx
+
+	pop rbx
+
+	pop r12
+	pop r13
+	pop r14
+	pop r15
+	pop rbp
+	ret
 
 Lvmfail:
 	; 返回 1 表示 VM-Fail
@@ -213,92 +299,6 @@ vmx_sldt PROC
 	ret
 vmx_sldt ENDP
 
-vmx_vmexit PROC
-
-	; Temporarily save guest's RAX.
-	push rax
-
-	; Reload @regs to RAX.
-	mov rax,[rsp]
-
-	; Save all guest registers, including RAX from the stack
-	pop VCPU_RAX
-	mov VCPU_RCX,rcx
-	mov VCPU_RDX,rdx
-	mov VCPU_RBX,rbx
-	mov VCPU_RBP,rbp
-	mov VCPU_RSI,rsi
-	mov VCPU_RDI,rdi
-	mov VCPU_R8,r8
-	mov VCPU_R9,r9
-	mov VCPU_R10,r10
-	mov VCPU_R11,r11
-	mov VCPU_R12,r12
-	mov VCPU_R13,r13
-	mov VCPU_R14,r14
-	mov VCPU_R15,r15
-
-	; Clear return value to indicate VM-Exit (as opposed to VM-Fail).
-	xor ebx,ebx
-
-Lclear_regs::
-	; Discard @regs. The register is irrelevant, it just can't be RBX.
-	pop rax
-
-	;
-	; Clear all general purpose register except RSP and RBX to prevent
-	; speculative use of the guest's values, even those that are reloadoed
-	; via the stack. In theory, an L1 cache miss when restoring registers
-	; could lead to speculative execution with the guest's values.
-	; Zeroing XORs are dirt cheap, i.e. the extra paranoia is essentially
-	; free. RSP and RBX are exempt as RSP is restored by hardware during
-	; VM-Exit and RBX is explicitly loaded with 0 or 1 to hold the return
-	; value.
-	;
-	xor eax,eax
-	xor ecx,ecx
-	xor edx,edx
-	xor ebp,ebp
-	xor esi,esi
-	xor edi,edi
-	xor r8d,r8d
-	xor r9d,r9d
-	xor r10d,r10d
-	xor r11d,r11d
-	xor r12d,r12d
-	xor r13d,r13d
-	xor r14d,r14d
-	xor r15d,r15d
-
-	;
-	; IMPORTANT: RSB filling and SPEC_CTRL handling must be done before
-	; the first unbalanced RET after vmexit!
-	;
-	; For retpoline or IBRS, RSB filling is needed to prevent poisoned RSB
-	; entries and (in some cases) RSB underflow.
-	;
-	; eIBRS has its own protection against poisoned RSB, so it doesn't
-	; need the RSB filling sequence.  But it does need to be enabled, and a
-	; single call to retire, before the first unbalanced RET.
-	;
-
-	pop rdx		; @flags
-	pop rcx 	; @vmx
-
-	call vmx_spec_ctrl_restore_host
-
-	; Put return value in AX
-	mov rax,rbx
-
-	pop rbx
-
-	pop r12
-	pop r13
-	pop r14
-	pop r15
-	pop rbp
-	ret
-vmx_vmexit ENDP
 
 
 
