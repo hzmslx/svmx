@@ -238,7 +238,8 @@ static int vcpu_enter_guest(struct kvm_vcpu* vcpu)
 	// 准备陷入到guest
 	kvm_x86_ops.prepare_switch_to_guest(vcpu);
 
-
+	// 将vcpu模式设置为guest状态
+	vcpu->mode = IN_GUEST_MODE;
 
 	for (;;) {
 		/*
@@ -248,13 +249,15 @@ static int vcpu_enter_guest(struct kvm_vcpu* vcpu)
 		* to complete before servicing KVM_REQ_APICV_UPDATE.
 		*/
 
-
+		// 调用架构相关的run接口, 进入Guest 模式
 		exit_fastpath = kvm_x86_ops.vcpu_run(vcpu);
+		// 此处开始，说明已经发生了VM-exit
 		if (exit_fastpath != EXIT_FASTPATH_REENTER_GUEST)
 			break;
 
 		
-		
+		/* Note, VM-Exits that go down the "slow" path are accounted below. */
+		++vcpu->stat.exits;
 	}
 	
 	/*
@@ -281,6 +284,7 @@ static int vcpu_enter_guest(struct kvm_vcpu* vcpu)
 
 	vcpu->arch.last_vmentry_cpu = vcpu->cpu;
 	
+	// 设置vcpu模式，恢复host相关内容
 	vcpu->mode = OUTSIDE_GUEST_MODE;
 
 	kvm_x86_ops.handle_exit_irqoff(vcpu);

@@ -467,6 +467,7 @@ static void vmx_hardware_unsetup(void) {
 	free_kvm_area();
 }
 
+// 进入vmx模式
 static int kvm_cpu_vmxon(u64 vmxon_pointer) {
 	// enable the cr4's vmxe bit
 	__writecr4(__readcr4() | X86_CR4_VMXE);
@@ -817,6 +818,9 @@ static void vmx_vcpu_enter_exit(struct kvm_vcpu* vcpu,
 	if (vcpu->arch.cr2 != __readcr2())
 		vmx_set_cr2(vcpu->arch.cr2);
 
+	vmcs_writel(GUEST_RSP, guest_stack_pointer);
+
+	// 执行vmlaunch或者vmresume进入guest模式,虚拟机得以运行
 	vmx->fail = __vmx_vcpu_run(vmx, (ULONG_PTR*)&vcpu->arch.regs, flags);
 
 	vcpu->arch.cr2 = __readcr2();
@@ -3210,8 +3214,7 @@ static void init_vmcs(struct vcpu_vmx* vmx) {
 	vmcs_writel(GUEST_SS_BASE, 0);
 	vmcs_writel(GUEST_DS_BASE, 0);
 
-
-	vmcs_writel(GUEST_RIP, (ULONG_PTR)Lclear_regs);
+	vmcs_writel(GUEST_RIP, (ULONG_PTR)vm_restore_state);
 }
 
 #pragma warning(push)
@@ -3273,7 +3276,7 @@ static void __vmx_vcpu_reset(struct kvm_vcpu* vcpu) {
 	get_segment_desc(dt.address, var.selector, &desc);
 	set_segment_by_desc(&desc, &var);
 	vmx_set_segment(vcpu, &var, VCPU_SREG_ES);
-
+	
 	var.selector = vmx_get_cs();
 	var.base = get_segment_base(dt.address, var.selector);
 	var.limit = GetSegmentLimit(var.selector);
@@ -3315,7 +3318,7 @@ static void __vmx_vcpu_reset(struct kvm_vcpu* vcpu) {
 	get_segment_desc(dt.address, var.selector, &desc);
 	set_segment_by_desc(&desc, &var);
 	vmx_set_segment(vcpu, &var, VCPU_SREG_LDTR);
-
+	// 初始化vmcs域，会调用vmwrite
 	init_vmcs(vmx);
 
 	vmx->nested.posted_intr_nv = (u16)-1;
@@ -3708,7 +3711,7 @@ void vmx_set_constant_host_state(struct vcpu_vmx* vmx) {
 
 
 	vmcs_writel(HOST_IDTR_BASE, host_idt_base); /* 22.2.4 */
-
+	// 设置vmexit时的vmm入口地址
 	vmcs_writel(HOST_RIP, (ULONG_PTR)vmx_vmexit); /* 22.2.5 */
 
 	vmcs_write32(HOST_IA32_SYSENTER_CS, (u32)__readmsr(HOST_IA32_SYSENTER_CS));

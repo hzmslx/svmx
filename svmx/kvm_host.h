@@ -1277,7 +1277,7 @@ struct kvm_vcpu {
 
 	bool preempted;
 	bool ready;
-	// 架构相关部分
+	// 当前vcpu的架构
 	struct kvm_vcpu_arch arch;
 	// vcpu状态信息
 	struct kvm_vcpu_stat stat;
@@ -1726,6 +1726,7 @@ struct kvm_arch {
 };
 
 struct kvm {
+	// 保护mmu的锁
 	ERESOURCE mmu_lock;
 
 	// 内存槽操作锁
@@ -1851,6 +1852,8 @@ static struct kvm* kvm_arch_alloc_vm(void) {
 	return kvm;
 }
 
+int vm_restore_state();
+int vm_save_state(struct kvm_vcpu* vcpu);
 void kvm_arch_hardware_disable(void);
 void kvm_put_kvm(struct kvm* kvm);
 int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu* vcpu);
@@ -1911,7 +1914,7 @@ __gfn_to_hva_memslot(const struct kvm_memory_slot* slot, gfn_t gfn)
 }
 
 void kvm_mmu_destroy(struct kvm_vcpu* vcpu);
-// 初始化MMU的函数
+// 初始化MMU的函数,里面的函数都是地址转换的重点
 int kvm_mmu_create(struct kvm_vcpu* vcpu);
 
 int kvm_mmu_page_fault(struct kvm_vcpu* vcpu, gpa_t cr2_or_gpa, u64 error_code,
@@ -2030,3 +2033,5 @@ void* kvm_mmu_memory_cache_alloc(struct kvm_mmu_memory_cache* mc);
 
 void kvm_mmu_free_roots(struct kvm* kvm, struct kvm_mmu* mmu,
 	ULONG roots_to_free);
+
+ULONG_PTR guest_stack_pointer;

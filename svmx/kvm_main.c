@@ -32,6 +32,8 @@ struct kvm* g_kvm = NULL;
 static ULONG s_vcpu_size;
 
 
+
+
 int kvm_init(unsigned vcpu_size, unsigned vcpu_align) {
 	UNREFERENCED_PARAMETER(vcpu_align);
 	NTSTATUS status = STATUS_SUCCESS;
@@ -318,7 +320,7 @@ int kvm_vm_ioctl_create_vcpu(struct kvm* kvm, u32 id) {
 		}
 		RtlZeroMemory(page, PAGE_SIZE);
 		vcpu->run = page;
-
+		// 初始化vmx中的vcpu结构
 		kvm_vcpu_init(vcpu, kvm, id);
 
 
@@ -358,14 +360,13 @@ ULONG_PTR RunKvm(ULONG_PTR Arg) {
 	LogErr("irql: 0x%x\n", irql);
 	int cpu = KeGetCurrentProcessorNumber();
 	struct kvm_vcpu* vcpu = g_kvm->vcpu_array[cpu];
-	int run_ret = kvm_arch_vcpu_ioctl_run(vcpu);
-	int r = STATUS_SUCCESS;
+	int run_ret = vm_save_state(vcpu);
 	if (run_ret < 0) {
 		// error: kvm run failed
+		struct kvm_run* run = vcpu->run;
+		run_ret = kvm_arch_handle_exit(vcpu, run);
 	}
-	struct kvm_run* run = vcpu->run;
-	r = kvm_arch_handle_exit(vcpu, run);
-	return r;
+	return run_ret;
 }
 
 long kvm_vcpu_ioctl(unsigned int ioctl, PIRP Irp) {

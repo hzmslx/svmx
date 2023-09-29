@@ -5,6 +5,7 @@ PUBLIC vmx_vmexit
 EXTERN vmx_update_host_rsp :PROC
 EXTERN vmx_spec_ctrl_restore_host :PROC
 
+
 VMX_RUN_VMRESUME DD 1
 VCPU_RAX	DQ	0
 VCPU_RCX	DQ	0
@@ -313,6 +314,8 @@ vmx_invept PROC
 	invept rcx,oword ptr [rdx]
 	ret
 vmx_invept ENDP
+
+
 
 
 END

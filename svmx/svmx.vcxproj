@@ -248,6 +248,7 @@
     <ClInclude Include="x86.h" />
   </ItemGroup>
   <ItemGroup>
+    <MASM Include="vm.asm" />
     <MASM Include="vmxenter.asm" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

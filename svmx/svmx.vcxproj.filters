@@ -245,5 +245,8 @@
     <MASM Include="vmxenter.asm">
       <Filter>vmx</Filter>
     </MASM>
+    <MASM Include="vm.asm">
+      <Filter>kvm</Filter>
+    </MASM>
   </ItemGroup>
 </Project>
