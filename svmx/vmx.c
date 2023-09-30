@@ -3260,14 +3260,14 @@ static void get_segment_desc(ULONG_PTR gdt_base, USHORT selector, x86_segment_de
 
 	if (sel.ti == LDT_SEL) {
 		x86_segment_selector ldt_sel = { vmx_sldt() };
-		desc = (x86_segment_descriptor*)(gdt_base +
+		x86_segment_descriptor* ldt_desc = (x86_segment_descriptor*)(gdt_base +
 			ldt_sel.index * sizeof(x86_segment_descriptor));
-		ULONG_PTR ldt_base = x86_segment_base(desc);
-		desc = (x86_segment_descriptor*)(ldt_base +
+		ULONG_PTR ldt_base = x86_segment_base(ldt_desc);
+		*desc = *(x86_segment_descriptor*)(ldt_base +
 			sel.index * sizeof(x86_segment_descriptor));
 	}
 	else {
-		desc = (x86_segment_descriptor*)(gdt_base +
+		*desc = *(x86_segment_descriptor*)(gdt_base +
 			sel.index * sizeof(x86_segment_descriptor));
 	}
 }
@@ -3282,10 +3282,10 @@ static void __vmx_vcpu_reset(struct kvm_vcpu* vcpu) {
 	vmx_set_gdt(vcpu, &dt);
 
 	ULONG_PTR rflags = __readeflags();
-	vmx_set_rflags(vcpu, (ULONG)rflags);
+	vmx_set_rflags(vcpu, rflags);
 
 	struct kvm_segment var = { 0 };
-	x86_segment_descriptor desc;
+	x86_segment_descriptor desc = { 0 };
 	var.selector = vmx_str();
 	var.base = get_segment_base(dt.address, var.selector);
 	var.limit = GetSegmentLimit(var.selector);
@@ -3393,7 +3393,7 @@ static void vmx_vcpu_reset(struct kvm_vcpu* vcpu, bool init_event) {
 	vmx_sgdt(&dt);
 
 	struct kvm_segment var = { 0 };
-	x86_segment_descriptor desc;
+	x86_segment_descriptor desc = { 0 };
 	var.selector = vmx_str();
 	var.base = get_segment_base(dt.address, var.selector);
 	var.limit = GetSegmentLimit(var.selector);
