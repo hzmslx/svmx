@@ -234,6 +234,8 @@ static int vcpu_enter_guest(struct kvm_vcpu* vcpu)
 
 	// 加载mmu
 	r = kvm_mmu_reload(vcpu);
+	if (r)
+		goto cancel_injection;
 
 	// 准备陷入到guest
 	kvm_x86_ops.prepare_switch_to_guest(vcpu);
@@ -255,6 +257,10 @@ static int vcpu_enter_guest(struct kvm_vcpu* vcpu)
 		if (exit_fastpath != EXIT_FASTPATH_REENTER_GUEST)
 			break;
 
+		if (kvm_vcpu_exit_request(vcpu)) {
+			exit_fastpath = EXIT_FASTPATH_EXIT_HANDLED;
+			break;
+		}
 		
 		/* Note, VM-Exits that go down the "slow" path are accounted below. */
 		++vcpu->stat.exits;
@@ -280,23 +286,32 @@ static int vcpu_enter_guest(struct kvm_vcpu* vcpu)
 	* care about the messed up debug address registers. But if
 	* we have some of them active, restore the old state.
 	*/
-	
-
 	vcpu->arch.last_vmentry_cpu = vcpu->cpu;
-	
+
 	// 设置vcpu模式，恢复host相关内容
 	vcpu->mode = OUTSIDE_GUEST_MODE;
 
 	kvm_x86_ops.handle_exit_irqoff(vcpu);
 
+	
 	++vcpu->stat.exits;
 
 	/*
 	* Profile KVM exit RIPs
 	*/
+	
 
 	// vmexit的处理,处理虚拟机异常
 	r = kvm_x86_ops.handle_exit(vcpu, exit_fastpath);
+
+	return r;
+
+cancel_injection:
+	
+	if (vcpu->arch.apic_attention) {
+
+	}
+
 
 	return r;
 }
@@ -602,11 +617,17 @@ void kvm_vcpu_reset(struct kvm_vcpu* vcpu, bool init_event) {
 	ULONG_PTR old_cr0 = kvm_read_cr0(vcpu);
 	ULONG_PTR new_cr0;
 
+	vcpu->arch.hflags = 0;
+
 	vcpu->arch.dr6 = DR6_ACTIVE_LOW;
 	vcpu->arch.dr7 = DR7_FIXED_1;
 	kvm_update_dr7(vcpu);
 
 	vcpu->arch.cr2 = __readcr2();
+
+	vcpu->arch.apf.msr_en_val = 0;
+	vcpu->arch.apf.msr_int_val = 0;
+	vcpu->arch.st.msr_val = 0;
 
 	vcpu->arch.apf.halted = FALSE;
 
@@ -621,7 +642,7 @@ void kvm_vcpu_reset(struct kvm_vcpu* vcpu, bool init_event) {
 	kvm_set_rflags(vcpu, rflags);
 	
 
-	vcpu->arch.cr3 = 0;
+	vcpu->arch.cr3 = __readcr3();
 	kvm_register_mark_dirty(vcpu, VCPU_EXREG_CR3);
 	/*
 	* CR0.CD/NW are set on RESET, preserved on INIT.  Note, some versions
@@ -764,7 +785,7 @@ int kvm_handle_invalid_op(struct kvm_vcpu* vcpu) {
 	return 0;
 }
 
-static inline bool kvm_vcpu_exit_request(struct kvm_vcpu* vcpu) {
+bool kvm_vcpu_exit_request(struct kvm_vcpu* vcpu) {
 	UNREFERENCED_PARAMETER(vcpu);
 	return FALSE;
 }
@@ -1050,4 +1071,19 @@ void kvm_arch_vcpu_destroy(struct kvm_vcpu* vcpu) {
 int kvm_x86_init(void) {
 	kvm_mmu_x86_module_init();
 	return 0;
+}
+
+int kvm_skip_emulated_instruction(struct kvm_vcpu* vcpu) {
+	ULONG_PTR rflags = kvm_x86_ops.get_rflags(vcpu);
+	int r;
+
+	r = kvm_x86_ops.skip_emulated_instruction(vcpu);
+	if (!r)
+		return 0;
+	
+	if (rflags & X86_EFLAGS_TF) {
+
+	}
+
+	return r;
 }

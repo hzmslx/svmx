@@ -237,6 +237,7 @@
     <ClInclude Include="spte.h" />
     <ClInclude Include="svm.h" />
     <ClInclude Include="svmx.h" />
+    <ClInclude Include="tdp_iter.h" />
     <ClInclude Include="tdp_mmu.h" />
     <ClInclude Include="types.h" />
     <ClInclude Include="virtext.h" />

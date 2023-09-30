@@ -176,7 +176,6 @@ void vmx_cache_reg(struct kvm_vcpu* vcpu, enum kvm_reg reg);
 ULONG_PTR vmx_get_rflags(struct kvm_vcpu* vcpu);
 void vmx_set_rflags(struct kvm_vcpu* vcpu, ULONG_PTR rflags);
 void vmx_flush_tlb(struct kvm_vcpu* vcpu);
-void skip_emulated_instruction(struct kvm_vcpu* vcpu);
 void vmx_set_interrupt_shadow(struct kvm_vcpu* vcpu, int mask);
 u32 vmx_get_interrupt_shadow(struct kvm_vcpu* vcpu, int mask);
 void vmx_patch_hypercall(struct kvm_vcpu* vcpu, unsigned char* hypercall);
@@ -825,6 +824,7 @@ static void vmx_vcpu_enter_exit(struct kvm_vcpu* vcpu,
 
 	vcpu->arch.cr2 = __readcr2();
 
+	// __vmx_vcpu_run返回 0 表明是 VM-exit, 返回1表明是 VM-Fail
 	if (vmx->fail)
 		vmx->exit_reason.full = 0xdead;
 	else
@@ -913,6 +913,8 @@ static fastpath_t vmx_vcpu_run(struct kvm_vcpu* vcpu) {
 		vmx_set_interrupt_shadow(vcpu, 0);
 
 	vmx_vcpu_enter_exit(vcpu, __vmx_vcpu_run_flags(vmx));
+
+	
 
 	/* MSR_IA32_DEBUGCTLMSR is zeroed on vmexit. Restore it if needed */
 	if (vmx->host_debugctlmsr)
@@ -1082,9 +1084,41 @@ static int handle_ept_violation(struct kvm_vcpu* vcpu) {
 	return kvm_mmu_page_fault(vcpu, gpa, error_code, NULL, 0);
 }
 
+static bool vmx_can_emulate_instruction(struct kvm_vcpu* vcpu, int emul_type,
+	void* insn, int insn_len) {
+	UNREFERENCED_PARAMETER(emul_type);
+	UNREFERENCED_PARAMETER(insn);
+	UNREFERENCED_PARAMETER(insn_len);
+	/*
+	* Emulation of instructions in SGX enclaves is impossible as RIP does
+	* not point at the failing instruction, and even if it dis, the code
+	* stream is inaccessible. Inject #UD instead of exiting to userspace
+	* so that guest userspace can't DoS the guest simply by triggering
+	* emulation (enclaves are CPL3 only)
+	*/
+	if (to_vmx(vcpu)->exit_reason.enclave_mode) {
+		
+		return FALSE;
+	}
+	return TRUE;
+}
+
 static int handle_ept_misconfig(struct kvm_vcpu* vcpu) {
-	UNREFERENCED_PARAMETER(vcpu);
-	return 0;
+	gpa_t gpa;
+
+	if (!vmx_can_emulate_instruction(vcpu, EMULTYPE_PF, NULL, 0))
+		return 1;
+
+	/*
+	* A nested guest cannot optimize MMIO vmexits, because we have an
+	* nGPA here instead of the require GPA.
+	*/
+	gpa = vmcs_read64(GUEST_PHYSICAL_ADDRESS);
+	if (!is_guest_mode(vcpu)) {
+		return kvm_skip_emulated_instruction(vcpu);
+	}
+
+	return kvm_mmu_page_fault(vcpu, gpa, PFERR_RSVD_MASK, NULL, 0);
 }
 
 static int handle_preemption_timer(struct kvm_vcpu* vcpu) {
@@ -1218,7 +1252,6 @@ static void vmx_flush_pml_buffer(struct kvm_vcpu* vcpu) {
  * The guest has exited.  See if we can fix it or if we need userspace
  * assistance.
  */
- // __vmx_vcpu_run返回 0 表明是 VM-exit, 返回1表明是 VM-Fail
 static int __vmx_handle_exit(struct kvm_vcpu* vcpu, fastpath_t exit_fastpath)
 {
 	struct vcpu_vmx* vmx = to_vmx(vcpu);
@@ -1236,6 +1269,7 @@ static int __vmx_handle_exit(struct kvm_vcpu* vcpu, fastpath_t exit_fastpath)
 	 */
 	if (enable_pml && !is_guest_mode(vcpu))
 		vmx_flush_pml_buffer(vcpu);
+
 
 	if (is_guest_mode(vcpu)) {
 		/*
@@ -1356,6 +1390,17 @@ static void vmx_handle_exit_irqoff(struct kvm_vcpu* vcpu) {
 static void vmx_load_mmu_pgd(struct kvm_vcpu* vcpu, hpa_t root_hpa,
 	int root_level);
 
+static int skip_emulated_instruction(struct kvm_vcpu* vcpu) {
+	UNREFERENCED_PARAMETER(vcpu);
+
+	return 1;
+}
+
+static int vmx_skip_emulated_instruction(struct kvm_vcpu* vcpu) {
+	
+	return skip_emulated_instruction(vcpu);
+}
+
 static struct kvm_x86_ops vmx_x86_ops = {
 	.check_processor_compatibility = vmx_check_processor_compat,
 
@@ -1399,7 +1444,7 @@ static struct kvm_x86_ops vmx_x86_ops = {
 	.vcpu_pre_run = vmx_vcpu_pre_run,
 	.vcpu_run = vmx_vcpu_run,
 	.handle_exit = vmx_handle_exit,
-
+	.skip_emulated_instruction = vmx_skip_emulated_instruction,
 	.write_tsc_offset = vmx_write_tsc_offset,
 
 	.load_mmu_pgd = vmx_load_mmu_pgd,
@@ -1898,7 +1943,7 @@ void vmx_set_cr4(struct kvm_vcpu* vcpu, ULONG_PTR cr4) {
 	* is in force while we are in guest mode.  Do not let guests control
 	* this bit, even if host CR4.MCE == 0.
 	*/
-	unsigned long hw_cr4;
+	ULONG_PTR hw_cr4;
 
 	hw_cr4 = (cr4 & X86_CR4_MCE) | (cr4 & ~X86_CR4_MCE);
 	if (is_unrestricted_guest(vcpu))
@@ -2057,9 +2102,7 @@ void vmx_flush_tlb(struct kvm_vcpu* vcpu) {
 
 
 
-void skip_emulated_instruction(struct kvm_vcpu* vcpu) {
-	UNREFERENCED_PARAMETER(vcpu);
-}
+
 
 void vmx_set_interrupt_shadow(struct kvm_vcpu* vcpu, int mask) {
 	UNREFERENCED_PARAMETER(vcpu);

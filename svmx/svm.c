@@ -154,7 +154,6 @@ void svm_set_rflags(struct kvm_vcpu* vcpu, unsigned long rflags);
 void svm_flush_tlb(struct kvm_vcpu* vcpu);
 void svm_vcpu_run(struct kvm_vcpu* vcpu, struct kvm_run* kvm_run);
 int handle_exit(struct kvm_run* kvm_run, struct kvm_vcpu* vcpu);
-static void skip_emulated_instruction(struct kvm_vcpu* vcpu);
 void svm_set_interrupt_shadow(struct kvm_vcpu* vcpu, int mask);
 u32 svm_get_interrupt_shadow(struct kvm_vcpu* vcpu, int mask);
 void svm_patch_hypercall(struct kvm_vcpu* vcpu, unsigned char* hypercall);

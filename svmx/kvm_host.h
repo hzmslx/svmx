@@ -2035,3 +2035,14 @@ void kvm_mmu_free_roots(struct kvm* kvm, struct kvm_mmu* mmu,
 	ULONG roots_to_free);
 
 ULONG_PTR guest_stack_pointer;
+
+int kvm_skip_emulated_instruction(struct kvm_vcpu* vcpu);
+
+static inline struct kvm_memslots* __kvm_memslots(struct kvm* kvm,
+	int as_id) {
+	return kvm->memslots[as_id];
+}
+
+static inline struct kvm_memslots* kvm_memslots(struct kvm* kvm) {
+	return __kvm_memslots(kvm, 0);
+}

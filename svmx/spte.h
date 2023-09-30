@@ -139,3 +139,11 @@ void kvm_mmu_reset_all_pte_masks(void);
  */
 #define SPTE_MMIO_ALLOWED_MASK (BIT_ULL(63) | GENMASK_ULL(51, 12) | GENMASK_ULL(2, 0))
 
+
+
+
+static inline bool is_rsvd_spte(struct rsvd_bits_validate* rsvd_check,
+	u64 spte, int level) {
+	return __is_bad_mt_xwr(rsvd_check, spte) ||
+		__is_rsvd_bits_set(rsvd_check, spte, level);
+}

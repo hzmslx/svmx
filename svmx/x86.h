@@ -1,5 +1,6 @@
 #pragma once
 #include "kvm_cache_regs.h"
+#include "mmu.h"
 
 extern bool enable_vmware_backdoor;
 
@@ -104,3 +105,27 @@ static inline bool kvm_notify_vmexit_enabled(struct kvm* kvm) {
 
 void kvm_vcpu_mtrr_init(struct kvm_vcpu* vcpu);
 int kvm_x86_init(void);
+bool kvm_vcpu_exit_request(struct kvm_vcpu* vcpu);
+
+static inline bool vcpu_match_mmio_gen(struct kvm_vcpu* vcpu) {
+	return vcpu->arch.mmio_gen == kvm_memslots(vcpu->kvm)->generation;
+}
+
+static inline bool vcpu_match_mmio_gva(struct kvm_vcpu* vcpu,
+	ULONG_PTR gva) {
+	if (vcpu_match_mmio_gen(vcpu) && vcpu->arch.mmio_gva &&
+		vcpu->arch.mmio_gva == (gva & PAGE_MASK))
+		return TRUE;
+
+	return FALSE;
+}
+
+static inline bool vcpu_match_mmio_gpa(struct kvm_vcpu* vcpu,
+	gpa_t gpa)
+{
+	if (vcpu_match_mmio_gen(vcpu) && vcpu->arch.mmio_gfn &&
+		vcpu->arch.mmio_gfn == gpa >> PAGE_SHIFT)
+		return TRUE;
+
+	return FALSE;
+}

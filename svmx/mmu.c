@@ -82,6 +82,12 @@ struct kvm_mmu_role_regs {
 /* make pte_list_desc fit well in cache lines */
 #define PTE_LIST_EXT 14
 
+/**
+ * lower_32_bits - return bits 0-31 of a number
+ * @n: the number we're accessing
+ */
+#define lower_32_bits(n) ((u32)((n) & 0xffffffff))
+
 /*
  * struct pte_list_desc is the core data structure used to implement a custom
  * list for tracking a set of related SPTEs, e.g. all the SPTEs that map a
@@ -1139,22 +1145,98 @@ static int mmu_first_shadow_root_alloc(struct kvm* kvm) {
 	return 0;
 }
 
-/**
- * lower_32_bits - return bits 0-31 of a number
- * @n: the number we're accessing
- */
-#define lower_32_bits(n) ((u32)((n) & 0xffffffff))
+static bool mmio_info_in_cache(struct kvm_vcpu* vcpu, u64 addr, 
+	bool direct) {
+	/*
+	* A nested guest cannot use the MMIO cache if it is using nested
+	* page tables, because cr2 is a nGPA while the cache stores GPAs.
+	*/
+	if (mmu_is_nested(vcpu))
+		return FALSE;
+
+	if (direct)
+		return vcpu_match_mmio_gpa(vcpu, addr);
+
+	return vcpu_match_mmio_gva(vcpu, addr);
+}
+
+static inline bool is_tdp_mmu_active(struct kvm_vcpu* vcpu) {
+	return tdp_mmu_enabled && vcpu->arch.mmu->root_role.direct;
+}
+
+/*
+* Return the level of the lowest level SPTE added to sptes.
+* That SPTE may be non-present.
+*/
+static int get_walk(struct kvm_vcpu* vcpu, u64 addr, 
+	u64* sptes, int* root_level) {
+	UNREFERENCED_PARAMETER(vcpu);
+	UNREFERENCED_PARAMETER(addr);
+	UNREFERENCED_PARAMETER(sptes);
+	UNREFERENCED_PARAMETER(root_level);
+	int leaf = -1;
+
+	return leaf;
+}
+
+/* return true if reserved bit(s) are detected on a valid, non-MMIO SPTE. */
+static bool get_mmio_spte(struct kvm_vcpu* vcpu, u64 addr, u64* sptep)
+{
+	u64 sptes[PT64_ROOT_MAX_LEVEL + 1];
+	struct rsvd_bits_validate* rsvd_check;
+	int root, leaf, level;
+	bool reserved = FALSE;
+
+	if (is_tdp_mmu_active(vcpu)) {
+		leaf = kvm_tdp_mmu_get_walk(vcpu, addr, sptes, &root);
+	}
+	else
+		leaf = get_walk(vcpu, addr, sptes, &root);
+
+	if (leaf < 0) {
+		*sptep = 0ull;
+		return reserved;
+	}
+
+	rsvd_check = &vcpu->arch.mmu->shadow_zero_check;
+
+	for (level = root; level >= leaf; level--) {
+		reserved |= is_rsvd_spte(rsvd_check, sptes[level], level);
+	}
+
+	*sptep = sptes[leaf];
+
+	return reserved;
+}
+
+static int handle_mmio_page_fault(struct kvm_vcpu* vcpu, 
+	u64 addr, bool direct) {
+	u64 spte;
+	bool reserved;
+
+	if (mmio_info_in_cache(vcpu, addr, direct))
+		return RET_PF_EMULATE;
+
+	reserved = get_mmio_spte(vcpu, addr, &spte);
+
+	/*
+	* If the page table is zapped by other cpus, let CPU fault again on
+	* the address
+	*/
+	return RET_PF_RETRY;
+}
 
 int kvm_mmu_page_fault(struct kvm_vcpu* vcpu, gpa_t cr2_or_gpa, u64 error_code,
 	void* insn, int insn_len) {
 	int r, emulation_type = EMULTYPE_PF;
+	bool direct = (bool)vcpu->arch.mmu->root_role.direct;
 
 	if (!VALID_PAGE(vcpu->arch.mmu->root.hpa))
 		return RET_PF_RETRY;
 
 	r = RET_PF_INVALID;
 	if (error_code & PFERR_RSVD_MASK) {
-		
+		r = handle_mmio_page_fault(vcpu, cr2_or_gpa, direct);
 		if (r == RET_PF_EMULATE)
 			goto emulate;
 	}

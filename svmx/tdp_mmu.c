@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "tdp_mmu.h"
 #include "mmu_internal.h"
+#include "tdp_iter.h"
 
 /* Initializes the TDP MMU for the VM, if enabled. */
 int kvm_mmu_init_tdp_mmu(struct kvm* kvm)
@@ -96,4 +97,21 @@ void kvm_tdp_mmu_put_root(struct kvm* kvm, struct kvm_mmu_page* root,
 	// spin_unlock
 
 	
+}
+
+/*
+* Return the level of the lowest level SPTE added to sptes.
+* That SPTE may be non-present.
+* 
+* Must be called between kvm_tdp_mmu_walk_lockless_{begin,end}.
+*/
+int kvm_tdp_mmu_get_walk(struct kvm_vcpu* vcpu, u64 addr,
+	u64* sptes, int* root_level) {
+	UNREFERENCED_PARAMETER(vcpu);
+	UNREFERENCED_PARAMETER(addr);
+	UNREFERENCED_PARAMETER(sptes);
+	UNREFERENCED_PARAMETER(root_level);
+	int leaf = -1;
+	
+	return leaf;
 }

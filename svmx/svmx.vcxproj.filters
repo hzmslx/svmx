@@ -240,6 +240,9 @@
     <ClInclude Include="perf_event.h">
       <Filter>asm</Filter>
     </ClInclude>
+    <ClInclude Include="tdp_iter.h">
+      <Filter>mmu</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <MASM Include="vmxenter.asm">
