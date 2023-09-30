@@ -39,7 +39,7 @@ static inline ULONG_PTR kvm_read_cr0_bits(struct kvm_vcpu* vcpu, ULONG_PTR mask)
 
 static inline ULONG_PTR kvm_read_cr0(struct kvm_vcpu* vcpu)
 {
-	return kvm_read_cr0_bits(vcpu, ~0UL);
+	return kvm_read_cr0_bits(vcpu, ~0ULL);
 }
 
 static inline ULONG_PTR kvm_read_cr4_bits(struct kvm_vcpu* vcpu, ULONG_PTR mask)

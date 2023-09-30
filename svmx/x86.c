@@ -628,7 +628,7 @@ void kvm_vcpu_reset(struct kvm_vcpu* vcpu, bool init_event) {
 	* of Intel's SDM list CD/NW as being set on INIT, but they contradict
 	* (or qualify) that with a footnote stating that CD/NW are preserved.
 	*/
-	new_cr0 = X86_CR0_ET;
+	new_cr0 = __readcr0() | X86_CR0_ET;
 	if (init_event)
 		new_cr0 |= (old_cr0 & (X86_CR0_NW | X86_CR0_CD));
 	else

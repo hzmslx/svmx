@@ -42,20 +42,31 @@
 #define X86_EFLAGS_ID_BIT	21 /* CPUID detection */
 #define X86_EFLAGS_ID		_BITUL(X86_EFLAGS_ID_BIT)
 
-/*
- * Basic CPU control in CR0
- */
-#define X86_CR0_PE	0x00000001 /* Protection Enable */
-#define X86_CR0_MP	0x00000002 /* Monitor Coprocessor */
-#define X86_CR0_EM	0x00000004 /* Emulation */
-#define X86_CR0_TS	0x00000008 /* Task Switched */
-#define X86_CR0_ET	0x00000010 /* Extension Type */
-#define X86_CR0_NE	0x00000020 /* Numeric Error */
-#define X86_CR0_WP	0x00010000 /* Write Protect */
-#define X86_CR0_AM	0x00040000 /* Alignment Mask */
-#define X86_CR0_NW	0x20000000 /* Not Write-through */
-#define X86_CR0_CD	0x40000000 /* Cache Disable */
-#define X86_CR0_PG	0x80000000 /* Paging */
+ /*
+  * Basic CPU control in CR0
+  */
+#define X86_CR0_PE_BIT		0 /* Protection Enable */
+#define X86_CR0_PE		_BITUL(X86_CR0_PE_BIT)
+#define X86_CR0_MP_BIT		1 /* Monitor Coprocessor */
+#define X86_CR0_MP		_BITUL(X86_CR0_MP_BIT)
+#define X86_CR0_EM_BIT		2 /* Emulation */
+#define X86_CR0_EM		_BITUL(X86_CR0_EM_BIT)
+#define X86_CR0_TS_BIT		3 /* Task Switched */
+#define X86_CR0_TS		_BITUL(X86_CR0_TS_BIT)
+#define X86_CR0_ET_BIT		4 /* Extension Type */
+#define X86_CR0_ET		_BITUL(X86_CR0_ET_BIT)
+#define X86_CR0_NE_BIT		5 /* Numeric Error */
+#define X86_CR0_NE		_BITUL(X86_CR0_NE_BIT)
+#define X86_CR0_WP_BIT		16 /* Write Protect */
+#define X86_CR0_WP		_BITUL(X86_CR0_WP_BIT)
+#define X86_CR0_AM_BIT		18 /* Alignment Mask */
+#define X86_CR0_AM		_BITUL(X86_CR0_AM_BIT)
+#define X86_CR0_NW_BIT		29 /* Not Write-through */
+#define X86_CR0_NW		_BITUL(X86_CR0_NW_BIT)
+#define X86_CR0_CD_BIT		30 /* Cache Disable */
+#define X86_CR0_CD		_BITUL(X86_CR0_CD_BIT)
+#define X86_CR0_PG_BIT		31 /* Paging */
+#define X86_CR0_PG		_BITUL(X86_CR0_PG_BIT)
 
 
  /*

@@ -1857,6 +1857,7 @@ void vmx_set_cr0(struct kvm_vcpu* vcpu, ULONG_PTR cr0) {
 	vmcs_writel(CR0_READ_SHADOW, cr0);
 	vmcs_writel(GUEST_CR0, hw_cr0);
 	vcpu->arch.cr0 = cr0;
+	kvm_register_mark_available(vcpu, VCPU_EXREG_CR0);
 
 
 #ifdef  _WIN64
@@ -1868,7 +1869,9 @@ void vmx_set_cr0(struct kvm_vcpu* vcpu, ULONG_PTR cr0) {
 	}
 #endif //  _WIN64
 
+	if (enable_ept && !is_unrestricted_guest(vcpu)) {
 
+	}
 }
 
 void vmx_set_cr3(struct kvm_vcpu* vcpu, ULONG_PTR cr3) {
@@ -1893,11 +1896,11 @@ void vmx_set_cr4(struct kvm_vcpu* vcpu, ULONG_PTR cr4) {
 	/*
 	* Pass through host's Machine Check Enable value to hw_cr4, which
 	* is in force while we are in guest mode.  Do not let guests control
-	* this bit, even if host CR4.MCE == 0.vmx_set_cr4(
+	* this bit, even if host CR4.MCE == 0.
 	*/
 	unsigned long hw_cr4;
 
-	hw_cr4 = cr4 & ~X86_CR4_MCE;
+	hw_cr4 = (cr4 & X86_CR4_MCE) | (cr4 & ~X86_CR4_MCE);
 	if (is_unrestricted_guest(vcpu))
 		hw_cr4 |= KVM_VM_CR4_ALWAYS_ON_UNRESTRICTED_GUEST;
 	else if (vmx->rmode.vm86_active)
@@ -1910,8 +1913,28 @@ void vmx_set_cr4(struct kvm_vcpu* vcpu, ULONG_PTR cr4) {
 
 	if (!is_unrestricted_guest(vcpu)) {
 		if (enable_ept) {
-
+			if (!is_paging(vcpu)) {
+				hw_cr4 &= ~X86_CR4_PAE;
+				hw_cr4 |= X86_CR4_PSE;
+			}
+			else if (!(cr4 & X86_CR4_PAE)) {
+				hw_cr4 &= ~X86_CR4_PAE;
+			}
 		}
+
+		/*
+		* SMEP/SMAP/PKU is disabled if CPU is in non-paging mode in
+		* hardware. To emulate this behavior, SMEP/SMAP/PKU needs
+		* to be manually disabled when guest switches to non-paging
+		* mode.
+		* 
+		* If !enable_unrestricted_guest, the CPU is always running
+		* with CR0.PG=1 and CR4 needs to be modified.
+		* If enable_unrestricted_guest, the CPU automatically
+		* disables SMEP/SMAP/PKU when the guest sets CR0.PG=0.
+		*/
+		if (!is_paging(vcpu))
+			hw_cr4 &= ~(X86_CR4_SMEP | X86_CR4_SMAP | X86_CR4_PKE);
 	}
 
 
@@ -2702,10 +2725,10 @@ void dump_vmcs(struct kvm_vcpu* vcpu) {
 	LogErr("VMCS %p, last attempted VM-entry on CPU %d\n",
 		vmx->loaded_vmcs->vmcs, vcpu->arch.last_vmentry_cpu);
 	LogErr("*** Guest State ***\n");
-	LogErr("CR0: actual=0x%016lx,shadow=0x%016lx,gh_mask=%016lx\n",
+	LogErr("CR0: actual=0x%p,shadow=0x%p,gh_mask=0x%p\n",
 		vmcs_readl(GUEST_CR0), vmcs_readl(CR0_READ_SHADOW),
 		vmcs_readl(CR0_GUEST_HOST_MASK));
-	LogErr("CR4: actual=0x%016lx,shadow=0x%016lx,gh_mask=%016lx\n",
+	LogErr("CR4: actual=0x%p,shadow=0x%p,gh_mask=0x%p\n",
 		vmcs_readl(GUEST_CR4), vmcs_readl(CR4_READ_SHADOW),
 		vmcs_readl(CR4_GUEST_HOST_MASK));
 	LogErr("CR3 = 0x%016lx\n", vmcs_readl(GUEST_CR3));
@@ -3360,6 +3383,7 @@ static void vmx_vcpu_reset(struct kvm_vcpu* vcpu, bool init_event) {
 		__vmx_vcpu_reset(vcpu);
 
 	vmx->rmode.vm86_active = 0;
+	vmx->spec_ctrl = 0;
 
 	// set guest segment fields
 	vmcs_write16(GUEST_CS_SELECTOR, vmx_get_cs());
@@ -3527,6 +3551,7 @@ static int vmx_get_msr_feature(struct kvm_msr_entry* msr)
 void set_cr4_guest_host_mask(struct vcpu_vmx* vmx) {
 	struct kvm_vcpu* vcpu = &vmx->vcpu;
 
+	vcpu->arch.cr4_guest_rsvd_bits = CR4_RESERVED_BITS;
 	vcpu->arch.cr4_guest_owned_bits = KVM_POSSIBLE_CR4_GUEST_BITS &
 		~vcpu->arch.cr4_guest_rsvd_bits;
 
