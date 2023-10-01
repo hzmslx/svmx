@@ -148,6 +148,7 @@ int kvm_mmu_vendor_module_init(void) {
 			FALSE, FALSE, NULL);
 		if (!pte_list_desc_cache_mdl)
 			break;
+		// 申请缓存用于反向映射
 		pte_list_desc_cache = MmMapLockedPagesSpecifyCache(pte_list_desc_cache_mdl,
 			KernelMode,
 			MmNonCached,
@@ -164,6 +165,7 @@ int kvm_mmu_vendor_module_init(void) {
 			status = STATUS_NO_MEMORY;
 			break;
 		}
+		// 申请缓存，用于分配struct kvm_mmu_page
 		mmu_page_header_cache = MmMapLockedPagesSpecifyCache(mmu_page_header_mdl,
 			KernelMode,
 			MmNonCached,
@@ -253,7 +255,7 @@ static void init_kvm_softmmu(struct kvm_vcpu* vcpu,
 }
 
 
-
+// 初始化mmu相关的全局变量
 void kvm_configure_mmu(bool enable_tdp, int tdp_forced_root_level,
 	int tdp_max_root_level, int tdp_huge_page_level) {
 	tdp_enabled = enable_tdp;
@@ -917,7 +919,7 @@ static void reset_guest_paging_metadata(struct kvm_vcpu* vcpu,
 	reset_guest_paging_metadata(vcpu, mmu);
 }
 
-// EPT的初始化
+// EPT的初始化,基本上就是填充vcpu->arch.root_mmu结构体
 static void init_kvm_tdp_mmu(struct kvm_vcpu* vcpu,
 	union kvm_cpu_role cpu_role) {
 	struct kvm_mmu* context = &vcpu->arch.root_mmu;
@@ -945,15 +947,16 @@ static void init_kvm_tdp_mmu(struct kvm_vcpu* vcpu,
 	
 }
 
+// mmu的初始化
 void kvm_init_mmu(struct kvm_vcpu* vcpu) {
 	struct kvm_mmu_role_regs regs = vcpu_to_role_regs(vcpu);
 	union kvm_cpu_role cpu_role = kvm_calc_cpu_role(vcpu, &regs);
 
-	if (mmu_is_nested(vcpu))
+	if (mmu_is_nested(vcpu)) // 嵌套虚拟化
 		init_kvm_nested_mmu(vcpu, cpu_role);
-	else if (tdp_enabled)
+	else if (tdp_enabled) // 是否支持EPT
 		init_kvm_tdp_mmu(vcpu, cpu_role);
-	else
+	else // 影子页表
 		init_kvm_softmmu(vcpu, cpu_role);
 }
 
@@ -1067,6 +1070,7 @@ static void free_mmu_pages(struct kvm_mmu* mmu) {
 	ExFreePool(mmu->pml5_root);
 }
 
+// 创建mmu
 int kvm_mmu_create(struct kvm_vcpu* vcpu) {
 	int ret;
 
@@ -1074,9 +1078,11 @@ int kvm_mmu_create(struct kvm_vcpu* vcpu) {
 	
 	vcpu->arch.mmu_page_header_cache.kmem_cache = mmu_page_header_cache;
 
+	// walk_mmu和mmu是等价的
 	vcpu->arch.mmu = &vcpu->arch.root_mmu;
 	vcpu->arch.walk_mmu = &vcpu->arch.root_mmu;
 
+	// guest_mmu 是嵌套的情况下，L1虚拟机mmu
 	ret = __kvm_mmu_create(vcpu, &vcpu->arch.guest_mmu);
 	if (ret)
 		return ret;
@@ -1084,6 +1090,7 @@ int kvm_mmu_create(struct kvm_vcpu* vcpu) {
 	bool fail_allocate_root = FALSE;
 	do
 	{
+		// 非嵌套情况下的虚拟机mmu
 		ret = __kvm_mmu_create(vcpu, &vcpu->arch.root_mmu);
 		if (ret) {
 			fail_allocate_root = TRUE;

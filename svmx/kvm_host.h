@@ -29,10 +29,15 @@
 /* KVM Hugepage definitions for x86 */
 #define KVM_MAX_HUGEPAGE_LEVEL	PG_LEVEL_1G
 #define KVM_NR_PAGE_SIZES	(KVM_MAX_HUGEPAGE_LEVEL - PG_LEVEL_4K + 1)
+/*
+* 表示以level级别为叶子页表的情况下，所管理的页面是标准页面的多少倍
+*/
 #define KVM_HPAGE_GFN_SHIFT(x)	(((x) - 1) * 9)
 #define KVM_HPAGE_SHIFT(x)	(PAGE_SHIFT + KVM_HPAGE_GFN_SHIFT(x))
+/* 当前所管理的页面大小 */
 #define KVM_HPAGE_SIZE(x)	(1UL << KVM_HPAGE_SHIFT(x))
 #define KVM_HPAGE_MASK(x)	(~(KVM_HPAGE_SIZE(x) - 1))
+/* 当前所管理的页面，是标准页面的多少倍 */
 #define KVM_PAGES_PER_HPAGE(x)	(KVM_HPAGE_SIZE(x) / PAGE_SIZE)
 
 #define DE_VECTOR 0
@@ -1825,7 +1830,6 @@ void kvm_get_cs_db_l_bits(struct kvm_vcpu* vcpu, int* db, int* l);
 
 
 
-NTSTATUS kvm_mmu_module_init();
 int kvm_mmu_vendor_module_init(void);
 
 void kvm_arch_check_processor_compat();

@@ -118,3 +118,10 @@ static inline int kvm_mmu_role_as_id(union kvm_mmu_page_role role) {
 static inline int kvm_mmu_page_as_id(struct kvm_mmu_page* sp) {
 	return kvm_mmu_role_as_id(sp->role);
 }
+
+#pragma warning(push)
+#pragma warning(disable:4146)
+static inline gfn_t gfn_round_for_level(gfn_t gfn, int level) {
+	return gfn & -KVM_PAGES_PER_HPAGE(level);
+}
+#pragma warning(pop)
