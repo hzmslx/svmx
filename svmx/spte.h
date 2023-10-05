@@ -53,12 +53,17 @@ static inline bool kvm_ad_enabled(void)
 {
 	return !!shadow_accessed_mask;
 }
-
+/*
+* 判断pte是否是大页的最后一级
+*/
 static inline bool is_large_pte(u64 pte)
 {
 	return pte & PT_PAGE_SIZE_MASK;
 }
 
+/*
+* 判断pte是否是影子页表的叶子页表表项
+*/
 static inline bool is_last_spte(u64 pte, int level)
 {
 	return (level == PG_LEVEL_4K) || is_large_pte(pte);

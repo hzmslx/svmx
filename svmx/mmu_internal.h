@@ -99,6 +99,7 @@ static inline int kvm_mmu_do_page_fault(struct kvm_vcpu* vcpu, gpa_t cr2_or_gpa,
 		vcpu->stat.pf_taken++;
 
 	if (fault.is_tdp) {
+		// EPT下会调用此函数
 		r = kvm_tdp_page_fault(vcpu, &fault);
 	}
 	else

@@ -1056,15 +1056,21 @@ static int handle_desc(struct kvm_vcpu* vcpu)
 	return 0;
 }
 
+/*
+* EPT violation异常的处理
+*/
 static int handle_ept_violation(struct kvm_vcpu* vcpu) {
 	unsigned long exit_qualification;
 	gpa_t gpa;
 	u64 error_code;
 
+	// 读取exit_qualification字段
 	exit_qualification = vmx_get_exit_qual(vcpu);
 
+	// 读取虚拟机的物理地址,这就是产生异常的GPA
 	gpa = vmcs_read64(GUEST_PHYSICAL_ADDRESS);
 
+	// 拼凑error
 	/* Is it a read fault? */
 	error_code = (exit_qualification & EPT_VIOLATION_ACC_READ)
 		? PFERR_USER_MASK : 0;
@@ -1080,6 +1086,9 @@ static int handle_ept_violation(struct kvm_vcpu* vcpu) {
 
 	error_code |= (exit_qualification & EPT_VIOLATION_GVA_TRANSLATED) != 0 ?
 		PFERR_GUEST_FINAL_MASK : PFERR_GUEST_PAGE_MASK;
+
+	// exit 明细信息
+	vcpu->arch.exit_qualification = exit_qualification;
 
 	return kvm_mmu_page_fault(vcpu, gpa, error_code, NULL, 0);
 }
@@ -3712,7 +3721,7 @@ static void vmx_load_mmu_pgd(struct kvm_vcpu* vcpu, hpa_t root_hpa,
 	int root_level) {
 	struct kvm* kvm = vcpu->kvm;
 	bool update_guest_cr3 = TRUE;
-	ULONG_PTR guest_cr3 = 0;
+	ULONG_PTR guest_cr3 = INVALID_PAGE;
 	u64 eptp;
 
 	// 开启ept
@@ -3735,7 +3744,6 @@ static void vmx_load_mmu_pgd(struct kvm_vcpu* vcpu, hpa_t root_hpa,
 
 	
 	// 设置虚拟机的cr3寄存器
-	guest_cr3 = __readcr3();
 	if (update_guest_cr3)
 		vmcs_writel(GUEST_CR3, guest_cr3);
 }

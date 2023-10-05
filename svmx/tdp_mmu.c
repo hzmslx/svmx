@@ -78,7 +78,10 @@ hpa_t kvm_tdp_mmu_get_vcpu_root_hpa(struct kvm_vcpu* vcpu) {
 	InsertHeadList(&kvm->arch.tdp_mmu_roots, &root->link);
 	// spin_unlock
 
+	
+
 out:
+	// root->spt指向影子页表页的地址
 	physical = MmGetPhysicalAddress(root->spt);
 	return physical.QuadPart;
 }

@@ -195,11 +195,11 @@ void kvm_mmu_set_base_ptes(u64 base_pte) {
 }
 
 struct kvm_shadow_walk_iterator {
-	u64 addr;
-	hpa_t shadow_addr;
-	u64* sptep;
-	int level;
-	unsigned index;
+	u64 addr;// 寻找的 guest os 物理地址
+	hpa_t shadow_addr; // 指向下一个要找的EPT页表基地址
+	u64* sptep;// 当前页表中要使用的表项
+	int level; // 当前查找所处的页表级别
+	unsigned index; // 对应于gaddr的表项在当前页表的索引
 };
 
 void kvm_mmu_set_mask_ptes(u64 user_mask, u64 accessed_mask,
@@ -278,6 +278,7 @@ void kvm_configure_mmu(bool enable_tdp, int tdp_forced_root_level,
 		max_huge_page_level = PG_LEVEL_2M;
 }
 
+// 分配相关的缓存
 static int mmu_topup_memory_caches(struct kvm_vcpu* vcpu,
 	bool maybe_indirect) {
 	int r = 0;
@@ -768,6 +769,7 @@ int kvm_mmu_load(struct kvm_vcpu* vcpu) {
 		r = mmu_alloc_special_roots(vcpu);
 		if (r)
 			break;
+		// 初始化根目录的页面
 		if (vcpu->arch.mmu->root_role.direct)
 			r = mmu_alloc_direct_roots(vcpu);
 		else
@@ -960,11 +962,44 @@ void kvm_init_mmu(struct kvm_vcpu* vcpu) {
 		init_kvm_softmmu(vcpu, cpu_role);
 }
 
-static int direct_page_fault(struct kvm_vcpu* vcpu, 
+/*
+* 完成EPT页表的构造，并在最后一级页表项中将gfn同pfn映射起来
+*/
+static int direct_map(struct kvm_vcpu* vcpu, struct kvm_page_fault* fault) {
+	UNREFERENCED_PARAMETER(vcpu);
+	UNREFERENCED_PARAMETER(fault);
+
+	return 0;
+}
+
+/*
+ * Returns one of RET_PF_INVALID, RET_PF_FIXED or RET_PF_SPURIOUS.
+ */
+static int fast_page_fault(struct kvm_vcpu* vcpu,
 	struct kvm_page_fault* fault) {
 	UNREFERENCED_PARAMETER(vcpu);
 	UNREFERENCED_PARAMETER(fault);
-	return RET_PF_EMULATE;
+
+	return RET_PF_INVALID;
+}
+
+static int direct_page_fault(struct kvm_vcpu* vcpu, 
+	struct kvm_page_fault* fault) {
+	int r;
+
+	r = fast_page_fault(vcpu, fault);
+	if (r != RET_PF_INVALID)
+		return r;
+
+	// 分配缓存池
+	r = mmu_topup_memory_caches(vcpu, FALSE);
+	if (r)
+		return r;
+
+	r = direct_map(vcpu, fault);
+	
+
+	return r;
 }
 
 #ifdef AMD64
@@ -977,7 +1012,7 @@ static int kvm_tdp_mmu_page_fault(struct kvm_vcpu* vcpu,
 }
 #endif // AMD64
 
-
+// 建立页表项
 int kvm_tdp_page_fault(struct kvm_vcpu* vcpu, struct kvm_page_fault* fault) {
 	/*
 	 * If the guest's MTRRs may be used to compute the "real" memtype,
@@ -1003,16 +1038,7 @@ int kvm_tdp_page_fault(struct kvm_vcpu* vcpu, struct kvm_page_fault* fault) {
 
 
 
-/*
- * Returns one of RET_PF_INVALID, RET_PF_FIXED or RET_PF_SPURIOUS.
- */
-static int fast_page_fault(struct kvm_vcpu* vcpu, 
-	struct kvm_page_fault* fault) {
-	UNREFERENCED_PARAMETER(vcpu);
-	UNREFERENCED_PARAMETER(fault);
 
-	return RET_PF_INVALID;
-}
 
 static int __kvm_mmu_create(struct kvm_vcpu* vcpu, struct kvm_mmu* mmu) {
 	void* page;
@@ -1109,12 +1135,37 @@ int kvm_mmu_create(struct kvm_vcpu* vcpu) {
 static void shadow_walk_init_using_root(struct kvm_shadow_walk_iterator* iterator,
 	struct kvm_vcpu* vcpu, hpa_t root,
 	u64 addr) {
-	UNREFERENCED_PARAMETER(iterator);
-	UNREFERENCED_PARAMETER(vcpu);
-	UNREFERENCED_PARAMETER(root);
-	UNREFERENCED_PARAMETER(addr);
+	/* 把要索引的地址赋值给addr */
+	iterator->addr = addr;
+	// 初始化时，指向EPT Pointer的基地址
+	iterator->shadow_addr = root;
+	// 影子页表级数
+	iterator->level = vcpu->arch.mmu->root_role.level;
+
+	if (iterator->level >= PT64_ROOT_4LEVEL &&
+		vcpu->arch.mmu->cpu_role.base.level < PT64_ROOT_4LEVEL &&
+		!vcpu->arch.mmu->root_role.direct)
+		iterator->level = PT32E_ROOT_LEVEL;
+
+	if (iterator->level == PT32E_ROOT_LEVEL) {
+		/*
+		* prev_root is currently only used for 64-bits hosts. So only
+		* the active root_hpa is valid here.
+		*/
+		iterator->shadow_addr = vcpu->arch.mmu->pae_root[(addr >> 30) & 3];
+		iterator->shadow_addr &= SPTE_BASE_ADDR_MASK;
+		--iterator->level;
+		if (!iterator->shadow_addr)
+			iterator->level = 0;
+	}
 }
 
+/*
+* 负责初始化iterator结构，准备遍历EPT页表
+* @addr 是发生EPT violation的guest物理地址
+* @vcpu 是发生EPT violation的vcpu
+* @iterator 迭代器
+*/
 static void shadow_walk_init(struct kvm_shadow_walk_iterator* iterator,
 	struct kvm_vcpu* vcpu, u64 addr)
 {
@@ -1122,28 +1173,67 @@ static void shadow_walk_init(struct kvm_shadow_walk_iterator* iterator,
 		addr);
 }
 
+/*
+* 检查当前页表是否还需要遍历当前页表
+*/
 static bool shadow_walk_okay(struct kvm_shadow_walk_iterator* iterator)
 {
+	/*
+	* 当level小于1的时候说明已经遍历完最后一个级别，也就不需要遍历了
+	*/
 	if (iterator->level < PG_LEVEL_4K)
 		return FALSE;
 
-	
+	/*
+	* 得到addr在当前level级页表中表项的索引值
+	*/
+	iterator->index = SPTE_INDEX(iterator->addr, iterator->level);
+	PHYSICAL_ADDRESS physical;
+	// shadow_addr指向当前level级页表的基地址
+	physical.QuadPart = iterator->shadow_addr;
+	/* 
+	 * 通过加上偏移index得到对应的页表项地址，
+	 * 表项中会指向下一级页表的地址
+	 */
+	iterator->sptep = ((u64*)MmGetVirtualForPhysical(physical))
+		+ iterator->index;
 	
 	return TRUE;
 }
 
+/*
+* 处理完了当前级别页表，取得下一级页表。
+*/
 static void __shadow_walk_next(struct kvm_shadow_walk_iterator* iterator,
 	u64 spte) {
+	/*
+	* 如果当前页表项已经是叶子页表项，直接处理level=0
+	* 以便在shadow_walk_okay中退出
+	*/
 	if (!is_shadow_present_pte(spte) || is_last_spte(spte, iterator->level)) {
 		iterator->level = 0;
 		return;
 	}
-
+	
+	/*
+	* 不是最后一级页表的页表项的话
+	* 从SPTE中取出下一级影子页表的基地址，记录到shadow_addr
+	* 此处得到的是下一级页表的物理地址
+	*/
 	iterator->shadow_addr = spte & SPTE_BASE_ADDR_MASK;
+	// 因为到了下一级页表，页表级别也相应减1。
 	--iterator->level;
 }
 
+static void shadow_walk_next(struct kvm_shadow_walk_iterator* iterator)
+{
+	__shadow_walk_next(iterator, *iterator->sptep);
+}
 
+#define for_each_shadow_entry(_vcpu, _addr, _walker)            \
+	for (shadow_walk_init(&(_walker), _vcpu, _addr);	\
+	     shadow_walk_okay(&(_walker));			\
+	     shadow_walk_next(&(_walker)))
 
 
 static int mmu_first_shadow_root_alloc(struct kvm* kvm) {
@@ -1233,6 +1323,9 @@ static int handle_mmio_page_fault(struct kvm_vcpu* vcpu,
 	return RET_PF_RETRY;
 }
 
+/*
+* 处理page fault异常
+*/
 int kvm_mmu_page_fault(struct kvm_vcpu* vcpu, gpa_t cr2_or_gpa, u64 error_code,
 	void* insn, int insn_len) {
 	int r, emulation_type = EMULTYPE_PF;
@@ -1243,12 +1336,14 @@ int kvm_mmu_page_fault(struct kvm_vcpu* vcpu, gpa_t cr2_or_gpa, u64 error_code,
 
 	r = RET_PF_INVALID;
 	if (error_code & PFERR_RSVD_MASK) {
+		// mmio引起的退出,会从handle_ept_misconfig过来
 		r = handle_mmio_page_fault(vcpu, cr2_or_gpa, direct);
 		if (r == RET_PF_EMULATE)
 			goto emulate;
 	}
 
 	if (r == RET_PF_INVALID) {
+		// 处理内存访问异常
 		r = kvm_mmu_do_page_fault(vcpu, cr2_or_gpa,
 			lower_32_bits(error_code), FALSE,
 			&emulation_type);
@@ -1264,6 +1359,9 @@ emulate:
 		emulation_type, insn, insn_len);
 }
 
+/*
+* 用于设置影子页表项
+*/
 static int mmu_set_spte(struct kvm_vcpu* vcpu, struct kvm_memory_slot* slot,
 	u64* sptep, unsigned int pte_access, gfn_t gfn,
 	kvm_pfn_t pfn, struct kvm_page_fault* fault) {
@@ -1274,10 +1372,14 @@ static int mmu_set_spte(struct kvm_vcpu* vcpu, struct kvm_memory_slot* slot,
 	UNREFERENCED_PARAMETER(gfn);
 	UNREFERENCED_PARAMETER(pfn);
 	UNREFERENCED_PARAMETER(fault);
+	int ret = RET_PF_FIXED;
 
-	return 0;
+	return ret;
 }
 
+/*
+* 将新分配出来的下一级影子页表的地址填写到本级对应的SPTE中
+*/
 static void link_shadow_page(struct kvm_vcpu* vcpu, u64* sptep,
 	struct kvm_mmu_page* sp) {
 	UNREFERENCED_PARAMETER(vcpu);
