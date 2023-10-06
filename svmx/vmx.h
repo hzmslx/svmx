@@ -1388,6 +1388,22 @@ typedef struct x86_call_gate {
 	uint64_t offset1 : 16;
 }x86_call_gate;
 
+/* 25.6.11 Extended-Page-Table Pointer(EPTP) */
+typedef struct ept_pointer {
+	union{
+		u64 value;
+		struct {
+			u64 memory_type : 3;
+			u64 page_walk_length : 3;
+			u64 enable_accessed_and_dirty_flags : 1;
+			u64 enable_supervisor_shadow_stack_pages : 1;
+			u64 reserved1 : 4;
+			u64 page_frame_number : 36;
+			u64 reserved2 : 16;
+		};
+	};
+}ept_pointer;
+
 #include <poppack.h>
 
 #ifdef _WIN64

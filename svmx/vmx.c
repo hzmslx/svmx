@@ -3822,16 +3822,17 @@ void ept_save_pdptrs(struct kvm_vcpu* vcpu)
 
 u64 construct_eptp(struct kvm_vcpu* vcpu, hpa_t root_hpa, int root_level) {
 	// 当前只支持 UC(值 0) 和WB(值 6)类型. 29.3.7.1
-	u64 eptp = VMX_EPTP_MT_WB;
+	ept_pointer eptp = { 0 };
+	eptp.value = VMX_EPTP_MT_WB;
 
-	eptp |= (root_level == 5) ? VMX_EPTP_PWL_5 : VMX_EPTP_PWL_4;
+	eptp.value |= (root_level == 5) ? VMX_EPTP_PWL_5 : VMX_EPTP_PWL_4;
 
 	if (enable_ept_ad_bits &&
 		(!is_guest_mode(vcpu) || nested_ept_ad_enabled(vcpu)))
-		eptp |= VMX_EPTP_AD_ENABLE_BIT;
-	eptp |= root_hpa;
+		eptp.value |= VMX_EPTP_AD_ENABLE_BIT;
+	eptp.value |= root_hpa;
 
-	return eptp;
+	return eptp.value;
 }
 
 static u32 vmx_segment_access_rights(struct kvm_segment* var)

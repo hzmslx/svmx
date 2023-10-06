@@ -592,7 +592,10 @@ int kvm_mmu_topup_memory_cache(struct kvm_mmu_memory_cache* mc, int min) {
 
 static void* mmu_memory_cache_alloc_obj(struct kvm_mmu_memory_cache* mc) {
 	UNREFERENCED_PARAMETER(mc);
-	return ExAllocatePoolWithTag(NonPagedPool, PAGE_SIZE, DRIVER_TAG);
+	void* obj = ExAllocatePoolWithTag(NonPagedPool, PAGE_SIZE, DRIVER_TAG);
+	if (obj != NULL)
+		RtlZeroMemory(obj, PAGE_SIZE);
+	return obj;
 }
 
 int __kvm_mmu_topup_memory_cache(struct kvm_mmu_memory_cache* mc, int capacity, int min){
