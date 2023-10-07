@@ -83,7 +83,7 @@ hpa_t kvm_tdp_mmu_get_vcpu_root_hpa(struct kvm_vcpu* vcpu) {
 out:
 	// root->spt指向影子页表页的地址
 	physical = MmGetPhysicalAddress(root->spt);
-	return physical.QuadPart >> PAGE_SHIFT;
+	return physical.QuadPart;
 }
 
 void kvm_tdp_mmu_put_root(struct kvm* kvm, struct kvm_mmu_page* root,
