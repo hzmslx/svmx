@@ -884,7 +884,7 @@ struct kvm_vcpu_stat {
 
 struct kvm_memslots {
 	u64 generation;
-
+	LONG64 volatile last_used_slot;
 
 	/*
 	 * The mapping table from slot id to memslot.
@@ -899,7 +899,7 @@ struct kvm_memslots {
 };
 
 struct kvm_rmap_head {
-	unsigned long val;
+	ULONG_PTR val;
 };
 
 struct kvm_lpage_info {
@@ -907,7 +907,13 @@ struct kvm_lpage_info {
 };
 
 struct kvm_arch_memory_slot {
+	/*
+	* reverse map
+	* KVM_NR_PAGE_SIZE是虚机分配的不同大小的页的种类
+	* 因为需要维护不同页大小的页，例如2M，1G等。
+	*/
 	struct kvm_rmap_head* rmap[KVM_NR_PAGE_SIZES];
+	// Large page
 	struct kvm_lpage_info* lpage_info[KVM_NR_PAGE_SIZES - 1];
 	unsigned short* gfn_track[KVM_PAGE_TRACK_MAX];
 };
@@ -934,11 +940,15 @@ struct kvm_arch_memory_slot {
  * individually added or deleted.
  */
 struct kvm_memory_slot {
-	gfn_t base_gfn;
-	unsigned long npages;
-	unsigned long* dirty_bitmap;
+	gfn_t base_gfn;// 虚拟内存区间的物理页框号
+	ULONG_PTR npages;// 将内存区间的大小转化为页数
+	ULONG_PTR* dirty_bitmap;
+	/*
+	* 反向映射相关，用于定位指向同一物理页框号的所有EPT表项
+	* 在缺页处理创建EPT页表项时就记录了GPA对应的页表项地址
+	*/
 	struct kvm_arch_memory_slot arch;
-	unsigned long userspace_addr;
+	ULONG_PTR userspace_addr;// 内存区间对应的HVA
 	u32 flags;
 	short id;
 	u16 as_id;
@@ -1748,8 +1758,11 @@ struct kvm {
 	unsigned long nr_memslot_pages;
 	/* The two memslot sets - active and inactive (per address space) */
 	struct kvm_memslots __memslots[KVM_ADDRESS_SPACE_NUM][2];
-	/* The current active memslot set for each address space */
-	struct kvm_memslots* memslots[KVM_ADDRESS_SPACE_NUM];/* 模拟的内存条模型 */
+	/*
+	* The current active memslot set for each address space 
+	* 地址空间的个数为2，对应两个地址空间
+	*/
+	struct kvm_memslots* memslots[KVM_ADDRESS_SPACE_NUM];
 	struct kvm_vcpu** vcpu_array;
 	/*
 	 * Protected by slots_lock, but can be read outside if an
