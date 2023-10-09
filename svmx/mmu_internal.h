@@ -126,3 +126,5 @@ static inline gfn_t gfn_round_for_level(gfn_t gfn, int level) {
 	return gfn & -KVM_PAGES_PER_HPAGE(level);
 }
 #pragma warning(pop)
+
+void kvm_mmu_hugepage_adjust(struct kvm_vcpu* vcpu, struct kvm_page_fault* fault);

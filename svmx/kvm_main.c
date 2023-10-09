@@ -423,8 +423,8 @@ static long kvm_vm_ioctl(unsigned int ioctl, unsigned long arg) {
 		// 建立 guest 物理地址空间中的内存区域与 qemu-kvm 虚拟地址空间中的内存区域的映射
 		case KVM_SET_USER_MEMORY_REGION:
 		{
-
-
+			struct kvm_userspace_memory_region kvm_userspace_mem;
+			r = kvm_vm_ioctl_set_memory_region(g_kvm, &kvm_userspace_mem);
 			break;
 		}
 
@@ -437,11 +437,45 @@ static long kvm_vm_ioctl(unsigned int ioctl, unsigned long arg) {
 
 int kvm_set_memory_region(struct kvm* kvm,
 	const struct kvm_userspace_memory_region* mem) {
-	UNREFERENCED_PARAMETER(kvm);
-	UNREFERENCED_PARAMETER(mem);
 	int r = 0;
-
+	KeWaitForSingleObject(&kvm->slots_loc, Executive, KernelMode, FALSE, NULL);
+	r = __kvm_set_memory_region(kvm, mem);
+	KeReleaseMutex(&kvm->slots_loc, FALSE);
 	return r;
+}
+
+static int check_memory_region_flags(const struct kvm_userspace_memory_region* mem) {
+	u32 valid_flags = KVM_MEM_LOG_DIRTY_PAGES;
+
+	valid_flags |= KVM_MEM_READONLY;
+
+	if (mem->flags & ~valid_flags)
+		return STATUS_INVALID_PARAMETER;
+
+	return STATUS_SUCCESS;
+}
+
+static bool kvm_check_memslot_overlap(struct kvm_memslots* slots, int id,
+	gfn_t start, gfn_t end) {
+	UNREFERENCED_PARAMETER(slots);
+	UNREFERENCED_PARAMETER(id);
+	UNREFERENCED_PARAMETER(start);
+	UNREFERENCED_PARAMETER(end);
+	// struct kvm_memslot_iter iter;
+
+	return FALSE;
+}
+
+static int kvm_set_memslot(struct kvm* kvm,
+	struct kvm_memory_slot* old,
+	struct kvm_memory_slot* new,
+	enum kvm_mr_change change) {
+	UNREFERENCED_PARAMETER(kvm);
+	UNREFERENCED_PARAMETER(old);
+	UNREFERENCED_PARAMETER(new);
+	UNREFERENCED_PARAMETER(change);
+
+	return 0;
 }
 
 /*
@@ -454,10 +488,106 @@ int kvm_set_memory_region(struct kvm* kvm,
  */
 int __kvm_set_memory_region(struct kvm* kvm,
 	const struct kvm_userspace_memory_region* mem) {
-	UNREFERENCED_PARAMETER(kvm);
-	UNREFERENCED_PARAMETER(mem);
+	struct kvm_memory_slot* old, * new;
+	struct kvm_memslots* slots;
+	enum kvm_mr_change change;
+	ULONG_PTR npages;
+	gfn_t base_gfn;
+	u16 as_id, id;
+	int r;
 
-	return 0;
+	r = check_memory_region_flags(mem);
+	if (r)
+		return r;
+
+	as_id = mem->slot >> 16;
+	id = (u16)mem->slot;
+
+	/* General sanity checks */
+	// 要求以页为单位
+	if ((mem->memory_size & (PAGE_SIZE - 1)) ||
+		(mem->memory_size != (ULONG_PTR)mem->memory_size))
+		return STATUS_INVALID_PARAMETER;
+	// 要求页对齐
+	if (mem->guest_phys_addr & (PAGE_SIZE - 1))
+		return STATUS_INVALID_PARAMETER;
+	// 保证线性地址页对齐
+	if ((mem->userspace_addr & (PAGE_SIZE - 1)))
+		return STATUS_INVALID_PARAMETER;
+	if (as_id >= KVM_ADDRESS_SPACE_NUM || id >= KVM_MEM_SLOTS_NUM)
+		return STATUS_INVALID_PARAMETER;
+	if (mem->guest_phys_addr + mem->memory_size < mem->guest_phys_addr)
+		return STATUS_INVALID_PARAMETER;
+	if ((mem->memory_size >> PAGE_SHIFT) > KVM_MEM_MAX_NR_PAGES)
+		return STATUS_INVALID_PARAMETER;
+
+	slots = __kvm_memslots(kvm, as_id);
+
+	/*
+	* Note, the old memslot (and the pointer itself!) may be invalidated
+	* and/or destroyed by kvm_set_memslot().
+	*/
+	old = id_to_memslot(slots, id);
+
+	if (!mem->memory_size) {
+		if (!old || !old->npages)
+			return STATUS_INVALID_PARAMETER;
+
+		if (kvm->nr_memslot_pages < old->npages)
+			return STATUS_UNSUCCESSFUL;
+
+		return kvm_set_memslot(kvm, old, NULL, KVM_MR_DELETE);
+	}
+
+	base_gfn = (mem->guest_phys_addr >> PAGE_SHIFT);
+	npages = (mem->memory_size >> PAGE_SHIFT);
+
+	if (!old || !old->npages) {
+		change = KVM_MR_CREATE;
+
+		/*
+		* To simplify KVM internals, the total number of pages across
+		* all memslots must fit in an unsigned long.
+		*/
+		if ((kvm->nr_memslot_pages + npages) < kvm->nr_memslot_pages)
+			return STATUS_INVALID_PARAMETER;
+	}
+	else { /* Modify an existing slot. */
+		if ((mem->userspace_addr != old->userspace_addr) ||
+			(npages != old->npages) ||
+			((mem->flags ^ old->flags) & KVM_MEM_READONLY))
+			return STATUS_INVALID_PARAMETER;
+
+		if (base_gfn != old->base_gfn)
+			change = KVM_MR_MOVE; // 内存平移
+		else if (mem->flags != old->flags)
+			change = KVM_MR_FLAGS_ONLY;// 修改属性
+		else /* Nothing to change */
+			return 0;
+	}
+
+	if ((change == KVM_MR_CREATE || change == KVM_MR_MOVE) &&
+		kvm_check_memslot_overlap(slots, id, base_gfn, base_gfn + npages))
+		return STATUS_ALREADY_COMMITTED;
+
+	/* Allocate a slot that will persist in the memslot. */
+	new = ExAllocatePoolWithTag(NonPagedPool, sizeof(*new), DRIVER_TAG);
+	if (!new) {
+		return STATUS_NO_MEMORY;
+	}
+
+	new->as_id = as_id;
+	new->id = id;
+	new->base_gfn = base_gfn;
+	new->npages = npages;
+	new->flags = mem->flags;
+	new->userspace_addr = mem->userspace_addr;
+
+	r = kvm_set_memslot(kvm, old, new, change);
+	if (r)
+		ExFreePool(new);
+
+	return r;
 }
 
 /*
@@ -515,17 +645,7 @@ static void kvm_free_memslot(struct kvm* kvm, struct kvm_memory_slot* slot)
 	UNREFERENCED_PARAMETER(slot);
 }
 
-static int kvm_set_memslot(struct kvm* kvm,
-	struct kvm_memory_slot* old,
-	struct kvm_memory_slot* new,
-	enum kvm_mr_change change) {
-	UNREFERENCED_PARAMETER(kvm);
-	UNREFERENCED_PARAMETER(old);
-	UNREFERENCED_PARAMETER(new);
-	UNREFERENCED_PARAMETER(change);
 
-	return 0;
-}
 
 void vcpu_put(struct kvm_vcpu* vcpu) {
 	kvm_arch_vcpu_put(vcpu);

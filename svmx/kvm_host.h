@@ -11,7 +11,36 @@
 #include "pgtable_types.h"
 #include "mtrr.h"
 
+/*
+ * For the normal pfn, the highest 12 bits should be zero,
+ * so we can mask bit 62 ~ bit 52  to indicate the error pfn,
+ * mask bit 63 to indicate the noslot pfn.
+ */
+#define KVM_PFN_ERR_MASK	(0x7ffULL << 52)
+#define KVM_PFN_ERR_NOSLOT_MASK	(0xfffULL << 52)
+#define KVM_PFN_NOSLOT		(0x1ULL << 63)
 
+#define KVM_PFN_ERR_FAULT	(KVM_PFN_ERR_MASK)
+#define KVM_PFN_ERR_HWPOISON	(KVM_PFN_ERR_MASK + 1)
+#define KVM_PFN_ERR_RO_FAULT	(KVM_PFN_ERR_MASK + 2)
+#define KVM_PFN_ERR_SIGPENDING	(KVM_PFN_ERR_MASK + 3)
+
+/*
+* error pfns indicate that the gfn is in slot but faild to
+* translate it to pfn on host.
+*/
+static inline bool is_error_pfn(kvm_pfn_t pfn) {
+	return !!(pfn & KVM_PFN_ERR_MASK);
+}
+
+/*
+* error_noslot pfns indicate that the gfn can not be
+* translated to pfn - it is not in slot or failed to
+* translate it to pfn.
+*/
+static inline bool is_error_noslot_pfn(kvm_pfn_t pfn) {
+	return !!(pfn & KVM_PFN_ERR_NOSLOT_MASK);
+}
 
 #define KVM_GUEST_CR0_MASK_UNRESTRICTED_GUEST				\
 	(X86_CR0_WP | X86_CR0_NE | X86_CR0_NW | X86_CR0_CD)
@@ -756,7 +785,7 @@ struct kvm_page_fault {
 
 	/* Outputs of kvm_faultin_pfn.  */
 	unsigned long mmu_seq;
-	// kvm_pfn_t pfn;
+	kvm_pfn_t pfn;
 	hva_t hva;
 	bool map_writable;
 
@@ -923,6 +952,13 @@ struct kvm_arch_memory_slot {
 #endif
 #define KVM_MEM_SLOTS_NUM SHRT_MAX
 #define KVM_USER_MEM_SLOTS (KVM_MEM_SLOTS_NUM - KVM_INTERNAL_MEM_SLOTS)
+
+/*
+ * Some of the bitops functions do not support too long bitmaps.
+ * This number must be determined not to exceed such limits.
+ */
+#define KVM_MEM_MAX_NR_PAGES ((1UL << 31) - 1)
+
 /*
  * Since at idle each memslot belongs to two memslot sets it has to contain
  * two embedded nodes for each data structure that it forms a part of.
@@ -950,7 +986,7 @@ struct kvm_memory_slot {
 	struct kvm_arch_memory_slot arch;
 	ULONG_PTR userspace_addr;// 内存区间对应的HVA
 	u32 flags;
-	short id;
+	u16 id;
 	u16 as_id;
 };
 
@@ -1262,6 +1298,13 @@ struct kvm_memory_slot* id_to_memslot(struct kvm_memslots* slots, int id)
 
 	return NULL;
 }
+
+/* Iterator used for walking memslots that overlap a gfn range. */
+struct kvm_memslot_iter {
+	struct kvm_memslots* slots;
+	PRTL_BALANCED_NODE* node;
+	struct kvm_memory_slot* slot;
+};
 
 struct kvm_vcpu {
 	// 指向vcpu所属的虚拟机对应的kvm结构
@@ -1755,7 +1798,7 @@ struct kvm {
 	 */
 	KMUTEX slots_arch_lock;
 
-	unsigned long nr_memslot_pages;
+	ULONG_PTR nr_memslot_pages;
 	/* The two memslot sets - active and inactive (per address space) */
 	struct kvm_memslots __memslots[KVM_ADDRESS_SPACE_NUM][2];
 	/*
