@@ -72,7 +72,9 @@ struct kvm_segment {
  * userspace, other bits are reserved for kvm internal use which are defined
  * in include/linux/kvm_host.h.
  */
+// 用于开启内存脏页
 #define KVM_MEM_LOG_DIRTY_PAGES	(1UL << 0)
+// 用于开启内存只读
 #define KVM_MEM_READONLY	(1UL << 1)
 
 /* for KVM_SET_USER_MEMORY_REGION */
@@ -185,8 +187,8 @@ struct kvm_msr_entry {
 #define KVM_MP_STATE_AP_RESET_HOLD     9
 #define KVM_MP_STATE_SUSPENDED         10
 
-NTSTATUS kvm_dev_ioctl_create_vm(unsigned long type);
-struct kvm* kvm_create_vm(unsigned long type);
+NTSTATUS kvm_dev_ioctl_create_vm(ULONG_PTR type);
+struct kvm* kvm_create_vm(ULONG_PTR type);
 
 struct kvm_dtable {
 	__u64 base;

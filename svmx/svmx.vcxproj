@@ -202,12 +202,14 @@
     <ClInclude Include="cpuid.h" />
     <ClInclude Include="desc.h" />
     <ClInclude Include="desc_defs.h" />
+    <ClInclude Include="hashtable.h" />
     <ClInclude Include="hyperv.h" />
     <ClInclude Include="int-ll64.h" />
     <ClInclude Include="intel_pt.h" />
     <ClInclude Include="irq_vectors.h" />
     <ClInclude Include="kvm.h" />
     <ClInclude Include="kvm_cache_regs.h" />
+    <ClInclude Include="kvm_dirty_ring.h" />
     <ClInclude Include="kvm_emulate.h" />
     <ClInclude Include="kvm_host.h" />
     <ClInclude Include="kvm_mm.h" />
@@ -231,6 +233,7 @@
     <ClInclude Include="posted_intr.h" />
     <ClInclude Include="processor-flags.h" />
     <ClInclude Include="processor.h" />
+    <ClInclude Include="rbtree_types.h" />
     <ClInclude Include="run_flags.h" />
     <ClInclude Include="sgx.h" />
     <ClInclude Include="smm.h" />

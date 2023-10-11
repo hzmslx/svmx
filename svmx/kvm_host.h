@@ -915,6 +915,8 @@ struct kvm_memslots {
 	u64 generation;
 	LONG64 volatile last_used_slot;
 
+	struct rb_root_cached hva_tree;
+	struct rb_root gfn_tree;
 	/*
 	 * The mapping table from slot id to memslot.
 	 *
@@ -923,7 +925,7 @@ struct kvm_memslots {
 	 * Higher bucket counts bring only small performance improvements but
 	 * always result in higher memory usage (even for lower memslot counts).
 	 */
-
+	DECLARE_HASHTABLE(id_hash, 7);
 	int node_idx;
 };
 
@@ -1302,7 +1304,7 @@ struct kvm_memory_slot* id_to_memslot(struct kvm_memslots* slots, int id)
 /* Iterator used for walking memslots that overlap a gfn range. */
 struct kvm_memslot_iter {
 	struct kvm_memslots* slots;
-	PRTL_BALANCED_NODE* node;
+	
 	struct kvm_memory_slot* slot;
 };
 
@@ -1799,6 +1801,7 @@ struct kvm {
 	KMUTEX slots_arch_lock;
 
 	ULONG_PTR nr_memslot_pages;
+
 	/* The two memslot sets - active and inactive (per address space) */
 	struct kvm_memslots __memslots[KVM_ADDRESS_SPACE_NUM][2];
 	/*
@@ -2105,4 +2108,9 @@ static inline struct kvm_memslots* __kvm_memslots(struct kvm* kvm,
 
 static inline struct kvm_memslots* kvm_memslots(struct kvm* kvm) {
 	return __kvm_memslots(kvm, 0);
+}
+
+static inline ULONG_PTR kvm_dirty_bitmap_bytes(struct kvm_memory_slot* memslot)
+{
+	return ALIGN_UP(memslot->npages, ULONG_PTR) / 8;
 }

@@ -159,7 +159,7 @@ NTSTATUS DriverDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
 			break;
 
 		case KVM_CHECK_EXTENSION:
-
+			
 			break;
 
 		case KVM_GET_VCPU_MMAP_SIZE:

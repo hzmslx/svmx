@@ -3,6 +3,7 @@
 #include "kvm.h"
 #include "kvm_mm.h"
 #include "x86.h"
+#include "kvm_dirty_ring.h"
 
 /*
 * Kernel-based Virtual Machine driver for Windows
@@ -58,7 +59,7 @@ void kvm_exit(void) {
 
 }
 
-NTSTATUS kvm_dev_ioctl_create_vm(unsigned long type) {
+NTSTATUS kvm_dev_ioctl_create_vm(ULONG_PTR type) {
 	struct kvm* kvm;
 
 	// the main implementation of creating vm
@@ -117,8 +118,7 @@ static NTSTATUS hardware_enable_all(void) {
 	return status;
 }
 
-struct kvm* kvm_create_vm(unsigned long type) {
-	UNREFERENCED_PARAMETER(type);
+struct kvm* kvm_create_vm(ULONG_PTR type) {
 	int i, j;
 	/*
 	 * 分配 kvm 结构体, 一个虚拟机对应一个 kvm 结构, 其中包括了虚拟机中的
@@ -126,6 +126,7 @@ struct kvm* kvm_create_vm(unsigned long type) {
 	 * 构体之一
 	 */
 	struct kvm* kvm = kvm_arch_alloc_vm();
+	struct kvm_memslots* slots;
 
 	if (!kvm)
 		return NULL;
@@ -145,7 +146,15 @@ struct kvm* kvm_create_vm(unsigned long type) {
 
 	for (i = 0; i < KVM_ADDRESS_SPACE_NUM; i++) {
 		for (j = 0; j < 2; j++) {
+			slots = &kvm->__memslots[i][j];
+			
+			InterlockedCompareExchange64(&slots->last_used_slot,
+				0, 0);
+			
+			slots->node_idx = j;
 
+			/* Generations must be different for each address space. */
+			slots->generation = i;
 		}
 	}
 
@@ -466,14 +475,125 @@ static bool kvm_check_memslot_overlap(struct kvm_memslots* slots, int id,
 	return FALSE;
 }
 
+static void kvm_invalidate_memslot(struct kvm* kvm,
+	struct kvm_memory_slot* old,
+	struct kvm_memory_slot* invalid_slot) {
+	UNREFERENCED_PARAMETER(kvm);
+	/*
+	* Mark the current slot INVALID. As with all memslot modifications,
+	* this must be done on an unreachable slot to avoid modifying the 
+	* current slot in the active tree.
+	*/
+	old->arch = invalid_slot->arch;
+}
+
+/*
+* Allocation size is twice as large as the actual dirty bitmap size.
+* See kvm_vm_ioctl_get_dirty_log() why this is needed.
+*/
+static int kvm_alloc_dirty_bitmap(struct kvm_memory_slot* memslot) {
+	ULONG_PTR dirty_bytes = kvm_dirty_bitmap_bytes(memslot);
+	
+	memslot->dirty_bitmap = ExAllocatePoolWithTag(PagedPool, 2 * dirty_bytes, DRIVER_TAG);
+	if (!memslot->dirty_bitmap)
+		return STATUS_NO_MEMORY;
+
+	return STATUS_SUCCESS;
+}
+
+static void kvm_destroy_dirty_bitmap(struct kvm_memory_slot* memslot) {
+	if (!memslot->dirty_bitmap)
+		return;
+
+	ExFreePool(memslot->dirty_bitmap);
+	memslot->dirty_bitmap = NULL;
+}
+
+static int kvm_prepare_memory_region(struct kvm* kvm,
+	const struct kvm_memory_slot* old,
+	struct kvm_memory_slot* new,
+	enum kvm_mr_change change) {
+	int r;
+
+	/*
+	* If dirty logging is disabled, nullify the bitmap; the old bitmap
+	* will be freed on "commit". If logging is enabled in both old and
+	* new, reuse the existing bitmap. If logging is enabled only in the
+	* new and KVM isn't using a ring buffer, allocate and initialize a
+	* new bitmap.
+	*/
+	if (change != KVM_MR_DELETE) {
+		if (!(new->flags & KVM_MEM_LOG_DIRTY_PAGES))
+			new->dirty_bitmap = NULL;
+		else if (old && old->dirty_bitmap)
+			new->dirty_bitmap = old->dirty_bitmap;
+		else if (kvm_use_dirty_bitmap(kvm)) {
+			r = kvm_alloc_dirty_bitmap(new);
+			if (r)
+				return r;
+
+
+		}
+	}
+
+	r = kvm_arch_prepare_memory_region(kvm, old, new, change);
+
+	/* Free the bitmap on failure if it was allocated above. */
+	if (r && new && new->dirty_bitmap && (!old || !old->dirty_bitmap)) {
+		kvm_destroy_dirty_bitmap(new);
+	}
+
+	return r;
+}
+
 static int kvm_set_memslot(struct kvm* kvm,
 	struct kvm_memory_slot* old,
 	struct kvm_memory_slot* new,
 	enum kvm_mr_change change) {
-	UNREFERENCED_PARAMETER(kvm);
-	UNREFERENCED_PARAMETER(old);
-	UNREFERENCED_PARAMETER(new);
-	UNREFERENCED_PARAMETER(change);
+	struct kvm_memory_slot* invalid_slot;
+	int r;
+
+	/*
+	* Released in kvm_swap_active_memslots().
+	* 
+	* Must be held from before the current memslots are copied until after
+	* the new memslots are installed, then released before the
+	* synchronize in kvm_swap_active_memslots().
+	* 
+	* When modifying memslots outside of the slots_lock, must be held
+	* before reading the pointer to the current memslots until after all
+	* changes to those memslots are complete.
+	* 
+	* These rules ensure that installing new memslots does not lose
+	* changes made to the previous memslots.
+	*/
+	KeWaitForSingleObject(&kvm->slots_arch_lock, Executive, KernelMode,
+		FALSE, NULL);
+
+	/*
+	* Invalidate the old slot if it's being deleted or moved. This is
+	* done prior to actually deleting/moving the memslot to allow vCPUs to 
+	* contine running by ensuring there are no mappings or shadow pages
+	* for the memslot when it is deleted/moved. Without pre-invalidation
+	* (and without a lock), a window would exist between effecting the 
+	* delete/move and committing the changes in arch code where KVM or a 
+	* guest could access a non-existent memslot.
+	* 
+	* Modifications are done on a temporary, unreachable slot. The old
+	* slot needs to be preserved in case a later step fails and the 
+	* invalidataion needs to be reverted.
+	*/
+	if (change == KVM_MR_DELETE || change == KVM_MR_MOVE) {
+		invalid_slot = ExAllocatePoolWithTag(NonPagedPool, sizeof(*invalid_slot),
+			DRIVER_TAG);
+		if (!invalid_slot) {
+			KeReleaseMutex(&kvm->slots_arch_lock, FALSE);
+			return STATUS_NO_MEMORY;
+		}
+		kvm_invalidate_memslot(kvm, old, invalid_slot);
+	}
+
+	r = kvm_prepare_memory_region(kvm, old, new, change);
 
 	return 0;
 }
@@ -500,7 +620,9 @@ int __kvm_set_memory_region(struct kvm* kvm,
 	if (r)
 		return r;
 
+	// 地址空间id
 	as_id = mem->slot >> 16;
+	// slot的低16位是插槽号
 	id = (u16)mem->slot;
 
 	/* General sanity checks */
@@ -521,11 +643,13 @@ int __kvm_set_memory_region(struct kvm* kvm,
 	if ((mem->memory_size >> PAGE_SHIFT) > KVM_MEM_MAX_NR_PAGES)
 		return STATUS_INVALID_PARAMETER;
 
+	// 根据地址空间id从kvm->memslots[]数组中找到对应的地址空间
 	slots = __kvm_memslots(kvm, as_id);
 
 	/*
 	* Note, the old memslot (and the pointer itself!) may be invalidated
 	* and/or destroyed by kvm_set_memslot().
+	* 再根据slots找到对应id的slot结构体
 	*/
 	old = id_to_memslot(slots, id);
 
@@ -758,4 +882,18 @@ void* kvm_mmu_memory_cache_alloc(struct kvm_mmu_memory_cache* mc) {
 	else
 		p = mc->objects[--mc->nobjs];
 	return p;
+}
+
+static int kvm_vm_ioctl_check_extension_generic(struct kvm* kvm, ULONG arg)
+{
+	UNREFERENCED_PARAMETER(kvm);
+	switch (arg)
+	{
+		case KVM_CAP_USER_MEMORY:
+			return 1;
+		case KVM_CAP_NR_MEMSLOTS: // 查询最大插槽数
+			return KVM_USER_MEM_SLOTS;
+		default:
+			break;
+	}
 }

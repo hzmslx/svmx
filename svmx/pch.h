@@ -8,6 +8,8 @@
 #include "types.h"
 #include "Logging.h"
 #include "msr-index.h"
+#include "rbtree_types.h"
+#include "hashtable.h"
 
 #define DRIVER_TAG	'xmvs'
 
@@ -31,6 +33,12 @@
 
 #define GENMASK_ULL(h, l) \
 	(((~0ULL) << (l))& (~0ULL >> (BITS_PER_LONG_LONG - 1 - (h))))
+
+#ifdef AMD64
+#define BITS_PER_LONG 64
+#else
+#define BITS_PER_LONG 32
+#endif
 
 #include "kvm_host.h"
 #include "virtext.h"

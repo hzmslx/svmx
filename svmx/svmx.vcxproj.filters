@@ -35,6 +35,9 @@
     <Filter Include="mmu">
       <UniqueIdentifier>{8ecb2201-4dfc-4ee8-b83f-81ad8c9c052e}</UniqueIdentifier>
     </Filter>
+    <Filter Include="ktl">
+      <UniqueIdentifier>{f5e44aa3-9561-41a2-b7e5-67fbdfe29bd0}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="svmx.c">
@@ -242,6 +245,15 @@
     </ClInclude>
     <ClInclude Include="tdp_iter.h">
       <Filter>mmu</Filter>
+    </ClInclude>
+    <ClInclude Include="rbtree_types.h">
+      <Filter>ktl</Filter>
+    </ClInclude>
+    <ClInclude Include="hashtable.h">
+      <Filter>ktl</Filter>
+    </ClInclude>
+    <ClInclude Include="kvm_dirty_ring.h">
+      <Filter>kvm</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
