@@ -466,11 +466,13 @@ static int check_memory_region_flags(const struct kvm_userspace_memory_region* m
 
 static bool kvm_check_memslot_overlap(struct kvm_memslots* slots, int id,
 	gfn_t start, gfn_t end) {
+	// struct kvm_memslot_iter iter;
 	UNREFERENCED_PARAMETER(slots);
 	UNREFERENCED_PARAMETER(id);
 	UNREFERENCED_PARAMETER(start);
 	UNREFERENCED_PARAMETER(end);
-	// struct kvm_memslot_iter iter;
+
+	// kvm_for_each_memslot_in_gfn_range()
 
 	return FALSE;
 }
@@ -616,6 +618,7 @@ int __kvm_set_memory_region(struct kvm* kvm,
 	u16 as_id, id;
 	int r;
 
+	// 检查mem->flags是否合法
 	r = check_memory_region_flags(mem);
 	if (r)
 		return r;
@@ -649,7 +652,7 @@ int __kvm_set_memory_region(struct kvm* kvm,
 	/*
 	* Note, the old memslot (and the pointer itself!) may be invalidated
 	* and/or destroyed by kvm_set_memslot().
-	* 再根据slots找到对应id的slot结构体
+	* 根据qemu的内存槽号得到kvm结构下的内存槽号
 	*/
 	old = id_to_memslot(slots, id);
 
@@ -659,7 +662,7 @@ int __kvm_set_memory_region(struct kvm* kvm,
 
 		if (kvm->nr_memslot_pages < old->npages)
 			return STATUS_UNSUCCESSFUL;
-
+		// 如果内存大小为0，而插槽上有内存，那么意味删除
 		return kvm_set_memslot(kvm, old, NULL, KVM_MR_DELETE);
 	}
 
@@ -667,7 +670,7 @@ int __kvm_set_memory_region(struct kvm* kvm,
 	npages = (mem->memory_size >> PAGE_SHIFT);
 
 	if (!old || !old->npages) {
-		change = KVM_MR_CREATE;
+		change = KVM_MR_CREATE;// 新创建内存区域
 
 		/*
 		* To simplify KVM internals, the total number of pages across
@@ -677,13 +680,14 @@ int __kvm_set_memory_region(struct kvm* kvm,
 			return STATUS_INVALID_PARAMETER;
 	}
 	else { /* Modify an existing slot. */
+		// 内存大小不能改变，物理地址不能改变，也不能修改只读内存
 		if ((mem->userspace_addr != old->userspace_addr) ||
 			(npages != old->npages) ||
 			((mem->flags ^ old->flags) & KVM_MEM_READONLY))
 			return STATUS_INVALID_PARAMETER;
 
 		if (base_gfn != old->base_gfn)
-			change = KVM_MR_MOVE; // 内存平移
+			change = KVM_MR_MOVE; // 内存区域平移
 		else if (mem->flags != old->flags)
 			change = KVM_MR_FLAGS_ONLY;// 修改属性
 		else /* Nothing to change */

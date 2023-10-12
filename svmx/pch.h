@@ -10,6 +10,8 @@
 #include "msr-index.h"
 #include "rbtree_types.h"
 #include "hashtable.h"
+#include "interval_tree_node.h"
+#include "rbtree.h"
 
 #define DRIVER_TAG	'xmvs'
 

@@ -91,6 +91,9 @@
     <ClCompile Include="mtrr.c">
       <Filter>kvm</Filter>
     </ClCompile>
+    <ClCompile Include="rbtree.c">
+      <Filter>ktl</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="pch.h">
@@ -254,6 +257,12 @@
     </ClInclude>
     <ClInclude Include="kvm_dirty_ring.h">
       <Filter>kvm</Filter>
+    </ClInclude>
+    <ClInclude Include="interval_tree_node.h">
+      <Filter>ktl</Filter>
+    </ClInclude>
+    <ClInclude Include="rbtree.h">
+      <Filter>ktl</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

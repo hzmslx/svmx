@@ -978,6 +978,8 @@ struct kvm_arch_memory_slot {
  * individually added or deleted.
  */
 struct kvm_memory_slot {
+	
+	struct rb_node gfn_node[2];
 	gfn_t base_gfn;// 虚拟内存区间的物理页框号
 	ULONG_PTR npages;// 将内存区间的大小转化为页数
 	ULONG_PTR* dirty_bitmap;
@@ -1304,9 +1306,81 @@ struct kvm_memory_slot* id_to_memslot(struct kvm_memslots* slots, int id)
 /* Iterator used for walking memslots that overlap a gfn range. */
 struct kvm_memslot_iter {
 	struct kvm_memslots* slots;
-	
+	struct rb_node* node;
 	struct kvm_memory_slot* slot;
 };
+
+static inline void kvm_memslot_iter_next(struct kvm_memslot_iter* iter) {
+	iter->node = rb_next(iter->node);
+	if (!iter->node)
+		return;
+
+	iter->slot = CONTAINING_RECORD(iter->node, struct kvm_memory_slot, gfn_node[iter->slots->node_idx]);
+}
+
+static inline void kvm_memslot_iter_start(struct kvm_memslot_iter* iter,
+	struct kvm_memslots* slots, gfn_t start) {
+	int idx = slots->node_idx;
+	struct rb_node* tmp;
+	struct kvm_memory_slot* slot;
+
+	iter->slots = slots;
+
+	/*
+	* Find the so called "upper bound" of a key - the first node that has
+	* its key strictly greater than the searched one (the start gfn in our case).
+	*/
+	iter->node = NULL;
+	for (tmp = slots->gfn_tree.rb_node; tmp;) {
+		slot = CONTAINING_RECORD(tmp, struct kvm_memory_slot, gfn_node[idx]);
+		if (start < slot->base_gfn) {
+			iter->node = tmp;
+			tmp = tmp->rb_left;
+		}
+		else {
+			tmp = tmp->rb_right;
+		}
+	}
+
+	/*
+	* Find the slot with the lowest gfn that can possibly intersect with
+	* the range, so we'll ideally have slot start <= range start
+	*/
+	if (iter->node) {
+		/*
+		* A NULL previous node means that the very first slot
+		* already has a higher start gfn.
+		* In this case slot start > range start.
+		*/
+		tmp = rb_prev(iter->node);
+		if (tmp)
+			iter->node = tmp;
+	}
+	else {
+		/* a NULL node below means no slots */
+		iter->node = rb_last(&slots->gfn_tree);
+	}
+
+	if (iter->node) {
+		iter->slot = CONTAINING_RECORD(iter->node, struct kvm_memory_slot, gfn_node[idx]);
+		
+		/*
+		* It is possible in the slot start < range start case that the
+		* found slot ends before or at range start (slot end <= range start)
+		* and so it does not overlap the requested range.
+		* 
+		* In such non-overlapping case the next slot (if it exists) will
+		* already have slot start > range start, otherwise the logic above
+		* would have found it instead of the current slot.
+		*/
+		if (iter->slot->base_gfn + iter->slot->npages <= start)
+			kvm_memslot_iter_next(iter);
+	}
+}
+
+/* Iterate over each memslot at least partially intersecting [start,end) range */
+// #define kvm_for_each_memslot_in_gfn_range(iter,slots,start,end) \
+	
 
 struct kvm_vcpu {
 	// 指向vcpu所属的虚拟机对应的kvm结构
