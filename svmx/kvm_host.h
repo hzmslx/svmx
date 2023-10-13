@@ -1378,9 +1378,23 @@ static inline void kvm_memslot_iter_start(struct kvm_memslot_iter* iter,
 	}
 }
 
+static inline bool kvm_memslot_iter_is_valid(struct kvm_memslot_iter* iter,
+	gfn_t end) {
+	if (!iter->node)
+		return FALSE;
+
+	/*
+	* If this slot starts beyond or at the end of the range so does
+	* every next one
+	*/
+	return iter->slot->base_gfn < end;
+}
+
 /* Iterate over each memslot at least partially intersecting [start,end) range */
-// #define kvm_for_each_memslot_in_gfn_range(iter,slots,start,end) \
-	
+#define kvm_for_each_memslot_in_gfn_range(iter,slots,start,end) \
+	for (kvm_memslot_iter_start(iter,slots,start);		\
+		 kvm_memslot_iter_is_valid(iter,end);	\
+		 kvm_memslot_iter_next(iter))
 
 struct kvm_vcpu {
 	// 指向vcpu所属的虚拟机对应的kvm结构
@@ -1941,7 +1955,7 @@ struct kvm {
 
 };
 
-
+extern bool tdp_enabled;
 
 struct kvm_x86_init_ops {
 	NTSTATUS (*hardware_setup)();
@@ -2188,3 +2202,5 @@ static inline ULONG_PTR kvm_dirty_bitmap_bytes(struct kvm_memory_slot* memslot)
 {
 	return ALIGN_UP(memslot->npages, ULONG_PTR) / 8;
 }
+
+int memslot_rmap_alloc(struct kvm_memory_slot* slot, ULONG_PTR npages);

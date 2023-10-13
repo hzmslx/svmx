@@ -106,3 +106,54 @@ static inline u8 kvm_get_shadow_phys_bits(void) {
 }
 
 void kvm_mmu_x86_module_init(void);
+
+extern u8 shadow_phys_bits;
+
+static inline gfn_t kvm_mmu_max_gfn(void) {
+	/*
+	* Note that this uses the host MAXPHYADDR, not the guest's.
+	* EPT/NPT cannot support GPAs that would exceed host.MAXPHYADDR;
+	* assuming KVM is running on bare metal, guest accesses beyond
+	* host.MAXPHYADDR will hit a #PF(RSVD) and never cause a vmexit
+	* (either EPT Violation/Misconfig or #NPF), and so KVM will never
+	* install a SPTE for such addresses. If KVM is running as a VM 
+	* itself, on the other hand, it might see a MAXPHYADDR that is less
+	* than hardware's real MAXPHYADDR. Using the host MAXPHYADDR
+	* disallows such SPTEs entirely and simplifies the TDP MMU.
+	*/
+	int max_gpa_bits = tdp_enabled ? shadow_phys_bits : 52;
+	
+	return (1ULL << (max_gpa_bits - PAGE_SHIFT)) - 1;
+}
+
+#ifdef AMD64
+extern bool tdp_mmu_enabled;
+#else
+#define tdp_mmu_enabled false
+#endif
+
+static inline bool kvm_shadow_root_allocated(struct kvm* kvm) {
+	/*
+	* Read shadow_root_allocated before related pointers. Hence, threads
+	* reading shadow_root_allocated in any lock context are guaranteed to 
+	* see the pointers. 
+	*/
+	UNREFERENCED_PARAMETER(kvm);
+	return FALSE;
+}
+
+static inline bool kvm_memslots_have_rmaps(struct kvm* kvm) {
+	return !tdp_mmu_enabled || kvm_shadow_root_allocated(kvm);
+}
+
+static inline gfn_t gfn_to_index(gfn_t gfn, gfn_t base_gfn, int level) {
+	/* KVM_HPAGE_GFN_SHIFT(PG_LEVEL_4K) must be 0.*/
+	return (gfn >> KVM_HPAGE_GFN_SHIFT(level)) -
+		(base_gfn >> KVM_HPAGE_GFN_SHIFT(level));
+}
+
+static inline ULONG_PTR __kvm_mmu_slot_lpages(struct kvm_memory_slot* slot,
+	ULONG_PTR npages, int level) {
+	return gfn_to_index(slot->base_gfn + npages - 1,
+		slot->base_gfn, level) + 1;
+}

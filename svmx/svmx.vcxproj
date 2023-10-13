@@ -184,6 +184,7 @@
     <ClCompile Include="mmu.c" />
     <ClCompile Include="mtrr.c" />
     <ClCompile Include="nested.c" />
+    <ClCompile Include="page_track.c" />
     <ClCompile Include="pmu.c" />
     <ClCompile Include="pmu_intel.c" />
     <ClCompile Include="processor.c" />

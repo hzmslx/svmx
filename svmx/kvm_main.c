@@ -466,13 +466,12 @@ static int check_memory_region_flags(const struct kvm_userspace_memory_region* m
 
 static bool kvm_check_memslot_overlap(struct kvm_memslots* slots, int id,
 	gfn_t start, gfn_t end) {
-	// struct kvm_memslot_iter iter;
-	UNREFERENCED_PARAMETER(slots);
-	UNREFERENCED_PARAMETER(id);
-	UNREFERENCED_PARAMETER(start);
-	UNREFERENCED_PARAMETER(end);
+	struct kvm_memslot_iter iter;
 
-	// kvm_for_each_memslot_in_gfn_range()
+	kvm_for_each_memslot_in_gfn_range(&iter, slots, start, end) {
+		if (iter.slot->id != id)
+			return TRUE;
+	}
 
 	return FALSE;
 }
@@ -694,6 +693,7 @@ int __kvm_set_memory_region(struct kvm* kvm,
 			return 0;
 	}
 
+	// 检查是否有重叠的地方
 	if ((change == KVM_MR_CREATE || change == KVM_MR_MOVE) &&
 		kvm_check_memslot_overlap(slots, id, base_gfn, base_gfn + npages))
 		return STATUS_ALREADY_COMMITTED;

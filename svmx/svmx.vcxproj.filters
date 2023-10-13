@@ -94,6 +94,9 @@
     <ClCompile Include="rbtree.c">
       <Filter>ktl</Filter>
     </ClCompile>
+    <ClCompile Include="page_track.c">
+      <Filter>mmu</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="pch.h">

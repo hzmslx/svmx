@@ -821,25 +821,100 @@ void kvm_arch_memslots_updated(struct kvm* kvm, u64 gen) {
 	UNREFERENCED_PARAMETER(gen);
 }
 
-int kvm_arch_prepare_memory_region(struct kvm* kvm,
-	const struct kvm_memory_slot* old,
-	struct kvm_memory_slot* new,
-	enum kvm_mr_change change) {
-	UNREFERENCED_PARAMETER(kvm);
-	UNREFERENCED_PARAMETER(old);
-	UNREFERENCED_PARAMETER(new);
-	UNREFERENCED_PARAMETER(change);
+static void memslot_rmap_free(struct kvm_memory_slot* slot) {
+	int i;
 
-	return 0;
+	for (i = 0; i < KVM_NR_PAGE_SIZES; ++i) {
+		ExFreePool(slot->arch.rmap[i]);
+		slot->arch.rmap[i] = NULL;
+	}
 }
 
 static int kvm_alloc_memslot_metadata(struct kvm* kvm,
 	struct kvm_memory_slot* slot) {
-	UNREFERENCED_PARAMETER(kvm);
-	UNREFERENCED_PARAMETER(slot);
+	ULONG_PTR npages = slot->npages;
+	int i, r;
 
-	return 0;
+	/*
+	* Clear out the previous array pointers for the KVM_MR_MOVE case. The
+	* old arrays will be freed by __kvm_set_memory_region() if installing
+	* the new memslot is successful.
+	*/
+	memset(&slot->arch, 0, sizeof(slot->arch));
+
+	if (kvm_memslots_have_rmaps(kvm)) {
+		r = memslot_rmap_alloc(slot, npages);
+		if (r)
+			return r;
+	}
+
+	for (i = 1; i < KVM_NR_PAGE_SIZES; ++i) {
+		struct kvm_lpage_info* linfo;
+		ULONG_PTR ugfn;
+		ULONG_PTR lpages;
+		int level = i + 1;
+
+		lpages = __kvm_mmu_slot_lpages(slot, npages, level);
+
+		linfo = ExAllocatePoolWithTag(PagedPool, lpages * sizeof(*linfo), DRIVER_TAG);
+		if (!linfo)
+			goto out_free;
+
+		slot->arch.lpage_info[i - 1] = linfo;
+
+		if (slot->base_gfn & (KVM_PAGES_PER_HPAGE(level) - 1))
+			linfo[0].disallow_lpage = 1;
+		if ((slot->base_gfn + npages) & (KVM_PAGES_PER_HPAGE(level) - 1))
+			linfo[lpages - 1].disallow_lpage = 1;
+		ugfn = slot->userspace_addr >> PAGE_SHIFT;
+		/*
+		* If the gfn and userspace address are not aligned wrt each
+		* other, disable large page support for this slot.
+		*/
+		if ((slot->base_gfn ^ ugfn) & (KVM_PAGES_PER_HPAGE(level) - 1)) {
+			ULONG_PTR j;
+			for (j = 0; j < lpages; ++j) {
+				linfo[j].disallow_lpage = 1;
+			}
+		}
+	}
+
+	if (kvm_page_track_create_memslot(kvm, slot, npages))
+		goto out_free;
+
+	return STATUS_SUCCESS;
+
+out_free:
+	memslot_rmap_free(slot);
+
+	for (i = 1; i < KVM_NR_PAGE_SIZES; ++i) {
+		ExFreePool(slot->arch.lpage_info[i - 1]);
+		slot->arch.lpage_info[i - 1] = NULL;
+	}
+
+	return STATUS_NO_MEMORY;
 }
+
+int kvm_arch_prepare_memory_region(struct kvm* kvm,
+	const struct kvm_memory_slot* old,
+	struct kvm_memory_slot* new,
+	enum kvm_mr_change change) {
+	if (change == KVM_MR_CREATE || change == KVM_MR_MOVE) {
+		if ((new->base_gfn + new->npages - 1) > kvm_mmu_max_gfn())
+			return STATUS_INVALID_PARAMETER;
+
+		return kvm_alloc_memslot_metadata(kvm, new);
+	}
+
+	if (change == KVM_MR_FLAGS_ONLY)
+		memcpy(&new->arch, &old->arch, sizeof(old->arch));
+	else if (change != KVM_MR_DELETE)
+		return STATUS_UNSUCCESSFUL;
+
+	return STATUS_SUCCESS;
+}
+
+
 
 void kvm_arch_commit_memory_region(struct kvm* kvm,
 	struct kvm_memory_slot* old,
@@ -1086,4 +1161,27 @@ int kvm_skip_emulated_instruction(struct kvm_vcpu* vcpu) {
 	}
 
 	return r;
+}
+
+
+
+int memslot_rmap_alloc(struct kvm_memory_slot* slot, ULONG_PTR npages) {
+	const int sz = sizeof(*slot->arch.rmap[0]);
+	int i;
+
+	for (i = 0; i < KVM_NR_PAGE_SIZES; ++i) {
+		int level = i + 1;
+		ULONG_PTR lpages = __kvm_mmu_slot_lpages(slot, npages, level);
+
+		if (slot->arch.rmap[i])
+			continue;
+		SIZE_T bytes = lpages * sz;
+		slot->arch.rmap[i] = ExAllocatePoolWithTag(PagedPool, bytes,DRIVER_TAG);
+		if (!slot->arch.rmap[i]) {
+			memslot_rmap_free(slot);
+			return STATUS_NO_MEMORY;
+		}
+	}
+
+	return STATUS_SUCCESS;
 }
