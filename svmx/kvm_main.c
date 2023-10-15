@@ -901,3 +901,4 @@ static int kvm_vm_ioctl_check_extension_generic(struct kvm* kvm, ULONG arg)
 			break;
 	}
 }
+

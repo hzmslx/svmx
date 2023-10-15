@@ -18,3 +18,18 @@ void kvm_tdp_mmu_put_root(struct kvm* kvm, struct kvm_mmu_page* root,
 
 int kvm_tdp_mmu_get_walk(struct kvm_vcpu* vcpu, u64 addr, 
 	u64* sptes,int* root_level);
+
+
+#ifdef AMD64
+static inline bool is_tdp_mmu_page(struct kvm_mmu_page* sp) {
+	return sp->tdp_mmu_page;
+}
+#else
+static inline bool is_tdp_mmu_page(struct kvm_mmu_page* sp) {
+	UNREFERENCED_PARAMETER(sp);
+	return FALSE;
+}
+#endif // AMD64
+
+int kvm_tdp_mmu_map(struct kvm_vcpu* vcpu, struct kvm_page_fault* fault);
+

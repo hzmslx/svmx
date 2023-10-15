@@ -2204,3 +2204,22 @@ static inline ULONG_PTR kvm_dirty_bitmap_bytes(struct kvm_memory_slot* memslot)
 }
 
 int memslot_rmap_alloc(struct kvm_memory_slot* slot, ULONG_PTR npages);
+
+static inline int mmu_invalidate_retry_hva(struct kvm* kvm,
+	ULONG_PTR mmu_seq,
+	ULONG_PTR hva) {
+	UNREFERENCED_PARAMETER(kvm);
+	UNREFERENCED_PARAMETER(mmu_seq);
+	UNREFERENCED_PARAMETER(hva);
+	/*
+	* If mmu_invalidate_inprogress is non-zero, then the range maintained
+	* by kvm_mmu_notifier_invalidate_range_start contains all addresses
+	* that might be being invalidated. Note that it may include some false
+	* positives, due to shortcuts when handing concurrent invalidations.
+	*/
+	
+
+	return 0;
+}
+
+

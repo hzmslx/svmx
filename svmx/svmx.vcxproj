@@ -192,6 +192,7 @@
     <ClCompile Include="spte.c" />
     <ClCompile Include="svm.c" />
     <ClCompile Include="svmx.c" />
+    <ClCompile Include="tdp_iter.c" />
     <ClCompile Include="tdp_mmu.c" />
     <ClCompile Include="virtext.c" />
     <ClCompile Include="vmx.c" />

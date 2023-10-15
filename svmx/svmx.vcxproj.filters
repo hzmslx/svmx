@@ -97,6 +97,9 @@
     <ClCompile Include="page_track.c">
       <Filter>mmu</Filter>
     </ClCompile>
+    <ClCompile Include="tdp_iter.c">
+      <Filter>mmu</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="pch.h">

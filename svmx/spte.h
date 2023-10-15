@@ -152,3 +152,31 @@ static inline bool is_rsvd_spte(struct rsvd_bits_validate* rsvd_check,
 	return __is_bad_mt_xwr(rsvd_check, spte) ||
 		__is_rsvd_bits_set(rsvd_check, spte, level);
 }
+
+static inline kvm_pfn_t spte_to_pfn(u64 pte) {
+	return (pte & SPTE_BASE_ADDR_MASK) >> PAGE_SHIFT;
+}
+
+/*
+ * If a thread running without exclusive control of the MMU lock must perform a
+ * multi-part operation on an SPTE, it can set the SPTE to REMOVED_SPTE as a
+ * non-present intermediate value. Other threads which encounter this value
+ * should not modify the SPTE.
+ *
+ * Use a semi-arbitrary value that doesn't set RWX bits, i.e. is not-present on
+ * both AMD and Intel CPUs, and doesn't set PFN bits, i.e. doesn't create a L1TF
+ * vulnerability.  Use only low bits to avoid 64-bit immediates.
+ *
+ * Only used by the TDP MMU.
+ */
+#define REMOVED_SPTE	0x5a0ULL
+
+
+static inline bool is_removed_spte(u64 spte) {
+	return spte == REMOVED_SPTE;
+}
+
+static inline struct kvm_mmu_page* sptep_to_sp(u64* sptep) {
+	PHYSICAL_ADDRESS physical = MmGetPhysicalAddress(sptep);
+	return to_shadow_page(physical.QuadPart);
+}

@@ -118,3 +118,156 @@ int kvm_tdp_mmu_get_walk(struct kvm_vcpu* vcpu, u64 addr,
 	
 	return leaf;
 }
+
+
+#define tdp_mmu_for_each_pte(_iter,_mmu,_start,_end) \
+	for_each_tdp_pte(_iter,to_shadow_page(_mmu->root.hpa),_start,_end)
+
+/*
+* Installs a last-level SPTE to handle a TDP page fault.
+* (NTP/EPT violation/misconfiguration)
+*/
+static int tdp_mmu_map_handle_target_level(struct kvm_vcpu* vcpu,
+	struct kvm_page_fault* fault,
+	struct tdp_iter* iter) {
+	UNREFERENCED_PARAMETER(vcpu);
+	UNREFERENCED_PARAMETER(fault);
+	UNREFERENCED_PARAMETER(iter);
+	int ret = RET_PF_FIXED;
+
+	return ret;
+}
+
+static void tdp_mmu_init_child_sp(struct kvm_mmu_page* child_sp,
+	struct tdp_iter* iter) {
+	struct kvm_mmu_page* parent_sp;
+	union kvm_mmu_page_role role;
+	
+	parent_sp = sptep_to_sp(iter->sptep);
+
+	role = parent_sp->role;
+	role.level--;
+
+	tdp_mmu_init_sp(child_sp, iter->sptep, iter->gfn, role);
+}
+
+/*
+ * tdp_mmu_link_sp - Replace the given spte with an spte pointing to the
+ * provided page table.
+ *
+ * @kvm: kvm instance
+ * @iter: a tdp_iter instance currently on the SPTE that should be set
+ * @sp: The new TDP page table to install.
+ * @shared: This operation is running under the MMU lock in read mode.
+ *
+ * Returns: 0 if the new page table was installed. Non-0 if the page table
+ *          could not be installed (e.g. the atomic compare-exchange failed).
+ */
+static int tdp_mmu_link_sp(struct kvm* kvm, struct tdp_iter* iter,
+	struct kvm_mmu_page* sp, bool shared) {
+	UNREFERENCED_PARAMETER(kvm);
+	UNREFERENCED_PARAMETER(iter);
+	UNREFERENCED_PARAMETER(sp);
+	UNREFERENCED_PARAMETER(shared);
+
+
+	return 0;
+}
+
+/* Note: the caller is responsible for initializing @sp. */
+static int tdp_mmu_split_huge_page(struct kvm* kvm, struct tdp_iter* iter,
+	struct kvm_mmu_page* sp, bool shared) {
+	UNREFERENCED_PARAMETER(kvm);
+	UNREFERENCED_PARAMETER(iter);
+	UNREFERENCED_PARAMETER(sp);
+	UNREFERENCED_PARAMETER(shared);
+
+	int ret;
+
+	ret = tdp_mmu_link_sp(kvm, iter, sp, shared);
+
+	return ret;
+}
+
+static void tdp_mmu_free_sp(struct kvm_mmu_page* sp) {
+	ExFreePool(sp->spt);
+}
+
+/*
+* Handle a TDP page fault (NPT/EPT violation/misconfiguration) by installing
+* page tables and SPTEs to translate the faulting guest physical address.
+*/
+int kvm_tdp_mmu_map(struct kvm_vcpu* vcpu, struct kvm_page_fault* fault) {
+	struct kvm_mmu* mmu = vcpu->arch.mmu;
+	struct kvm* kvm = vcpu->kvm;
+	struct tdp_iter iter;
+	struct kvm_mmu_page* sp;
+	int ret = RET_PF_RETRY;
+
+	kvm_mmu_hugepage_adjust(vcpu, fault);
+
+	tdp_mmu_for_each_pte(iter, mmu, fault->gfn, fault->gfn + 1) {
+		int r;
+
+		if (fault->nx_huge_page_workaround_enabled)
+			disallowed_hugepage_adjust(fault, iter.old_spte, iter.level);
+
+		/*
+		* If SPTE has been frozen by another thread, just give up and
+		* retry, avoiding unnecessary page table allocation and free.
+		*/
+		if (is_removed_spte(iter.old_spte))
+			goto retry;
+		
+		if (iter.level == fault->goal_level)
+			goto map_target_level;
+
+		/* Step down into the lower level page table if it exists. */
+		if (is_shadow_present_pte(iter.old_spte) &&
+			!is_large_pte(iter.old_spte))
+			continue;
+
+		/*
+		* The SPTE is either non-present or points to a huge page that
+		* needs to be split.
+		*/
+		sp = tdp_mmu_alloc_sp(vcpu);
+		tdp_mmu_init_child_sp(sp, &iter);
+
+		sp->nx_huge_page_disallowed = fault->huge_page_disallowed;
+
+		if (is_shadow_present_pte(iter.old_spte))
+			r = tdp_mmu_split_huge_page(kvm, &iter, sp, TRUE);
+		else
+			r = tdp_mmu_link_sp(kvm, &iter, sp, TRUE);
+
+		/*
+		* Force the guest to retry if installing an upper level SPTE
+		* failed, e.g. because a different task modified the SPTE.
+		*/
+		if (r) {
+			tdp_mmu_free_sp(sp);
+			goto retry;
+		}
+
+		if (fault->huge_page_disallowed &&
+			fault->req_level >= iter.level) {
+			
+		}
+	}
+
+	/*
+	* The walk aborted before reaching the target level, e.g. because the
+	* iterator detected an upper level SPTE was frozen during traversal. 
+	*/
+	
+	goto retry;
+
+map_target_level:
+	ret = tdp_mmu_map_handle_target_level(vcpu, fault, &iter);
+
+retry:
+
+
+	return ret;
+}

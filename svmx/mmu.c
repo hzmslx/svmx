@@ -1145,13 +1145,86 @@ static int direct_page_fault(struct kvm_vcpu* vcpu,
 	return r;
 }
 
+static bool page_fault_handle_page_track(struct kvm_vcpu* vcpu,
+	struct kvm_page_fault* fault) {
+	UNREFERENCED_PARAMETER(vcpu);
+	if (fault->rsvd)
+		return FALSE;
+
+	if (!fault->present || !fault->write)
+		return FALSE;
+
+	/*
+	* guest is writing the page which is write tracked which can
+	* not be fixed by page fault handler.
+	*/
+	
+	return FALSE;
+}
+
+static bool is_obsolete_sp(struct kvm* kvm, struct kvm_mmu_page* sp) {
+	if (sp->role.invalid)
+		return TRUE;
+
+	/* TDP MMU pages do not use the MMU generation. */
+	return !is_tdp_mmu_page(sp) &&
+		sp->mmu_valid_gen != kvm->arch.mmu_valid_gen;
+}
+
+/*
+* Returns true if the page fault is stale and needs to be retried, i.e. if the
+* root was invalidated by a memslot update or a relevant mmu_notifier fired.
+*/
+static bool is_page_fault_stale(struct kvm_vcpu* vcpu,
+	struct kvm_page_fault* fault) {
+	struct kvm_mmu_page* sp = to_shadow_page(vcpu->arch.mmu->root.hpa);
+	
+	/* Special roots, e.g. pae_root, are not backed by shadow pages. */
+	if (sp && is_obsolete_sp(vcpu->kvm, sp))
+		return TRUE;
+
+	/*
+	* Roots without an associated shadow page are considered invalid if
+	* there is a pending request to free obsolete roots. The request is
+	* only a hint that the current root _may_ be obsolete and needs to be
+	* reloaded, e.g. if the guest frees a PGD that KVM is tracking as a previous
+	* root, then __kvm_mmu_prepare_zap_page() signals all vCPUs
+	* to reload even if no vCPU is actively using the root.
+	*/
+	
+
+	return fault->slot &&
+		mmu_invalidate_retry_hva(vcpu->kvm, fault->mmu_seq, fault->hva);
+}
+
 #ifdef AMD64
 static int kvm_tdp_mmu_page_fault(struct kvm_vcpu* vcpu,
 	struct kvm_page_fault* fault) {
-	UNREFERENCED_PARAMETER(vcpu);
-	UNREFERENCED_PARAMETER(fault);
+	int r;
 
-	return 0;
+	if (page_fault_handle_page_track(vcpu, fault))
+		return RET_PF_EMULATE;
+
+	// 快速处理一个简单的page fault
+	r = fast_page_fault(vcpu, fault);
+	if (r != RET_PF_INVALID)
+		return r;
+
+	r = mmu_topup_memory_caches(vcpu, FALSE);
+	if (r)
+		return r;
+
+	r = RET_PF_RETRY;
+
+	if (is_page_fault_stale(vcpu, fault))
+		goto out_unlock;
+
+	r = kvm_tdp_mmu_map(vcpu, fault);
+
+out_unlock:
+
+	
+	return r;
 }
 #endif // AMD64
 
@@ -1539,4 +1612,24 @@ void kvm_mmu_hugepage_adjust(struct kvm_vcpu* vcpu, struct kvm_page_fault* fault
 		return;
 
 	
+}
+
+void disallowed_hugepage_adjust(struct kvm_page_fault* fault, u64 spte, int cur_level) {
+	if (cur_level > PG_LEVEL_4K &&
+		cur_level == fault->goal_level &&
+		is_shadow_present_pte(spte) &&
+		!is_large_pte(spte) &&
+		spte_to_child_sp(spte)->nx_huge_page_disallowed) {
+		/*
+		* A small SPTE exists for this pfn, buf FNAME(fetch),
+		* direct_map(), or kvm_tdp_mmu_map() would like to create a
+		* large PTE instead: just force them to go down another level,
+		* patching back for them into pfn the next 9 bits of the
+		* address.
+		*/
+		u64 page_mask = KVM_PAGES_PER_HPAGE(cur_level) -
+			KVM_PAGES_PER_HPAGE(cur_level - 1);
+		fault->pfn |= fault->gfn & page_mask;
+		fault->goal_level--;
+	}
 }
