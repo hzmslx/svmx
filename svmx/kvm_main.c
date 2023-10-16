@@ -416,6 +416,7 @@ kvm_pfn_t __gfn_to_pfn_memslot(const struct kvm_memory_slot* slot, gfn_t gfn,
 static int kvm_vm_ioctl_set_memory_region(struct kvm* kvm,
 	struct kvm_userspace_memory_region* mem)
 {
+	// 编号过大，无法添加
 	if ((u16)mem->slot >= KVM_USER_MEM_SLOTS)
 		return STATUS_INVALID_PARAMETER;
 
@@ -547,24 +548,83 @@ static int kvm_prepare_memory_region(struct kvm* kvm,
 	return r;
 }
 
+/* This does not remove the slot from struct kvm_memslots data structures */
+static void kvm_free_memslot(struct kvm* kvm, struct kvm_memory_slot* slot)
+{
+	UNREFERENCED_PARAMETER(kvm);
+	UNREFERENCED_PARAMETER(slot);
+}
+
+static void kvm_commit_memory_region(struct kvm* kvm,
+	struct kvm_memory_slot* old,
+	const struct kvm_memory_slot* new,
+	enum kvm_mr_change change) {
+	int old_flags = old ? old->flags : 0;
+	int new_flags = new ? new->flags : 0;
+	/*
+	* Update the total number of memslot pages before calling the arch
+	* hook so that architectures can consume the result directly.
+	*/
+	if (change == KVM_MR_DELETE) {
+		kvm->nr_memslot_pages -= old->npages;
+	}
+	else if (change == KVM_MR_CREATE)
+		kvm->nr_memslot_pages += new->npages;
+
+	if ((old_flags ^ new_flags) & KVM_MEM_LOG_DIRTY_PAGES) {
+
+	}
+
+	kvm_arch_commit_memory_region(kvm, old, new, change);
+
+	switch (change)
+	{
+		case KVM_MR_CREATE:
+			/* Nothing more to do*/
+			break;
+		case KVM_MR_DELETE:
+			/* Free the old memslot and all its metadata.*/
+			kvm_free_memslot(kvm, old);
+			break;
+		case KVM_MR_MOVE:
+		case KVM_MR_FLAGS_ONLY:
+			/*
+			* Free the ditry bitmap as needed; the below check encompasses
+			* both the flags and whether a ring buffer is bing used
+			*/
+			if (old->dirty_bitmap && !new->dirty_bitmap)
+				kvm_destroy_dirty_bitmap(old);
+
+			/*
+			* The final quirk. Free the detached, old slot, but only its
+			* memory, not any metadata. Metadata, including arch specific
+			* data, may be reused by @new.
+			*/
+			ExFreePool(old);
+			break;
+		default:
+			KeBugCheckEx(DRIVER_VIOLATION, 0, 0, 0, 0);
+	}
+}
+
 static int kvm_set_memslot(struct kvm* kvm,
 	struct kvm_memory_slot* old,
 	struct kvm_memory_slot* new,
 	enum kvm_mr_change change) {
-	struct kvm_memory_slot* invalid_slot;
+	struct kvm_memory_slot* invalid_slot = NULL;
 	int r;
 
 	/*
 	* Released in kvm_swap_active_memslots().
-	* 
+	*
 	* Must be held from before the current memslots are copied until after
 	* the new memslots are installed, then released before the
 	* synchronize in kvm_swap_active_memslots().
-	* 
+	*
 	* When modifying memslots outside of the slots_lock, must be held
 	* before reading the pointer to the current memslots until after all
 	* changes to those memslots are complete.
-	* 
+	*
 	* These rules ensure that installing new memslots does not lose
 	* changes made to the previous memslots.
 	*/
@@ -573,15 +633,15 @@ static int kvm_set_memslot(struct kvm* kvm,
 
 	/*
 	* Invalidate the old slot if it's being deleted or moved. This is
-	* done prior to actually deleting/moving the memslot to allow vCPUs to 
+	* done prior to actually deleting/moving the memslot to allow vCPUs to
 	* contine running by ensuring there are no mappings or shadow pages
 	* for the memslot when it is deleted/moved. Without pre-invalidation
-	* (and without a lock), a window would exist between effecting the 
-	* delete/move and committing the changes in arch code where KVM or a 
+	* (and without a lock), a window would exist between effecting the
+	* delete/move and committing the changes in arch code where KVM or a
 	* guest could access a non-existent memslot.
-	* 
+	*
 	* Modifications are done on a temporary, unreachable slot. The old
-	* slot needs to be preserved in case a later step fails and the 
+	* slot needs to be preserved in case a later step fails and the
 	* invalidataion needs to be reverted.
 	*/
 	if (change == KVM_MR_DELETE || change == KVM_MR_MOVE) {
@@ -594,7 +654,56 @@ static int kvm_set_memslot(struct kvm* kvm,
 		kvm_invalidate_memslot(kvm, old, invalid_slot);
 	}
 
+	// 初始化kvm_memory_slot中arch部分
 	r = kvm_prepare_memory_region(kvm, old, new, change);
+	if (r) {
+		/*
+		* For DELETE/MOVE, revert the above INVALID change. No
+		* modifications required since the original slot was preserved
+		* in the inactive slots. Changing the active memslots also
+		* release slots_arch_lock.
+		*/
+		if (change == KVM_MR_DELETE || change == KVM_MR_MOVE) {
+
+		}
+		else {
+			KeReleaseMutex(&kvm->slots_arch_lock, FALSE);
+		}
+		return r;
+	}
+
+	/*
+	* For DELETE and MOVE, the working slot is now active as the INVALID
+	* version of the old slot. MOVE is particularly special as it reuses
+	* the old slot and returns a copy of the old slot (in working_slot).
+	* For CREATE, there is no old slot. For DELETE and FLAGS_ONLY, the
+	* old slot is detached but otherwise preserved.
+	*/
+	if (change == KVM_MR_CREATE) {
+
+	}
+	else if (change == KVM_MR_DELETE) {
+
+	}
+	else if (change == KVM_MR_MOVE) {
+
+	}
+	else if (change == KVM_MR_FLAGS_ONLY) {
+
+	}
+	else
+		KeBugCheckEx(DRIVER_VIOLATION, 0, 0, 0, 0);
+
+	/* Free the temporary INVALID slot used for DELETE and MOVE. */
+	if (change == KVM_MR_DELETE || change == KVM_MR_MOVE)
+		ExFreePool(invalid_slot);
+
+	/*
+	* No need to refresh new->arch, changes after dropping slots_arch_lock
+	* will directly hit the final, active memslot. Architetures are
+	* responsible for knowing that new->arch may be stale.
+	*/
+	kvm_commit_memory_region(kvm, old, new, change);
 
 	return 0;
 }
@@ -628,11 +737,11 @@ int __kvm_set_memory_region(struct kvm* kvm,
 	id = (u16)mem->slot;
 
 	/* General sanity checks */
-	// 要求以页为单位
+	// memory_size需要页对齐
 	if ((mem->memory_size & (PAGE_SIZE - 1)) ||
 		(mem->memory_size != (ULONG_PTR)mem->memory_size))
 		return STATUS_INVALID_PARAMETER;
-	// 要求页对齐
+	// 客户机物理地址要求页对齐
 	if (mem->guest_phys_addr & (PAGE_SIZE - 1))
 		return STATUS_INVALID_PARAMETER;
 	// 保证线性地址页对齐
@@ -655,13 +764,14 @@ int __kvm_set_memory_region(struct kvm* kvm,
 	*/
 	old = id_to_memslot(slots, id);
 
+	// 新设置区域大小为0，意味着删除原有区域
 	if (!mem->memory_size) {
 		if (!old || !old->npages)
 			return STATUS_INVALID_PARAMETER;
 
 		if (kvm->nr_memslot_pages < old->npages)
 			return STATUS_UNSUCCESSFUL;
-		// 如果内存大小为0，而插槽上有内存，那么意味删除
+		// 调用删除然后直接返回
 		return kvm_set_memslot(kvm, old, NULL, KVM_MR_DELETE);
 	}
 
@@ -698,6 +808,7 @@ int __kvm_set_memory_region(struct kvm* kvm,
 		kvm_check_memslot_overlap(slots, id, base_gfn, base_gfn + npages))
 		return STATUS_ALREADY_COMMITTED;
 
+	// 生成新slot
 	/* Allocate a slot that will persist in the memslot. */
 	new = ExAllocatePoolWithTag(NonPagedPool, sizeof(*new), DRIVER_TAG);
 	if (!new) {
@@ -709,6 +820,7 @@ int __kvm_set_memory_region(struct kvm* kvm,
 	new->base_gfn = base_gfn;
 	new->npages = npages;
 	new->flags = mem->flags;
+	// 主机虚拟地址，即HVA
 	new->userspace_addr = mem->userspace_addr;
 
 	r = kvm_set_memslot(kvm, old, new, change);
@@ -766,12 +878,7 @@ static void kvm_delete_memslot(struct kvm* kvm,
 }
 
 
-/* This does not remove the slot from struct kvm_memslots data structures */
-static void kvm_free_memslot(struct kvm* kvm, struct kvm_memory_slot* slot)
-{
-	UNREFERENCED_PARAMETER(kvm);
-	UNREFERENCED_PARAMETER(slot);
-}
+
 
 
 
