@@ -433,7 +433,16 @@ static long kvm_vm_ioctl(unsigned int ioctl, unsigned long arg) {
 		// 建立 guest 物理地址空间中的内存区域与 qemu-kvm 虚拟地址空间中的内存区域的映射
 		case KVM_SET_USER_MEMORY_REGION:
 		{
-			struct kvm_userspace_memory_region kvm_userspace_mem;
+			struct kvm_userspace_memory_region kvm_userspace_mem = { 0 };
+			PPHYSICAL_MEMORY_RANGE range = MmGetPhysicalMemoryRanges();
+			kvm_userspace_mem.guest_phys_addr = range->BaseAddress.QuadPart;
+			kvm_userspace_mem.memory_size = range->NumberOfBytes.QuadPart;
+			kvm_userspace_mem.slot = 0;
+			kvm_userspace_mem.flags = 0;
+			kvm_userspace_mem.userspace_addr = 0;
+			if (range != NULL) {
+				ExFreePool(range);
+			}
 			r = kvm_vm_ioctl_set_memory_region(g_kvm, &kvm_userspace_mem);
 			break;
 		}
@@ -607,6 +616,84 @@ static void kvm_commit_memory_region(struct kvm* kvm,
 	}
 }
 
+/*
+ * Replace @old with @new in the inactive memslots.
+ *
+ * With NULL @old this simply adds @new.
+ * With NULL @new this simply removes @old.
+ *
+ * If @new is non-NULL its hva_node[slots_idx] range has to be set
+ * appropriately.
+ */
+static void kvm_replace_memslot(struct kvm* kvm,
+	struct kvm_memory_slot* old,
+	struct kvm_memory_slot* new) {
+	UNREFERENCED_PARAMETER(kvm);
+	UNREFERENCED_PARAMETER(old);
+	UNREFERENCED_PARAMETER(new);
+}
+
+/*
+ * Activate @new, which must be installed in the inactive slots by the caller,
+ * by swapping the active slots and then propagating @new to @old once @old is
+ * unreachable and can be safely modified.
+ *
+ * With NULL @old this simply adds @new to @active (while swapping the sets).
+ * With NULL @new this simply removes @old from @active and frees it
+ * (while also swapping the sets).
+ */
+static void kvm_activate_memslot(struct kvm* kvm,
+	struct kvm_memory_slot* old,
+	struct kvm_memory_slot* new)
+{
+	UNREFERENCED_PARAMETER(kvm);
+	UNREFERENCED_PARAMETER(old);
+	UNREFERENCED_PARAMETER(new);
+}
+
+static void kvm_create_memslot(struct kvm* kvm,
+	struct kvm_memory_slot* new) {
+	/* Add the new memslot to the inactive set and activate.*/
+	kvm_replace_memslot(kvm, NULL, new);
+	kvm_activate_memslot(kvm, NULL, new);
+}
+
+static void kvm_move_memslot(struct kvm* kvm,
+	struct kvm_memory_slot* old,
+	struct kvm_memory_slot* new,
+	struct kvm_memory_slot* invalid_slot) {
+	/*
+	* Replace the old memslot in the active slots, and then swap slots
+	* and replace the current INVALID with the new as well.
+	*/
+	kvm_replace_memslot(kvm, old, new);
+	kvm_activate_memslot(kvm, invalid_slot, new);
+}
+
+static void kvm_delete_memslot(struct kvm* kvm,
+	struct kvm_memory_slot* old,
+	struct kvm_memory_slot* invalid_slot)
+{
+	/*
+	 * Remove the old memslot (in the inactive memslots) by passing NULL as
+	 * the "new" slot, and for the invalid version in the active slots.
+	 */
+	kvm_replace_memslot(kvm, old, NULL);
+	kvm_activate_memslot(kvm, invalid_slot, NULL);
+}
+
+static void kvm_update_flags_memslot(struct kvm* kvm,
+	struct kvm_memory_slot* old,
+	struct kvm_memory_slot* new) {
+	/*
+	* Similar to the MOVE case, but the slot doesn't need to be zapped as
+	* an intermediate step. Instead, the old memslot is simply replaced
+	* with a new, updated copy in both memslot sets.
+	*/
+	kvm_replace_memslot(kvm, old, new);
+	kvm_activate_memslot(kvm, old, new);
+}
+
 static int kvm_set_memslot(struct kvm* kvm,
 	struct kvm_memory_slot* old,
 	struct kvm_memory_slot* new,
@@ -680,23 +767,25 @@ static int kvm_set_memslot(struct kvm* kvm,
 	* old slot is detached but otherwise preserved.
 	*/
 	if (change == KVM_MR_CREATE) {
-
+		kvm_create_memslot(kvm, new);
 	}
 	else if (change == KVM_MR_DELETE) {
-
+		kvm_delete_memslot(kvm, old, invalid_slot);
 	}
 	else if (change == KVM_MR_MOVE) {
-
+		kvm_move_memslot(kvm, old, new, invalid_slot);
 	}
 	else if (change == KVM_MR_FLAGS_ONLY) {
-
+		kvm_update_flags_memslot(kvm, old, new);
 	}
 	else
 		KeBugCheckEx(DRIVER_VIOLATION, 0, 0, 0, 0);
 
 	/* Free the temporary INVALID slot used for DELETE and MOVE. */
-	if (change == KVM_MR_DELETE || change == KVM_MR_MOVE)
-		ExFreePool(invalid_slot);
+	if (change == KVM_MR_DELETE || change == KVM_MR_MOVE) {
+		if (invalid_slot != NULL)
+			ExFreePool(invalid_slot);
+	}
 
 	/*
 	* No need to refresh new->arch, changes after dropping slots_arch_lock
@@ -830,52 +919,11 @@ int __kvm_set_memory_region(struct kvm* kvm,
 	return r;
 }
 
-/*
- * Replace @old with @new in the inactive memslots.
- *
- * With NULL @old this simply adds @new.
- * With NULL @new this simply removes @old.
- *
- * If @new is non-NULL its hva_node[slots_idx] range has to be set
- * appropriately.
- */
-static void kvm_replace_memslot(struct kvm* kvm,
-	struct kvm_memory_slot* old,
-	struct kvm_memory_slot* new) {
-	UNREFERENCED_PARAMETER(kvm);
-	UNREFERENCED_PARAMETER(old);
-	UNREFERENCED_PARAMETER(new);
-}
 
-/*
- * Activate @new, which must be installed in the inactive slots by the caller,
- * by swapping the active slots and then propagating @new to @old once @old is
- * unreachable and can be safely modified.
- *
- * With NULL @old this simply adds @new to @active (while swapping the sets).
- * With NULL @new this simply removes @old from @active and frees it
- * (while also swapping the sets).
- */
-static void kvm_activate_memslot(struct kvm* kvm,
-	struct kvm_memory_slot* old,
-	struct kvm_memory_slot* new)
-{
-	UNREFERENCED_PARAMETER(kvm);
-	UNREFERENCED_PARAMETER(old);
-	UNREFERENCED_PARAMETER(new);
-}
 
-static void kvm_delete_memslot(struct kvm* kvm,
-	struct kvm_memory_slot* old,
-	struct kvm_memory_slot* invalid_slot)
-{
-	/*
-	 * Remove the old memslot (in the inactive memslots) by passing NULL as
-	 * the "new" slot, and for the invalid version in the active slots.
-	 */
-	kvm_replace_memslot(kvm, old, NULL);
-	kvm_activate_memslot(kvm, invalid_slot, NULL);
-}
+
+
+
 
 
 

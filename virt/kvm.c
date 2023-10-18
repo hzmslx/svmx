@@ -25,6 +25,7 @@ int kvm_init() {
 		Error("Failed to get api version");
 		goto err;
 	}
+	// 确保是正确的API版本
 	if (version < KVM_API_VERSION) {
 		ret = -EINVAL;
 		fprintf(stderr, "kvm version too old\n");
@@ -36,11 +37,20 @@ int kvm_init() {
 		fprintf(stderr, "kvm version not supported\n");
 		goto err;
 	}
+
 	// 创建虚拟机
 	if (!DeviceIoControl(hDevice, KVM_CREATE_VM, NULL, 0,
 		NULL, 0, &bytes, NULL)) {
 		ret = GetLastError();
 		Error("Failed to create vm");
+		goto err;
+	}
+
+	// 设置kvm的内存区域
+	if (!DeviceIoControl(hDevice, KVM_SET_USER_MEMORY_REGION,
+		NULL, 0, NULL, 0, &bytes, NULL)) {
+		ret = GetLastError();
+		Error("Failed to set memory region");
 		goto err;
 	}
 

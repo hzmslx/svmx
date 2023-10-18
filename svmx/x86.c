@@ -840,6 +840,7 @@ static int kvm_alloc_memslot_metadata(struct kvm* kvm,
 	* old arrays will be freed by __kvm_set_memory_region() if installing
 	* the new memslot is successful.
 	*/
+	// 重置整个kvm_memory_slot的arch
 	memset(&slot->arch, 0, sizeof(slot->arch));
 
 	if (kvm_memslots_have_rmaps(kvm)) {
@@ -848,14 +849,16 @@ static int kvm_alloc_memslot_metadata(struct kvm* kvm,
 			return r;
 	}
 
+	// 生成一个3级的软件页表
 	for (i = 1; i < KVM_NR_PAGE_SIZES; ++i) {
 		struct kvm_lpage_info* linfo;
 		ULONG_PTR ugfn;
 		ULONG_PTR lpages;
 		int level = i + 1;
-
+		// 每级页表所需的pages数目
 		lpages = __kvm_mmu_slot_lpages(slot, npages, level);
 
+		// Large page结构（如2MB、1GB大小页面）
 		linfo = ExAllocatePoolWithTag(PagedPool, lpages * sizeof(*linfo), DRIVER_TAG);
 		if (!linfo)
 			goto out_free;

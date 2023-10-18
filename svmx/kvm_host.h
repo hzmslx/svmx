@@ -57,6 +57,7 @@ static inline bool is_error_noslot_pfn(kvm_pfn_t pfn) {
 
 /* KVM Hugepage definitions for x86 */
 #define KVM_MAX_HUGEPAGE_LEVEL	PG_LEVEL_1G
+// 分页级数
 #define KVM_NR_PAGE_SIZES	(KVM_MAX_HUGEPAGE_LEVEL - PG_LEVEL_4K + 1)
 /*
 * 表示以level级别为叶子页表的情况下，所管理的页面是标准页面的多少倍
