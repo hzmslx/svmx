@@ -32,4 +32,5 @@ static inline bool is_tdp_mmu_page(struct kvm_mmu_page* sp) {
 #endif // AMD64
 
 int kvm_tdp_mmu_map(struct kvm_vcpu* vcpu, struct kvm_page_fault* fault);
-
+u64* kvm_tdp_mmu_fast_pf_get_last_sptep(struct kvm_vcpu* vcpu, u64 addr,
+	u64* spte);

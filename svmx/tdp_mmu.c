@@ -271,3 +271,33 @@ retry:
 
 	return ret;
 }
+
+/*
+* Returns the last level spte pointer of the shadow page walk for the given
+* gpa, and sets *spte to the spte value. This spte may be non-present. If no walk
+* could be performed, returns NULL and *spte does not contain valid data.
+* 
+* Contract:
+*  - Must be called between kvm_tdp_mmu_walk_lockless_{begin,end}
+*  - The returned sptep must not be used after kvm_tdp_mmu_walk_lockless_end.
+* 
+* WARNING: This function is only intended to be called during fast_page_fault.
+*/
+u64* kvm_tdp_mmu_fast_pf_get_last_sptep(struct kvm_vcpu* vcpu, u64 addr,
+	u64* spte) {
+	struct tdp_iter iter;
+	struct kvm_mmu* mmu = vcpu->arch.mmu;
+	gfn_t gfn = addr >> PAGE_SHIFT;
+	tdp_ptep_t sptep = NULL;
+
+	tdp_mmu_for_each_pte(iter, mmu, gfn, gfn + 1) {
+		*spte = iter.old_spte;
+		sptep = iter.sptep;
+	}
+	
+	if (sptep != NULL) {
+		return sptep;
+	}
+	else
+		return NULL;
+}

@@ -1090,6 +1090,7 @@ static int handle_ept_violation(struct kvm_vcpu* vcpu) {
 	// exit 明细信息
 	vcpu->arch.exit_qualification = exit_qualification;
 
+	// 处理page fault 异常
 	return kvm_mmu_page_fault(vcpu, gpa, error_code, NULL, 0);
 }
 

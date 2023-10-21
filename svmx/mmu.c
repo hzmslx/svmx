@@ -42,14 +42,7 @@ static PVOID pte_list_desc_cache;
 static PVOID rmap_desc_cache;
 static PVOID mmu_page_header_cache;
 
-static u64 shadow_trap_nonpresent_pte;
-static u64 shadow_notrap_nonpresent_pte;
-static u64 shadow_base_present_pte;
-static u64 shadow_nx_mask;
-static u64 shadow_x_mask;	/* mutual exclusive with nx_mask */
-static u64 shadow_user_mask;
-u64 shadow_accessed_mask;
-static u64 shadow_dirty_mask;
+
 
 static bool tdp_mmu_allowed = TRUE;
 #ifdef AMD64
@@ -185,14 +178,6 @@ int kvm_mmu_vendor_module_init(void) {
 	return status;
 }
 
-void kvm_mmu_set_nonpresent_ptes(u64 trap_pte, u64 notrap_pte) {
-	shadow_trap_nonpresent_pte = trap_pte;
-	shadow_notrap_nonpresent_pte = notrap_pte;
-}
-
-void kvm_mmu_set_base_ptes(u64 base_pte) {
-	shadow_base_present_pte = base_pte;
-}
 
 struct kvm_shadow_walk_iterator {
 	u64 addr;// 寻找的 guest os 物理地址
@@ -1115,13 +1100,136 @@ static int direct_map(struct kvm_vcpu* vcpu, struct kvm_page_fault* fault) {
 	return 0;
 }
 
+static bool page_fault_can_be_fast(struct kvm_page_fault* fault) {
+	/*
+	* Page faults with reserved bits set, i.e. faults on MMIO SPTEs, only
+	* reach the common page fault handler if the SPTE has an invalid MMIO
+	* generation number. Refreshing the MMIO generation needs to go down
+	* the slow path. Note, EPT Misconfigs do NOT set the PRESENT flag!
+	*/
+	if (fault->rsvd)
+		return FALSE;
+
+	/*
+	* #PF can be fast if:
+	* 
+	* 1. The shadow page table entry is not present and A/D bits are
+	* disabled _by KVM_, which could mean that the fault is potentially
+	* caused by access tracking (if enabled). If A/D bits are enabled
+	* by KVM, but disabled by L1 for L2, KVM is forced to disable A/D
+	* bits for L2 and employ access tracking, but the fast page fault
+	* mechanism only supports direct MMUs.
+	* 2. The shadow page table entry is present, the access is a write,
+	* and no reserved bits are set (MMIO_SPTEs cannot be "fixed"), i.e.
+	* the fault was caused by a write-protection violation. If the 
+	* SPTE is MMU-writable (determined later), the fault can be fixed
+	* by setting the Writable bit, which can be done out of mmu_lock.
+	*/
+	if (!fault->present)
+		return !kvm_ad_enabled();
+
+	/*
+	* Note, instruction fetches and writes are mutally exclusive, ignore
+	* the "exec" flag.
+	*/
+	return fault->write;
+}
+
+/*
+* Returns the last level spte pointer of the shadow page walk for the given
+* gpa, and sets *spte to the spte value. This spte may be non-present. If no
+* walk could be performed, returns NULL and *spte does not contain valid data.
+* 
+* Contract:
+* - Must be called between walk_shadow_page_lockless_{begin,end}.
+* - The returned sptep must not be used after walk_shadow_page_lockless_end.
+*/
+static u64* fast_pf_get_last_sptep(struct kvm_vcpu* vcpu, gpa_t gpa, u64* spte)
+{
+	UNREFERENCED_PARAMETER(vcpu);
+	UNREFERENCED_PARAMETER(gpa);
+	UNREFERENCED_PARAMETER(spte);
+	return NULL;
+}
+
+
+
+static bool is_access_allowed(struct kvm_page_fault* fault, u64 spte) {
+	if (fault->exec)
+		return is_executable_pte(spte);
+
+	if (fault->write)
+		return is_writable_pte(spte);
+
+	/* Fault was on Read access */
+	return spte & PT_PRESENT_MASK;
+}
+
 /*
  * Returns one of RET_PF_INVALID, RET_PF_FIXED or RET_PF_SPURIOUS.
  */
 static int fast_page_fault(struct kvm_vcpu* vcpu,
 	struct kvm_page_fault* fault) {
-	UNREFERENCED_PARAMETER(vcpu);
-	UNREFERENCED_PARAMETER(fault);
+	struct kvm_mmu_page* sp;
+	int ret = RET_PF_INVALID;
+	u64 spte = 0ull;
+	u64* sptep = NULL;
+	uint retry_count = 0;
+
+	if (!page_fault_can_be_fast(fault))
+		return ret;
+
+	do
+	{
+		u64 new_spte;
+
+		if (tdp_mmu_enabled)
+			sptep = kvm_tdp_mmu_fast_pf_get_last_sptep(vcpu, fault->addr, &spte);
+		else
+			sptep = fast_pf_get_last_sptep(vcpu, fault->addr, &spte);
+		
+		if (!is_shadow_present_pte(spte))
+			break;
+
+		sp = sptep_to_sp(sptep);
+		if (!is_last_spte(spte, sp->role.level))
+			break;
+
+		/*
+		* 
+		*/
+		if (is_access_allowed(fault, spte)) {
+			ret = RET_PF_SPURIOUS;
+			break;
+		}
+
+		new_spte = spte;
+
+		/*
+		* KVM only supports fixing page faults outside of MMU lock for
+		* direct MMUs, nested MMUs are always indirect, and KVM always
+		* uses A/D bits for non-nested MMUs. Thus, if A/D bits are
+		* enabled, the SPTE can't be an access-tracked SPTE.
+		*/
+		if (!kvm_ad_enabled() && is_access_track_spte(spte))
+			new_spte = restore_acc_track_spte(new_spte);
+
+		if (fault->write && is_mmu_writable_spte(spte)) {
+			new_spte |= PT_WRITABLE_MASK;
+
+			
+		}
+
+		if (new_spte == spte ||
+			!is_access_allowed(fault, new_spte))
+			break;
+
+
+		if (++retry_count > 4) {
+			// Fast #PF retrying more than 4 times.
+			break;
+		}
+	} while (TRUE);
 
 	return RET_PF_INVALID;
 }
@@ -1452,15 +1560,16 @@ int kvm_mmu_page_fault(struct kvm_vcpu* vcpu, gpa_t cr2_or_gpa, u64 error_code,
 		return RET_PF_RETRY;
 
 	r = RET_PF_INVALID;
+	// 判断是否是mmio引起的退出
 	if (error_code & PFERR_RSVD_MASK) {
-		// mmio引起的退出,会从handle_ept_misconfig过来
+		// mmio引起的退出,会从handle_ept_misconfig调用过来
 		r = handle_mmio_page_fault(vcpu, cr2_or_gpa, direct);
 		if (r == RET_PF_EMULATE)
 			goto emulate;
 	}
 
 	if (r == RET_PF_INVALID) {
-		// 处理内存访问异常
+		// EPT页表项无效
 		r = kvm_mmu_do_page_fault(vcpu, cr2_or_gpa,
 			lower_32_bits(error_code), FALSE,
 			&emulation_type);

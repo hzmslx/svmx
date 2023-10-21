@@ -7,8 +7,37 @@
 #define ACC_USER_MASK    PT_USER_MASK
 #define ACC_ALL          (ACC_EXEC_MASK | ACC_WRITE_MASK | ACC_USER_MASK)
 
+extern u64 shadow_host_writable_mask;
+extern u64 shadow_mmu_writable_mask;
+extern u64 shadow_nx_mask;
+extern u64 shadow_x_mask; /* mutual exclusive with nx_mask */
+extern u64 shadow_user_mask;
 extern u64 shadow_accessed_mask;
+extern u64 shadow_dirty_mask;
+extern u64 shadow_mmio_value;
+extern u64 shadow_mmio_mask;
+extern u64 shadow_mmio_access_mask;
+extern u64 shadow_present_mask;
+extern u64 shadow_memtype_mask;
+extern u64 shadow_me_value;
+extern u64 shadow_me_mask;
 
+/*
+ * SPTEs in MMUs without A/D bits are marked with SPTE_TDP_AD_DISABLED;
+ * shadow_acc_track_mask is the set of bits to be cleared in non-accessed
+ * pages.
+ */
+extern u64 shadow_acc_track_mask;
+
+/*
+ * This mask must be set on all non-zero Non-Present or Reserved SPTEs in order
+ * to guard against L1TF attacks.
+ */
+extern u64 shadow_nonpresent_or_rsvd_mask;
+
+/* The mask for the R/X bits in EPT PTEs */
+#define SPTE_EPT_READABLE_MASK			0x1ull
+#define SPTE_EPT_EXECUTABLE_MASK		0x4ull
 
 #define SPTE_LEVEL_BITS			9
 #define SPTE_LEVEL_SHIFT(level)		__PT_LEVEL_SHIFT(level, SPTE_LEVEL_BITS)
@@ -23,6 +52,20 @@ extern u64 shadow_accessed_mask;
  * enough that the improved code generation is noticeable in KVM's footprint.
  */
 #define SPTE_MMU_PRESENT_MASK		BIT_ULL(11)
+
+
+ /*
+  * The mask/shift to use for saving the original R/X bits when marking the PTE
+  * as not-present for access tracking purposes. We do not save the W bit as the
+  * PTEs being access tracked also need to be dirty tracked, so the W bit will be
+  * restored only when a write is attempted to the page.  This mask obviously
+  * must not overlap the A/D type mask.
+  */
+#define SHADOW_ACC_TRACK_SAVED_BITS_MASK (SPTE_EPT_READABLE_MASK | \
+					  SPTE_EPT_EXECUTABLE_MASK)
+#define SHADOW_ACC_TRACK_SAVED_BITS_SHIFT 54
+#define SHADOW_ACC_TRACK_SAVED_MASK	(SHADOW_ACC_TRACK_SAVED_BITS_MASK << \
+					 SHADOW_ACC_TRACK_SAVED_BITS_SHIFT)
 
  /*
   * TDP SPTES (more specifically, EPT SPTEs) may not have A/D bits, and may also
@@ -179,4 +222,39 @@ static inline bool is_removed_spte(u64 spte) {
 static inline struct kvm_mmu_page* sptep_to_sp(u64* sptep) {
 	PHYSICAL_ADDRESS physical = MmGetPhysicalAddress(sptep);
 	return to_shadow_page(physical.QuadPart);
+}
+
+static inline bool is_executable_pte(u64 spte)
+{
+	return (spte & (shadow_x_mask | shadow_nx_mask)) == shadow_x_mask;
+}
+
+static inline bool is_writable_pte(ULONG_PTR pte) {
+	return pte & PT_WRITABLE_MASK;
+}
+
+static inline bool spte_ad_enabled(u64 spte) {
+	return (spte & SPTE_TDP_AD_MASK) != SPTE_TDP_AD_DISABLED;
+}
+
+static inline bool is_access_track_spte(u64 spte) {
+	return !spte_ad_enabled(spte) && (spte & shadow_acc_track_mask) == 0;
+}
+
+/* Restore an acc-track PTE back to a regular PTE */
+static inline u64 restore_acc_track_spte(u64 spte) {
+	u64 saved_bits = (spte >> SHADOW_ACC_TRACK_SAVED_BITS_SHIFT)
+		& SHADOW_ACC_TRACK_SAVED_BITS_MASK;
+
+	spte &= ~shadow_acc_track_mask;
+	spte &= ~(SHADOW_ACC_TRACK_SAVED_BITS_MASK <<
+		SHADOW_ACC_TRACK_SAVED_BITS_SHIFT);
+	spte |= saved_bits;
+
+	return spte;
+}
+
+static inline bool is_mmu_writable_spte(u64 spte)
+{
+	return spte & shadow_mmu_writable_mask;
 }

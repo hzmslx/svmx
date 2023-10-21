@@ -443,6 +443,7 @@ static long kvm_vm_ioctl(unsigned int ioctl, unsigned long arg) {
 			if (range != NULL) {
 				ExFreePool(range);
 			}
+			
 			r = kvm_vm_ioctl_set_memory_region(g_kvm, &kvm_userspace_mem);
 			break;
 		}
