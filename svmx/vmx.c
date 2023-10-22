@@ -1063,12 +1063,15 @@ static int handle_ept_violation(struct kvm_vcpu* vcpu) {
 	unsigned long exit_qualification;
 	gpa_t gpa;
 	u64 error_code;
+	gva_t gva = 0;
 
 	// 读取exit_qualification字段
 	exit_qualification = vmx_get_exit_qual(vcpu);
 
 	// 读取虚拟机的物理地址,这就是产生异常的GPA
 	gpa = vmcs_read64(GUEST_PHYSICAL_ADDRESS);
+
+	gva = vmcs_read64(GUEST_LINEAR_ADDRESS);
 
 	// 拼凑error
 	/* Is it a read fault? */

@@ -17,3 +17,13 @@ typedef unsigned int		uint;
 
 
 typedef long long		s64;
+
+// hash桶的头结点
+struct hlist_head {
+	struct hlist_node* first;
+};
+
+// hash桶的普通结点
+struct hlist_node {
+	struct hlist_node* next, ** pprev;
+};

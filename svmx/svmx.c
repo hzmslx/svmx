@@ -198,6 +198,11 @@ NTSTATUS DriverDeviceControl(PDEVICE_OBJECT DeviceObject, PIRP Irp) {
 			kvm_put_kvm(g_kvm);
 			break;
 		}
+
+		case KVM_SET_USER_MEMORY_REGION:
+			kvm_vm_ioctl(ioctl, (ULONG_PTR)Irp->AssociatedIrp.SystemBuffer);
+			break;
+		
 		default:
 			status = kvm_vcpu_ioctl(ioctl, Irp);
 			break;

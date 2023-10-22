@@ -270,6 +270,12 @@
     <ClInclude Include="rbtree.h">
       <Filter>ktl</Filter>
     </ClInclude>
+    <ClInclude Include="list.h">
+      <Filter>ktl</Filter>
+    </ClInclude>
+    <ClInclude Include="hash.h">
+      <Filter>ktl</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <MASM Include="vmxenter.asm">

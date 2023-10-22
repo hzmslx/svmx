@@ -83,7 +83,7 @@ struct kvm_userspace_memory_region {
 	__u32 flags; // 标志位，例如是否追踪脏页、是否可用等
 	__u64 guest_phys_addr;// guest的物理地址起始位置，即GPA
 	__u64 memory_size; /* 内存大小，单位bytes */
-	__u64 userspace_addr; /* start of the userspace allocated memory, 即HVA */
+	/* start of the userspace allocated memory, 即HVA */
 };
 
 /* for KVM_RUN */

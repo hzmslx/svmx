@@ -141,3 +141,19 @@ void kvm_mmu_spte_module_init(void) {
 	 */
 	allow_mmio_caching = enable_mmio_caching;
 }
+
+u64 make_nonleaf_spte(u64* child_pt, bool ad_disabled) {
+	u64 spte = SPTE_MMU_PRESENT_MASK;
+	
+	PHYSICAL_ADDRESS physic = MmGetPhysicalAddress(child_pt);
+	spte |= physic.QuadPart | shadow_present_mask | PT_WRITABLE_MASK |
+		shadow_user_mask | shadow_x_mask | shadow_me_value;
+
+	if (ad_disabled)
+		spte |= SPTE_TDP_AD_DISABLED;
+	else
+		spte |= shadow_accessed_mask;
+
+
+	return spte;
+}

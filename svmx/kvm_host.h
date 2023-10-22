@@ -10,6 +10,8 @@
 #include "kvm_page_track.h"
 #include "pgtable_types.h"
 #include "mtrr.h"
+#include "list.h"
+#include "hash.h"
 
 /*
  * For the normal pfn, the highest 12 bits should be zero,
@@ -979,7 +981,7 @@ struct kvm_arch_memory_slot {
  * individually added or deleted.
  */
 struct kvm_memory_slot {
-	
+	struct hlist_node id_node[2];
 	struct rb_node gfn_node[2];
 	gfn_t base_gfn;// 虚拟内存区间的物理页框号
 	ULONG_PTR npages;// 将内存区间的大小转化为页数
@@ -989,7 +991,7 @@ struct kvm_memory_slot {
 	* 在缺页处理创建EPT页表项时就记录了GPA对应的页表项地址
 	*/
 	struct kvm_arch_memory_slot arch;
-	ULONG_PTR userspace_addr;// 内存区间对应的HVA
+	// ULONG_PTR userspace_addr;// 内存区间对应的HVA
 	u32 flags;
 	u16 id;
 	u16 as_id;
@@ -1297,9 +1299,19 @@ void vcpu_put(struct kvm_vcpu* vcpu);
 static inline
 struct kvm_memory_slot* id_to_memslot(struct kvm_memslots* slots, int id)
 {
-	UNREFERENCED_PARAMETER(slots);
-	UNREFERENCED_PARAMETER(id);
+	struct kvm_memory_slot* slot;
+	int idx = slots->node_idx;
+	int hash = hash_min(id, HASH_BITS(slots->id_hash));
+	struct hlist_head* head = &slots->id_hash[hash];
 
+	for (slot = hlist_entry_safe(head->first, struct kvm_memory_slot, id_node[idx]);
+		slot;
+		slot = hlist_entry_safe(slot->id_node[idx].next,
+			struct kvm_memory_slot, id_node[idx]))
+	{
+		if (slot->id == id)
+			return slot;
+	}
 
 	return NULL;
 }
@@ -1676,6 +1688,7 @@ struct kvm_arch {
 	ULONG n_max_mmu_pages;
 	unsigned int indirect_shadow_pages;
 	u8 mmu_valid_gen;
+	struct hlist_head mmu_page_hash[KVM_NUM_MMU_PAGES];
 	LIST_ENTRY active_mmu_pages;
 	LIST_ENTRY zapped_obsolete_pages;
 	/*
@@ -1997,7 +2010,7 @@ NTSTATUS kvm_x86_vendor_init(struct kvm_x86_init_ops* ops);
 void kvm_x86_vendor_exit(void);
 
 static struct kvm* kvm_arch_alloc_vm(void) {
-	struct kvm* kvm = ExAllocatePoolWithTag(NonPagedPool, kvm_x86_ops.vm_size, DRIVER_TAG);
+	struct kvm* kvm = (struct kvm*)ExAllocatePoolWithTag(NonPagedPool, kvm_x86_ops.vm_size, DRIVER_TAG);
 	if (kvm != NULL) {
 		RtlZeroMemory(kvm, kvm_x86_ops.vm_size);
 	}
@@ -2051,19 +2064,7 @@ kvm_pfn_t __gfn_to_pfn_memslot(const struct kvm_memory_slot* slot, gfn_t gfn,
 	bool atomic, bool interruptible, bool* async,
 	bool write_fault, bool* writable, hva_t* hva);
 
-static inline ULONG_PTR
-__gfn_to_hva_memslot(const struct kvm_memory_slot* slot, gfn_t gfn)
-{
-	/*
-	 * The index was checked originally in search_memslots.  To avoid
-	 * that a malicious guest builds a Spectre gadget out of e.g. page
-	 * table walks, do not let the processor speculate loads outside
-	 * the guest's registered memslots.
-	 */
-	ULONG_PTR offset = gfn - slot->base_gfn;
-	
-	return slot->userspace_addr + offset * PAGE_SIZE;
-}
+
 
 void kvm_mmu_destroy(struct kvm_vcpu* vcpu);
 // 初始化MMU的函数,里面的函数都是地址转换的重点
@@ -2223,4 +2224,5 @@ static inline int mmu_invalidate_retry_hva(struct kvm* kvm,
 	return 0;
 }
 
+long kvm_vm_ioctl(unsigned int ioctl, ULONG_PTR arg);
 

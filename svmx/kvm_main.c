@@ -423,23 +423,22 @@ static int kvm_vm_ioctl_set_memory_region(struct kvm* kvm,
 	return kvm_set_memory_region(kvm, mem);
 }
 
-static long kvm_vm_ioctl(unsigned int ioctl, unsigned long arg) {
+long kvm_vm_ioctl(unsigned int ioctl, ULONG_PTR arg) {
 	UNREFERENCED_PARAMETER(arg);
 	int r = 0;
 
 	switch (ioctl)
 	{
-
-		// 建立 guest 物理地址空间中的内存区域与 qemu-kvm 虚拟地址空间中的内存区域的映射
+		// 设置内存区域
 		case KVM_SET_USER_MEMORY_REGION:
 		{
 			struct kvm_userspace_memory_region kvm_userspace_mem = { 0 };
 			PPHYSICAL_MEMORY_RANGE range = MmGetPhysicalMemoryRanges();
 			kvm_userspace_mem.guest_phys_addr = range->BaseAddress.QuadPart;
 			kvm_userspace_mem.memory_size = range->NumberOfBytes.QuadPart;
-			kvm_userspace_mem.slot = 0;
+			kvm_userspace_mem.slot = 0;// 此处设置为0
 			kvm_userspace_mem.flags = 0;
-			kvm_userspace_mem.userspace_addr = 0;
+			
 			if (range != NULL) {
 				ExFreePool(range);
 			}
@@ -834,9 +833,6 @@ int __kvm_set_memory_region(struct kvm* kvm,
 	// 客户机物理地址要求页对齐
 	if (mem->guest_phys_addr & (PAGE_SIZE - 1))
 		return STATUS_INVALID_PARAMETER;
-	// 保证线性地址页对齐
-	if ((mem->userspace_addr & (PAGE_SIZE - 1)))
-		return STATUS_INVALID_PARAMETER;
 	if (as_id >= KVM_ADDRESS_SPACE_NUM || id >= KVM_MEM_SLOTS_NUM)
 		return STATUS_INVALID_PARAMETER;
 	if (mem->guest_phys_addr + mem->memory_size < mem->guest_phys_addr)
@@ -880,8 +876,7 @@ int __kvm_set_memory_region(struct kvm* kvm,
 	}
 	else { /* Modify an existing slot. */
 		// 内存大小不能改变，物理地址不能改变，也不能修改只读内存
-		if ((mem->userspace_addr != old->userspace_addr) ||
-			(npages != old->npages) ||
+		if ((npages != old->npages) ||
 			((mem->flags ^ old->flags) & KVM_MEM_READONLY))
 			return STATUS_INVALID_PARAMETER;
 
@@ -910,8 +905,7 @@ int __kvm_set_memory_region(struct kvm* kvm,
 	new->base_gfn = base_gfn;
 	new->npages = npages;
 	new->flags = mem->flags;
-	// 主机虚拟地址，即HVA
-	new->userspace_addr = mem->userspace_addr;
+
 
 	r = kvm_set_memslot(kvm, old, new, change);
 	if (r)
@@ -1058,3 +1052,16 @@ static int kvm_vm_ioctl_check_extension_generic(struct kvm* kvm, ULONG arg)
 	}
 }
 
+kvm_pfn_t hva_to_pfn(ULONG_PTR addr, bool atomic, bool interruptible,
+	bool* async, bool write_fault, bool* writable) {
+	UNREFERENCED_PARAMETER(addr);
+	UNREFERENCED_PARAMETER(atomic);
+	UNREFERENCED_PARAMETER(interruptible);
+	UNREFERENCED_PARAMETER(async);
+	UNREFERENCED_PARAMETER(write_fault);
+	UNREFERENCED_PARAMETER(writable);
+	kvm_pfn_t pfn = 0;
+	
+
+	return pfn;
+}

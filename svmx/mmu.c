@@ -1068,12 +1068,152 @@ static int mmu_set_spte(struct kvm_vcpu* vcpu, struct kvm_memory_slot* slot,
 	return ret;
 }
 
+static union kvm_mmu_page_role kvm_mmu_child_role(u64* sptep, bool direct,
+	unsigned int access) {
+	struct kvm_mmu_page* parent_sp = sptep_to_sp(sptep);
+	union kvm_mmu_page_role role;
+
+	role = parent_sp->role;
+	role.level--;
+	role.access = access;
+	role.direct = direct;
+	role.passthrough = 0;
+
+	if (role.has_4_byte_gpte) {
+		role.quadrant = spte_index(sptep) & 1;
+	}
+
+	return role;
+}
+
+/* Caches used when allocating a new shadow page. */
+struct shadow_page_caches {
+	struct kvm_mmu_memory_cache* page_header_cache;
+	struct kvm_mmu_memory_cache* shadow_page_cache;
+	struct kvm_mmu_memory_cache* shadowed_info_cache;
+};
+
+static unsigned kvm_page_table_hashfn(gfn_t gfn) {
+	UNREFERENCED_PARAMETER(gfn);
+
+	return 0;
+}
+
+/* Note, @vcpu may be NULL if @role.direct is true; see kvm_mmu_find_shadow_page. */
+static struct kvm_mmu_page* __kvm_mmu_get_shadow_page(struct kvm* kvm,
+	struct kvm_vcpu* vcpu,
+	struct shadow_page_caches* caches,
+	gfn_t gfn,
+	union kvm_mmu_page_role role)
+{
+	UNREFERENCED_PARAMETER(kvm);
+	UNREFERENCED_PARAMETER(vcpu);
+	UNREFERENCED_PARAMETER(caches);
+	UNREFERENCED_PARAMETER(gfn);
+	UNREFERENCED_PARAMETER(role);
+	//struct hlist_head* sp_list;
+	struct kvm_mmu_page* sp = NULL;
+	/*bool created = FALSE;
+
+	sp_list = &kvm->arch.mmu_page_hash[kvm_page_table_hashfn(gfn)];
+
+	sp = kvm_mmu_find_shadow_page(kvm, vcpu, gfn, sp_list, role);
+	if (!sp) {
+		created = TRUE;
+		sp = kvm_mmu_alloc_shadow_page(kvm, caches, gfn, sp_list, role);
+	}*/
+
+	
+	return sp;
+}
+
+static struct kvm_mmu_page* kvm_mmu_get_shadow_page(struct kvm_vcpu* vcpu,
+	gfn_t gfn,
+	union kvm_mmu_page_role role) {
+	struct shadow_page_caches caches = {
+		.page_header_cache = &vcpu->arch.mmu_page_header_cache,
+		.shadow_page_cache = &vcpu->arch.mmu_shadow_page_cache,
+		.shadowed_info_cache = &vcpu->arch.mmu_shadowed_info_cache,
+	};
+
+	return __kvm_mmu_get_shadow_page(vcpu->kvm, vcpu, &caches, gfn, role);
+}
+
+static struct kvm_mmu_page* kvm_mmu_get_child_sp(struct kvm_vcpu* vcpu,
+	u64* sptep, gfn_t gfn,
+	bool direct, unsigned int access) {
+	union kvm_mmu_page_role role;
+
+	if (is_shadow_present_pte(*sptep) && !is_large_pte(*sptep))
+		return (struct kvm_mmu_page*)STATUS_ALREADY_COMMITTED;
+
+	role = kvm_mmu_child_role(sptep, direct, access);
+	return kvm_mmu_get_shadow_page(vcpu, gfn, role);
+}
+
+static void drop_spte(struct kvm* kvm, u64* sptep) {
+	UNREFERENCED_PARAMETER(kvm);
+	UNREFERENCED_PARAMETER(sptep);
+}
+
+static void drop_large_spte(struct kvm* kvm, u64* sptep, bool flush) {
+	struct kvm_mmu_page* sp;
+
+	sp = sptep_to_sp(sptep);
+
+	drop_spte(kvm, sptep);
+
+	if (flush) {
+
+	}
+}
+
+static void mmu_spte_set(u64* sptep, u64 new_spte) {
+	*sptep = new_spte;
+}
+
+static void mmu_page_add_parent_pte(struct kvm_mmu_memory_cache* cache,
+	struct kvm_mmu_page* sp, u64* parent_pte) {
+	UNREFERENCED_PARAMETER(cache);
+	UNREFERENCED_PARAMETER(sp);
+	if (!parent_pte)
+		return;
+
+	
+}
+
+static void __link_shadow_page(struct kvm* kvm,
+	struct kvm_mmu_memory_cache* cache, u64* sptep,
+	struct kvm_mmu_page* sp, bool flush) {
+	UNREFERENCED_PARAMETER(cache);
+	u64 spte;
+
+	if (is_shadow_present_pte(*sptep))
+		drop_large_spte(kvm, sptep, flush);
+
+	spte = make_nonleaf_spte(sp->spt, sp_ad_disabled(sp));
+	
+	// 设置页表项(sptep)指向下一级页表页(spte)
+	mmu_spte_set(sptep, spte);
+
+
+}
+
+/*
+* 将新分配出来的下一级影子页表的地址填写到本级对应的SPTE中
+*/
+static void link_shadow_page(struct kvm_vcpu* vcpu, u64* sptep,
+	struct kvm_mmu_page* sp) {
+	__link_shadow_page(vcpu->kvm, &vcpu->arch.mmu_pte_list_desc_cache, sptep, sp, TRUE);
+}
+
+
 /*
 * 完成EPT页表的构造，并在最后一级页表项中将gfn同pfn映射起来
 */
 static int direct_map(struct kvm_vcpu* vcpu, struct kvm_page_fault* fault) {
 	struct kvm_shadow_walk_iterator it;
-	// struct kvm_mmu_page* sp;
+	struct kvm_mmu_page* sp;
 	int ret;
 	gfn_t base_gfn = fault->gfn;
 
@@ -1084,8 +1224,19 @@ static int direct_map(struct kvm_vcpu* vcpu, struct kvm_page_fault* fault) {
 		* We cannot overwrite existing page tables with an NX
 		* large page, as the leaf could be executable.
 		*/
+		if (fault->nx_huge_page_workaround_enabled)
+			disallowed_hugepage_adjust(fault, *it.sptep, it.level);
 		
+		base_gfn = gfn_round_for_level(fault->gfn, it.level);
+		if (it.level == fault->goal_level)
+			break;
 		
+		sp = kvm_mmu_get_child_sp(vcpu, it.sptep, base_gfn, TRUE, ACC_ALL);
+		if (sp == LongToPtr(STATUS_ALREADY_COMMITTED)) {
+			continue;
+		}
+
+		link_shadow_page(vcpu, it.sptep, sp);
 	}
 
 	if (it.level != fault->goal_level)
@@ -1246,6 +1397,9 @@ static int direct_page_fault(struct kvm_vcpu* vcpu,
 	r = mmu_topup_memory_caches(vcpu, FALSE);
 	if (r)
 		return r;
+
+	r = RET_PF_RETRY;
+
 
 	r = direct_map(vcpu, fault);
 	
@@ -1587,16 +1741,6 @@ emulate:
 
 
 
-/*
-* 将新分配出来的下一级影子页表的地址填写到本级对应的SPTE中
-*/
-static void link_shadow_page(struct kvm_vcpu* vcpu, u64* sptep,
-	struct kvm_mmu_page* sp) {
-	UNREFERENCED_PARAMETER(vcpu);
-	UNREFERENCED_PARAMETER(sptep);
-	UNREFERENCED_PARAMETER(sp);
-	
-}
 
 int kvm_mmu_init_vm(struct kvm* kvm) {
 	int r;

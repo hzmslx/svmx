@@ -852,7 +852,7 @@ static int kvm_alloc_memslot_metadata(struct kvm* kvm,
 	// 生成一个3级的软件页表
 	for (i = 1; i < KVM_NR_PAGE_SIZES; ++i) {
 		struct kvm_lpage_info* linfo;
-		ULONG_PTR ugfn;
+		
 		ULONG_PTR lpages;
 		int level = i + 1;
 		// 每级页表所需的pages数目
@@ -869,17 +869,6 @@ static int kvm_alloc_memslot_metadata(struct kvm* kvm,
 			linfo[0].disallow_lpage = 1;
 		if ((slot->base_gfn + npages) & (KVM_PAGES_PER_HPAGE(level) - 1))
 			linfo[lpages - 1].disallow_lpage = 1;
-		ugfn = slot->userspace_addr >> PAGE_SHIFT;
-		/*
-		* If the gfn and userspace address are not aligned wrt each
-		* other, disable large page support for this slot.
-		*/
-		if ((slot->base_gfn ^ ugfn) & (KVM_PAGES_PER_HPAGE(level) - 1)) {
-			ULONG_PTR j;
-			for (j = 0; j < lpages; ++j) {
-				linfo[j].disallow_lpage = 1;
-			}
-		}
 	}
 
 	if (kvm_page_track_create_memslot(kvm, slot, npages))

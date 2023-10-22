@@ -258,3 +258,15 @@ static inline bool is_mmu_writable_spte(u64 spte)
 {
 	return spte & shadow_mmu_writable_mask;
 }
+
+/* Get an SPTE's index into its parent's page table (and the spt array). */
+static inline int spte_index(u64* sptep)
+{
+	return ((ULONG_PTR)sptep / sizeof(*sptep)) & (SPTE_ENT_PER_PAGE - 1);
+}
+
+u64 make_nonleaf_spte(u64* child_pt, bool ad_disabled);
+
+static inline bool sp_ad_disabled(struct kvm_mmu_page* sp) {
+	return !!sp->role.ad_disabled;
+}
