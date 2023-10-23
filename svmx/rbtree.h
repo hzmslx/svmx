@@ -9,3 +9,4 @@
 struct rb_node* rb_prev(const struct rb_node* node);
 struct rb_node* rb_last(const struct rb_root* root);
 struct rb_node* rb_next(const struct rb_node* node);
+void rb_erase(struct rb_node* node, struct rb_root* root);

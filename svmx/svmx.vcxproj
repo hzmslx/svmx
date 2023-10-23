@@ -240,6 +240,7 @@
     <ClInclude Include="processor-flags.h" />
     <ClInclude Include="processor.h" />
     <ClInclude Include="rbtree.h" />
+    <ClInclude Include="rbtree_augmented.h" />
     <ClInclude Include="rbtree_types.h" />
     <ClInclude Include="run_flags.h" />
     <ClInclude Include="sgx.h" />

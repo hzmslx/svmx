@@ -1,6 +1,6 @@
 #pragma once
 #include "pch.h"
-#include "kvm_host.h"
+
 
 #define HLIST_HEAD_INIT {.first = NULL }
 #define HLIST_HEAD(name) struct hlist_head name = {.first = NULL}
@@ -87,4 +87,12 @@ static inline void hlist_add_behind(struct hlist_node* n,
 static inline int hlist_empty(const struct hlist_head* h)
 {
 	return !h->first;
+}
+
+static inline void hlist_del_init(struct hlist_node* n)
+{
+	if (!hlist_unhashed(n)) {
+		__hlist_del(n);
+		INIT_HLIST_NODE(n);
+	}
 }

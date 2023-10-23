@@ -148,14 +148,16 @@ struct kvm* kvm_create_vm(ULONG_PTR type) {
 		for (j = 0; j < 2; j++) {
 			slots = &kvm->__memslots[i][j];
 			
-			InterlockedCompareExchange64(&slots->last_used_slot,
-				0, 0);
+			InterlockedCompareExchangePointer(&slots->last_used_slot,
+				NULL, NULL);
 			
 			slots->node_idx = j;
 
 			/* Generations must be different for each address space. */
 			slots->generation = i;
 		}
+
+		kvm->memslots[i] = &kvm->__memslots[i][0];
 	}
 
 
@@ -616,6 +618,33 @@ static void kvm_commit_memory_region(struct kvm* kvm,
 	}
 }
 
+static struct kvm_memslots* kvm_get_inactive_memslots(struct kvm* kvm, int as_id)
+{
+	struct kvm_memslots* active = __kvm_memslots(kvm, as_id);
+	int node_idx_inactive = active->node_idx ^ 1;
+
+	return &kvm->__memslots[as_id][node_idx_inactive];
+}
+
+static int kvm_memslots_get_as_id(struct kvm_memory_slot* a,
+	struct kvm_memory_slot* b) {
+	if (!a && !b)
+		return 0;
+
+	if (!a)
+		return b->as_id;
+	if (!b)
+		return a->as_id;
+
+	return a->as_id;
+}
+
+static void kvm_erase_gfn_node(struct kvm_memslots* slots,
+	struct kvm_memory_slot* slot) {
+	UNREFERENCED_PARAMETER(slots);
+	UNREFERENCED_PARAMETER(slot);
+}
+
 /*
  * Replace @old with @new in the inactive memslots.
  *
@@ -628,9 +657,23 @@ static void kvm_commit_memory_region(struct kvm* kvm,
 static void kvm_replace_memslot(struct kvm* kvm,
 	struct kvm_memory_slot* old,
 	struct kvm_memory_slot* new) {
-	UNREFERENCED_PARAMETER(kvm);
-	UNREFERENCED_PARAMETER(old);
-	UNREFERENCED_PARAMETER(new);
+	int as_id = kvm_memslots_get_as_id(old, new);
+	struct kvm_memslots* slots = kvm_get_inactive_memslots(kvm, as_id);
+	int idx = slots->node_idx;
+
+	if (old) {
+		hash_del(&old->id_node[idx]);
+		InterlockedCompareExchangePointer(&slots->last_used_slot,
+			new, old);
+
+		if (!new) {
+			kvm_erase_gfn_node(slots, old);
+			return;
+		}
+	}
+
+	
+	
 }
 
 /*

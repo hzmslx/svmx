@@ -276,6 +276,9 @@
     <ClInclude Include="hash.h">
       <Filter>ktl</Filter>
     </ClInclude>
+    <ClInclude Include="rbtree_augmented.h">
+      <Filter>ktl</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <MASM Include="vmxenter.asm">

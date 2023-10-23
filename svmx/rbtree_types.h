@@ -1,5 +1,6 @@
 #pragma once
 
+
 struct rb_node {
 	ULONG_PTR __rb_parent_color;
 	struct rb_node* rb_right;

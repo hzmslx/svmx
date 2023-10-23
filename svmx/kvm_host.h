@@ -916,7 +916,7 @@ struct kvm_vcpu_stat {
 
 struct kvm_memslots {
 	u64 generation;
-	LONG64 volatile last_used_slot;
+	PVOID volatile last_used_slot;
 
 	struct rb_root_cached hva_tree;
 	struct rb_root gfn_tree;
