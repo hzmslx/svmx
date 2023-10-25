@@ -672,7 +672,7 @@ static void kvm_replace_memslot(struct kvm* kvm,
 		}
 	}
 
-	
+	hash_add(slots->id_hash, &new->id_node[idx], new->id);
 	
 }
 

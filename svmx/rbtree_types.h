@@ -2,12 +2,14 @@
 
 
 struct rb_node {
-	ULONG_PTR __rb_parent_color;
-	struct rb_node* rb_right;
-	struct rb_node* rb_left;
+	ULONG_PTR __rb_parent_color;	// 节点颜色
+	struct rb_node* rb_right;		// 右孩子指针
+	struct rb_node* rb_left;		// 左孩子指针
 };
 
+
 struct rb_root {
+	// 根节点一定是黑色的
 	struct rb_node* rb_node;
 };
 

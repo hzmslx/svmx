@@ -50,7 +50,7 @@ __rb_erase_augmented(struct rb_node* node, struct rb_root* root,
 	struct rb_node* parent = NULL, * rebalance = NULL;
 	ULONG_PTR pc;
 
-	if (!tmp) {
+	if (!tmp) { /* 待删除结点的左孩子为空 */
 		/*
 		* Case 1: node to earse has no more than 1 child (easy!)
 		* 
@@ -62,15 +62,17 @@ __rb_erase_augmented(struct rb_node* node, struct rb_root* root,
 		parent = __rb_parent(pc);
 		__rb_change_child(node, child, parent, root);
 		if (child) {
+			// 待删除结点仅有右孩子
 			child->__rb_parent_color = pc;
 			rebalance = NULL;
 		}
 		else {
+			// 待删除结点无右孩子
 			rebalance = __rb_is_black(pc) ? parent : NULL;
 		}
 		tmp = parent;
 	}
-	else if (!child) {
+	else if (!child) { // 待删除结点仅有左孩子
 		/* Still case 1, but this time the child is node->rb_left */
 		tmp->__rb_parent_color = pc = node->__rb_parent_color;
 		parent = __rb_parent(pc);
@@ -79,12 +81,14 @@ __rb_erase_augmented(struct rb_node* node, struct rb_root* root,
 		tmp = parent;
 	}
 	else {
+		/* 待删除结点有两个孩子结点 */
 		struct rb_node* successor = child, * child2 = NULL;
 
 		tmp = child->rb_left;
 		if (!tmp) {
 			/*
 			* Case 2: node's successor is its right child
+			* 后继结点是N的右孩子
 			* 
 			*     (n)		   (s)
 			*	 /   \	      /   \
@@ -96,6 +100,28 @@ __rb_erase_augmented(struct rb_node* node, struct rb_root* root,
 			*	  \
 			*     (c)
 			*/
+			
+			parent = successor;
+			child2 = successor->rb_right;
+
+			augment->copy(node, successor);
+		}
+		else {
+			/*
+			 * Case 3: node's successor is leftmost under
+			 * node's right child subtree
+			 *
+			 *    (n)          (s)
+			 *    / \          / \
+			 *  (x) (y)  ->  (x) (y)
+			 *      /            /
+			 *    (p)          (p)
+			 *    /            /
+			 *  (s)          (c)
+			 *    \
+			 *    (c)
+			 */
+			/* 找后继 */
 			do
 			{
 				parent = successor;
@@ -111,15 +137,17 @@ __rb_erase_augmented(struct rb_node* node, struct rb_root* root,
 			augment->propagate(parent, successor);
 		}
 
+		/* 将N的左子树移植到S结点 */
 		tmp = node->rb_left;
 		successor->rb_left = tmp;
 		rb_set_parent(tmp, successor);
 
+		/* N的父节点与S建立关系 */
 		pc = node->__rb_parent_color;
 		tmp = __rb_parent(pc);
 		__rb_change_child(node, successor, tmp, root);
 
-		if (child2) {
+		if (child2) { // 结点有右孩子
 			rb_set_parent_color(child2, parent, RB_BLACK);
 			rebalance = NULL;
 		}

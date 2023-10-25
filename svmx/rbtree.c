@@ -115,9 +115,11 @@ static inline void rb_set_black(struct rb_node* rb) {
 	rb->__rb_parent_color += RB_BLACK;
 }
 
+/* @parent: successor的父节点， root是红黑树的根节点 */
 static inline void
 ____rb_erase_color(struct rb_node* parent,struct rb_root* root,
 	void (*augment_rotate)(struct rb_node* old,struct rb_node* new)) {
+	
 	struct rb_node* node = NULL, * sibling, * tmp1, * tmp2;
 
 	while (TRUE)
@@ -181,7 +183,33 @@ ____rb_erase_color(struct rb_node* parent,struct rb_root* root,
 					}
 					break;
 				}
-
+				/*
+				 * Case 3 - right rotate at sibling
+				 * (p could be either color here)
+				 *
+				 *   (p)           (p)
+				 *   / \           / \
+				 *  N   S    -->  N   sl
+				 *     / \             \
+				 *    sl  Sr            S
+				 *                       \
+				 *                        Sr
+				 *
+				 * Note: p might be red, and then both
+				 * p and sl are red after rotation(which
+				 * breaks property 4). This is fixed in
+				 * Case 4 (in __rb_rotate_set_parents()
+				 *         which set sl the color of p
+				 *         and set p RB_BLACK)
+				 *
+				 *   (p)            (sl)
+				 *   / \            /  \
+				 *  N   sl   -->   P    S
+				 *       \        /      \
+				 *        S      N        Sr
+				 *         \
+				 *          Sr
+				 */
 				tmp1 = tmp2->rb_right;
 				sibling->rb_left = tmp1;
 				tmp2->rb_right = sibling;
@@ -193,7 +221,18 @@ ____rb_erase_color(struct rb_node* parent,struct rb_root* root,
 				tmp1 = sibling;
 				sibling = tmp2;
 			}
-
+			/*
+			 * Case 4 - left rotate at parent + color flips
+			 * (p and sl could be either color here.
+			 *  After rotation, p becomes black, s acquires
+			 *  p's color, and sl keeps its color)
+			 *
+			 *      (p)             (s)
+			 *      / \             / \
+			 *     N   S     -->   P   Sr
+			 *        / \         / \
+			 *      (sl) sr      N  (sl)
+			 */
 			tmp2 = sibling->rb_left;
 			parent->rb_right = tmp2;
 			sibling->rb_left = parent;
@@ -218,11 +257,15 @@ ____rb_erase_color(struct rb_node* parent,struct rb_root* root,
 				augment_rotate(parent, sibling);
 				sibling = tmp1;
 			}
+			/* tmp1 = S的兄弟节点的左孩子 */
 			tmp1 = sibling->rb_left;
-			if (!tmp1 || rb_is_black(tmp1)) {
+			// 兄弟节点没有左孩子或者左孩子是黑色
+			if (!tmp1 || rb_is_black(tmp1)) { 
+				// 兄弟节点的右孩子
 				tmp2 = sibling->rb_right;
-				if (!tmp2 || rb_is_black(tmp2)) {
+				if (!tmp2 || rb_is_black(tmp2)) { // 右孩子不存在或者右孩子是黑色
 					/* Case 2 - sibling color flip */
+					// 设置兄弟节点为红色
 					rb_set_parent_color(sibling, parent,
 						RB_RED);
 					if (rb_is_red(parent))
@@ -262,9 +305,11 @@ ____rb_erase_color(struct rb_node* parent,struct rb_root* root,
 	}
 }
 
+// 删除红黑树结点
 void rb_erase(struct rb_node* node, struct rb_root* root) {
 	struct rb_node* rebalance;
+	// 删除结点
 	rebalance = __rb_erase_augmented(node, root, &dummy_callbacks);
-	if (rebalance)
+	if (rebalance) // 恢复平衡
 		____rb_erase_color(rebalance, root, dummy_rotate);
 }

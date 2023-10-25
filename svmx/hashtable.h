@@ -36,3 +36,12 @@ static inline void hash_del(struct hlist_node* node)
 {
 	hlist_del_init(node);
 }
+
+/*
+* hash_add - add an object to a hashtable
+* @hashtable: hashtable to add to
+* @node: the &struct hlist_node of the object to be added
+* @key: the key of the object to be added
+*/
+#define hash_add(hashtable,node,key)	\
+	hlist_add_head(node,&hashtable[hash_min(key,HASH_BITS(hashtable))])
