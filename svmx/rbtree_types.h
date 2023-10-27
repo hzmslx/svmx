@@ -2,7 +2,7 @@
 
 
 struct rb_node {
-	ULONG_PTR __rb_parent_color;	// 节点颜色
+	ULONG_PTR __rb_parent_color;	// 节点颜色和双亲结点的地址
 	struct rb_node* rb_right;		// 右孩子指针
 	struct rb_node* rb_left;		// 左孩子指针
 };

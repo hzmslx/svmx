@@ -308,8 +308,8 @@ ____rb_erase_color(struct rb_node* parent,struct rb_root* root,
 // 删除红黑树结点
 void rb_erase(struct rb_node* node, struct rb_root* root) {
 	struct rb_node* rebalance;
-	// 删除结点
+	// 二叉排序树的删除
 	rebalance = __rb_erase_augmented(node, root, &dummy_callbacks);
-	if (rebalance) // 恢复平衡
+	if (rebalance) // 恢复红黑树的特性
 		____rb_erase_color(rebalance, root, dummy_rotate);
 }
