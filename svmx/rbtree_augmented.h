@@ -53,14 +53,14 @@ __rb_change_child(struct rb_node* old, struct rb_node* new,
 static struct rb_node*
 __rb_erase_augmented(struct rb_node* node, struct rb_root* root,
 	const struct rb_augment_callbacks* augment) {
-	// 待删除结点的右子树
+	// 待删除结点的右孩子
 	struct rb_node* child = node->rb_right;
-	// 待删除结点的左子树
+	// 待删除结点的左孩子
 	struct rb_node* tmp = node->rb_left;
 	struct rb_node* parent = NULL, * rebalance = NULL;
 	ULONG_PTR pc;
 
-	if (!tmp) { /* 待删除结点无左子树 */
+	if (!tmp) { /* 待删除结点无左孩子 */
 		/*
 		* Case 1: node to earse has no more than 1 child (easy!)
 		* 
@@ -77,9 +77,10 @@ __rb_erase_augmented(struct rb_node* node, struct rb_root* root,
 		__rb_change_child(node, child, parent, root);
 		if (child) {
 			/*
-			* 待删除结点仅有右子树，由性质5推出右子树必为红色结点
+			* 待删除结点仅有右孩子，
+			* 由性质5推出右孩子必为红色结点
 			* 由性质4，进一步推出待删除结点的颜色为黑色
-			* 将右子树的颜色设置为node结点的颜色，即黑色
+			* 将右孩子的颜色设置为node结点的颜色，即黑色
 			*/
 			child->__rb_parent_color = pc;
 			/*
@@ -89,9 +90,8 @@ __rb_erase_augmented(struct rb_node* node, struct rb_root* root,
 		}
 		else {
 			/*
-			* 待删除结点无右子树，
-			* 1.如果待删除结点为黑色，那么删除后可能会不满足性质5，
-			* 所以需要再平衡
+			* 走到这里意味着待删除结点没有孩子结点
+			* 1.如果待删除结点为黑色，破坏了性质5，需要再平衡
 			* 2.如果待删除结点为红色，那么删除后不会违反性质5，
 			* 不需要进行平衡操作
 			*/ 
@@ -99,31 +99,34 @@ __rb_erase_augmented(struct rb_node* node, struct rb_root* root,
 		}
 		tmp = parent;
 	}
-	else if (!child) { // 待删除结点仅有左子树
+	else if (!child) { // 待删除结点仅有左孩子
 		/*
 		* Still case 1, but this time the child is node->rb_left 
-		* 由性质5可推出，左子树为红色结点
+		* 由性质5可推出，左孩子为红色结点
 		* 由性质4可知，待删除结点颜色为黑色
 		*/
-		// 将左子树颜色设置为黑色
+		// 将左孩子颜色设置为黑色
+		// 左孩子的父节点修改为待删除结点的父节点
 		tmp->__rb_parent_color = pc = node->__rb_parent_color;
-		// 删除结点
+		// 获得待删除结点的父节点地址
 		parent = __rb_parent(pc);
+		// 修改其子节点为待删除结点的左孩子
 		__rb_change_child(node, tmp, parent, root);
-		// 删除后不再需要进行平衡操作
+		// 替代后不再需要进行平衡操作
 		rebalance = NULL;
 		tmp = parent;
 	}
 	else {
 		/*
-		* 待删除结点存在左右子树,需要确定待删除结点的直接后继 
+		* 待删除结点存在左右孩子,需要确定待删除结点的直接后继
+		* 也就是右子树中值最小的结点，
+		* 换句话说就是右子树中第一个被访问的结点
 		* 找到后用以替代待删除结点，然后再删除直接后继
-		* 
 		*/
 		struct rb_node* successor = child, * child2 = NULL;
 
 		tmp = child->rb_left;
-		if (!tmp) { // 后继结点没有左子树
+		if (!tmp) { // 后继结点就是待删除结点的右孩子
 			/*
 			* Case 2: node's successor is its right child
 			* 
@@ -141,12 +144,12 @@ __rb_erase_augmented(struct rb_node* node, struct rb_root* root,
 			
 			// 此处使用parent记录下直接后继，并未实际执行替换操作
 			parent = successor;
-			// child2为直接后继的右子树
+			// child2为直接后继的右孩子
 			child2 = successor->rb_right;
 
 			augment->copy(node, successor);
 		}
-		else {// 后继结点的左子树非空
+		else {
 			/*
 			 * Case 3: node's successor is leftmost under
 			 * node's right child subtree
@@ -170,44 +173,64 @@ __rb_erase_augmented(struct rb_node* node, struct rb_root* root,
 				successor = tmp;
 				tmp = tmp->rb_left;
 			} while (tmp);
-			// child2为直接后继的右子树
+			// child2为直接后继的右孩子
 			child2 = successor->rb_right;
 
+			/*
+			* 在二叉排序树中删除直接后继结点
+			*/ 
 			parent->rb_left = child2;
 
+			// 直接后继的右孩子设置为待删除结点的右孩子
 			successor->rb_right = child;
 
+			// 直接后继成为待删除结点的右孩子的双亲结点
 			rb_set_parent(child, successor);
 
 			augment->copy(node, successor);
 			augment->propagate(parent, successor);
 		}
 
-		/* 将N的左子树移植到S结点 */
+		/* 获取待删除结点的左孩子 */
 		tmp = node->rb_left;
+		// 直接后继的左孩子修改为待删除结点的左孩子
 		successor->rb_left = tmp;
+		// 设置待删除结点的左孩子的双亲结点为直接后继
 		rb_set_parent(tmp, successor);
 
-		/* N的父节点与S建立关系 */
+		/* 获取待删除结点的双亲结点 */
 		pc = node->__rb_parent_color;
 		tmp = __rb_parent(pc);
+		/*
+		* 将直接后继连接到待删除结点的父节点上
+		*/
 		__rb_change_child(node, successor, tmp, root);
 
-		if (child2) { // 直接后继有右子树
+		if (child2) { // 直接后继有右孩子
+			/*
+			* 由性质5可知,该右孩子为红色；由性质4可知,直接后继是黑色
+			* 直接后继被删除后，违反性质5，因此需将右孩子设置为黑色
+			*/
 			rb_set_parent_color(child2, parent, RB_BLACK);
+			// 至此达到平衡，不需要进一步平衡处理
 			rebalance = NULL;
 		}
 		else {
 			/*
 			* 若直接后继为黑色结点，删掉一个黑色结点将违反性质5
 			* 需要进行红黑树的平衡操作
+			* 
+			* 替换的情况下，如果直接后继是红色，对平衡无影响
+			* 如果直接后继为黑色，右子树将不平衡，因此需要平衡处理
 			*/
 			rebalance = rb_is_black(successor) ? parent : NULL;
 		}
+		// 直接后继的双亲设置为待删除结点的双亲
 		successor->__rb_parent_color = pc;
 		tmp = successor;
 	}
 
 	augment->propagate(tmp, NULL);
+	// 待平衡的结点
 	return rebalance;
 }

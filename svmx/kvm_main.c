@@ -641,8 +641,40 @@ static int kvm_memslots_get_as_id(struct kvm_memory_slot* a,
 
 static void kvm_erase_gfn_node(struct kvm_memslots* slots,
 	struct kvm_memory_slot* slot) {
-	UNREFERENCED_PARAMETER(slots);
-	UNREFERENCED_PARAMETER(slot);
+	rb_erase(&slot->gfn_node[slots->node_idx], &slots->gfn_tree);
+}
+
+static void kvm_replace_gfn_node(struct kvm_memslots* slots,
+	struct kvm_memory_slot* old,
+	struct kvm_memory_slot* new) {
+	int idx = slots->node_idx;
+
+	rb_replace_node(&old->gfn_node[idx], &new->gfn_node[idx],
+		&slots->gfn_tree);
+}
+
+static void kvm_insert_gfn_node(struct kvm_memslots* slots,
+	struct kvm_memory_slot* slot) {
+	struct rb_root* gfn_tree = &slots->gfn_tree;
+	struct rb_node** node, * parent;
+	int idx = slots->node_idx;
+
+	parent = NULL;
+	for (node = &gfn_tree->rb_node; *node;) {
+		struct kvm_memory_slot* tmp;
+
+		tmp = CONTAINING_RECORD(*node, struct kvm_memory_slot, gfn_node[idx]);
+		parent = *node;
+		if (slot->base_gfn < tmp->base_gfn)
+			node = &(*node)->rb_left;
+		else if (slot->base_gfn > tmp->base_gfn)
+			node = &(*node)->rb_right;
+		else
+			KeBugCheckEx(DRIVER_VIOLATION, 0, 0, 0, 0);
+	}
+
+	rb_link_node(&slot->gfn_node[idx], parent, node);
+	
 }
 
 /*
@@ -674,6 +706,14 @@ static void kvm_replace_memslot(struct kvm* kvm,
 
 	hash_add(slots->id_hash, &new->id_node[idx], new->id);
 	
+	if (old && old->base_gfn == new->base_gfn) {
+		kvm_replace_gfn_node(slots, old, new);
+	}
+	else {
+		if (old)
+			kvm_erase_gfn_node(slots, old);
+		
+	}
 }
 
 /*
