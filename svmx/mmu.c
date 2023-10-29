@@ -360,7 +360,7 @@ err_pml4:
 	return STATUS_NO_MEMORY;
 }
 
-static ULONG kvm_mmu_available_pages(struct kvm* kvm) {
+static ULONG_PTR kvm_mmu_available_pages(struct kvm* kvm) {
 	if (kvm->arch.n_max_mmu_pages > kvm->arch.n_used_mmu_pages)
 		return kvm->arch.n_max_mmu_pages -
 		kvm->arch.n_used_mmu_pages;
@@ -639,11 +639,31 @@ bool __kvm_mmu_prepare_zap_page(struct kvm* kvm,
 	return list_unstable;
 }
 
+static void kvm_mmu_free_shadow_page(struct kvm_mmu_page* sp) {
+	hlist_del(&sp->hash_link);
+	RemoveEntryList(&sp->link);
+	ExFreePool(sp->spt);
+	if (!sp->role.direct)
+		ExFreePool(sp->shadowed_translation);
+}
 
+static void kvm_mmu_commit_zap_page(struct kvm* kvm,
+	PLIST_ENTRY invalid_list) {
+	struct kvm_mmu_page* sp;
+
+	if (IsListEmpty(invalid_list))
+		return;
+
+	PLIST_ENTRY pListHead = &kvm->arch.active_mmu_pages;
+	PLIST_ENTRY pEntry = pListHead->Blink;
+	while (pEntry != pListHead) {
+		sp = CONTAINING_RECORD(pEntry, struct kvm_mmu_page, link);
+		kvm_mmu_free_shadow_page(sp);
+	}
+}
 
 static ULONG kvm_mmu_zap_oldest_mmu_pages(struct kvm* kvm,
-	ULONG nr_to_zap) {
-	UNREFERENCED_PARAMETER(nr_to_zap);
+	ULONG_PTR nr_to_zap) {
 	ULONG total_zapped = 0;
 	struct kvm_mmu_page* sp;
 
@@ -653,9 +673,12 @@ static ULONG kvm_mmu_zap_oldest_mmu_pages(struct kvm* kvm,
 
 	if (IsListEmpty(&kvm->arch.active_mmu_pages))
 		return 0;
+	PLIST_ENTRY pListHead = NULL;
+	PLIST_ENTRY pEntry = NULL;
 
-	PLIST_ENTRY pListHead = &kvm->arch.active_mmu_pages;
-	PLIST_ENTRY pEntry = pListHead->Blink;
+restart:
+	pListHead = &kvm->arch.active_mmu_pages;
+	pEntry = pListHead->Blink;
 	while (pEntry != pListHead) {
 		sp = CONTAINING_RECORD(pEntry, struct kvm_mmu_page, link);
 		/*
@@ -668,20 +691,29 @@ static ULONG kvm_mmu_zap_oldest_mmu_pages(struct kvm* kvm,
 		unstable = __kvm_mmu_prepare_zap_page(kvm, sp, &invalid_list,
 			&nr_zapped);
 
+		total_zapped += nr_zapped;
+		if (total_zapped >= nr_to_zap)
+			break;
+
+		if (unstable)
+			goto restart;
 	}
 
-	
+	kvm_mmu_commit_zap_page(kvm, &invalid_list);
 
 	kvm->stat.mmu_recycled += total_zapped;
 	return total_zapped;
 }
 
 static int make_mmu_pages_available(struct kvm_vcpu* vcpu) {
-	ULONG avail = kvm_mmu_available_pages(vcpu->kvm);
+	ULONG_PTR avail = kvm_mmu_available_pages(vcpu->kvm);
 	if (avail >= KVM_MIN_FREE_MMU_PAGES)
 		return 0;
 
-	
+	kvm_mmu_zap_oldest_mmu_pages(vcpu->kvm, KVM_REFILL_PAGES - avail);
+
+	if (!kvm_mmu_available_pages(vcpu->kvm))
+		return STATUS_NO_MEMORY;
 	
 	return 0;
 }
@@ -1885,4 +1917,19 @@ void disallowed_hugepage_adjust(struct kvm_page_fault* fault, u64 spte, int cur_
 		fault->pfn |= fault->gfn & page_mask;
 		fault->goal_level--;
 	}
+}
+
+void kvm_mmu_change_mmu_pages(struct kvm* kvm, ULONG_PTR goal_nr_mmu_pages) {
+	UNREFERENCED_PARAMETER(kvm);
+	ExEnterCriticalRegionAndAcquireResourceExclusive(&kvm->mmu_lock);
+
+	if (kvm->arch.n_used_mmu_pages > goal_nr_mmu_pages) {
+		kvm_mmu_zap_oldest_mmu_pages(kvm, kvm->arch.n_used_mmu_pages -
+			goal_nr_mmu_pages);
+		goal_nr_mmu_pages = kvm->arch.n_used_mmu_pages;
+	}
+	
+	kvm->arch.n_max_mmu_pages = goal_nr_mmu_pages;
+
+	ExReleaseResourceAndLeaveCriticalRegion(&kvm->mmu_lock);
 }

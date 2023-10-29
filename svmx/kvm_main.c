@@ -674,7 +674,7 @@ static void kvm_insert_gfn_node(struct kvm_memslots* slots,
 	}
 
 	rb_link_node(&slot->gfn_node[idx], parent, node);
-	
+	rb_insert_color(&slot->gfn_node[idx], gfn_tree);
 }
 
 /*
@@ -712,8 +712,35 @@ static void kvm_replace_memslot(struct kvm* kvm,
 	else {
 		if (old)
 			kvm_erase_gfn_node(slots, old);
-		
+		kvm_insert_gfn_node(slots, new);
 	}
+}
+
+static void kvm_swap_active_memslots(struct kvm* kvm, int as_id) {
+	struct kvm_memslots* slots = kvm_get_inactive_memslots(kvm, as_id);
+
+	/* Grab the generation from the active memslots. */
+	u64 gen = __kvm_memslots(kvm, as_id)->generation;
+
+	slots->generation = gen | KVM_MEMSLOT_GEN_UPDATE_IN_PROGRESS;
+
+	gen = slots->generation & ~KVM_MEMSLOT_GEN_UPDATE_IN_PROGRESS;
+
+	gen += KVM_ADDRESS_SPACE_NUM;
+
+	kvm_arch_memslots_updated(kvm, gen);
+
+	slots->generation = gen;
+}
+
+static void kvm_active_memslot(struct kvm* kvm,
+	struct kvm_memory_slot* old,
+	struct kvm_memory_slot* new) {
+	int as_id = kvm_memslots_get_as_id(old, new);
+
+	kvm_swap_active_memslots(kvm, as_id);
+
+	kvm_replace_memslot(kvm, old, new);
 }
 
 /*
@@ -729,9 +756,10 @@ static void kvm_activate_memslot(struct kvm* kvm,
 	struct kvm_memory_slot* old,
 	struct kvm_memory_slot* new)
 {
-	UNREFERENCED_PARAMETER(kvm);
-	UNREFERENCED_PARAMETER(old);
-	UNREFERENCED_PARAMETER(new);
+	int as_id = kvm_memslots_get_as_id(old, new);
+
+	kvm_swap_active_memslots(kvm, as_id);
+
 }
 
 static void kvm_create_memslot(struct kvm* kvm,

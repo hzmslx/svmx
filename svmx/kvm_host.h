@@ -72,6 +72,27 @@ static inline bool is_error_noslot_pfn(kvm_pfn_t pfn) {
 /* 当前所管理的页面，是标准页面的多少倍 */
 #define KVM_PAGES_PER_HPAGE(x)	(KVM_HPAGE_SIZE(x) / PAGE_SIZE)
 
+/*
+ * Bit 63 of the memslot generation number is an "update in-progress flag",
+ * e.g. is temporarily set for the duration of kvm_swap_active_memslots().
+ * This flag effectively creates a unique generation number that is used to
+ * mark cached memslot data, e.g. MMIO accesses, as potentially being stale,
+ * i.e. may (or may not) have come from the previous memslots generation.
+ *
+ * This is necessary because the actual memslots update is not atomic with
+ * respect to the generation number update.  Updating the generation number
+ * first would allow a vCPU to cache a spte from the old memslots using the
+ * new generation number, and updating the generation number after switching
+ * to the new memslots would allow cache hits using the old generation number
+ * to reference the defunct memslots.
+ *
+ * This mechanism is used to prevent getting hits in KVM's caches while a
+ * memslot update is in-progress, and to prevent cache hits *after* updating
+ * the actual generation number against accesses that were inserted into the
+ * cache *before* the memslots were updated.
+ */
+#define KVM_MEMSLOT_GEN_UPDATE_IN_PROGRESS	BIT_ULL(63)
+
 #define DE_VECTOR 0
 #define DB_VECTOR 1
 #define BP_VECTOR 3
@@ -661,6 +682,7 @@ struct kvm_mmu_page {
 	 * 64-bit kernels, keep it that way unless there's a reason not to.
 	 */
 	LIST_ENTRY link;
+	struct hlist_node hash_link;
 
 	bool tdp_mmu_page;
 	bool unsync;
@@ -1683,9 +1705,9 @@ int kvm_set_memory_region(struct kvm* kvm,
 int __kvm_set_memory_region(struct kvm* kvm,
 	const struct kvm_userspace_memory_region* mem);
 struct kvm_arch {
-	ULONG n_used_mmu_pages;
-	ULONG n_requested_mmu_pages;
-	ULONG n_max_mmu_pages;
+	ULONG_PTR n_used_mmu_pages;
+	ULONG_PTR n_requested_mmu_pages;
+	ULONG_PTR n_max_mmu_pages;
 	unsigned int indirect_shadow_pages;
 	u8 mmu_valid_gen;
 	struct hlist_head mmu_page_hash[KVM_NUM_MMU_PAGES];
@@ -2226,3 +2248,6 @@ static inline int mmu_invalidate_retry_hva(struct kvm* kvm,
 
 long kvm_vm_ioctl(unsigned int ioctl, ULONG_PTR arg);
 
+void kvm_mmu_change_mmu_pages(struct kvm* kvm, ULONG_PTR kvm_nr_mmu_pages);
+
+void kvm_arch_free_memslot(struct kvm* kvm, struct kvm_memory_slot* slot);

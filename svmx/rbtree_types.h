@@ -2,7 +2,9 @@
 
 
 struct rb_node {
-	ULONG_PTR __rb_parent_color;	// 节点颜色和双亲结点的地址
+	// 复合字段，同时表示父节点指针和本节点的颜色
+	// 最后一位表示本节点的颜色
+	ULONG_PTR __rb_parent_color;	
 	struct rb_node* rb_right;		// 右孩子指针
 	struct rb_node* rb_left;		// 左孩子指针
 };
@@ -28,5 +30,6 @@ struct rb_root_cached {
 	struct rb_node* rb_leftmost;
 };
 
+// 定义一个根节点
 #define RB_ROOT (struct rb_root) {NULL,}
 #define RB_ROOT_CACHED (struct rb_root_cached) {{NULL,},NULL}

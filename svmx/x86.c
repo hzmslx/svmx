@@ -906,16 +906,45 @@ int kvm_arch_prepare_memory_region(struct kvm* kvm,
 	return STATUS_SUCCESS;
 }
 
-
-
-void kvm_arch_commit_memory_region(struct kvm* kvm,
+static void kvm_mmu_slot_apply_flags(struct kvm* kvm,
 	struct kvm_memory_slot* old,
 	const struct kvm_memory_slot* new,
 	enum kvm_mr_change change) {
 	UNREFERENCED_PARAMETER(kvm);
 	UNREFERENCED_PARAMETER(old);
-	UNREFERENCED_PARAMETER(new);
-	UNREFERENCED_PARAMETER(change);
+
+	// u32 old_flags = old ? old->flags : 0;
+	u32 new_flags = new ? new->flags : 0;
+	bool log_dirty_pages = new_flags & KVM_MEM_LOG_DIRTY_PAGES;
+
+	if ((change != KVM_MR_FLAGS_ONLY) || (new_flags & KVM_MEM_READONLY))
+		return;
+
+	if (!log_dirty_pages) {
+		
+	}
+	else {
+	
+	}
+}
+
+void kvm_arch_commit_memory_region(struct kvm* kvm,
+	struct kvm_memory_slot* old,
+	const struct kvm_memory_slot* new,
+	enum kvm_mr_change change) {
+	if (!kvm->arch.n_requested_mmu_pages &&
+		(change == KVM_MR_CREATE || change == KVM_MR_DELETE)) {
+		ULONG_PTR nr_mmu_pages;
+
+		nr_mmu_pages = kvm->nr_memslot_pages / KVM_MEMSLOT_PAGES_TO_MMU_PAGES_RATIO;
+		nr_mmu_pages = max(nr_mmu_pages, KVM_MIN_ALLOC_MMU_PAGES);
+		kvm_mmu_change_mmu_pages(kvm, nr_mmu_pages);
+	}
+
+	kvm_mmu_slot_apply_flags(kvm, old, new, change);
+
+	if (change == KVM_MR_MOVE)
+		kvm_arch_free_memslot(kvm, old);
 }
 
 void kvm_arch_vcpu_put(struct kvm_vcpu* vcpu) {
@@ -1176,4 +1205,16 @@ int memslot_rmap_alloc(struct kvm_memory_slot* slot, ULONG_PTR npages) {
 	}
 
 	return STATUS_SUCCESS;
+}
+
+void kvm_arch_free_memslot(struct kvm* kvm, struct kvm_memory_slot* slot) {
+	UNREFERENCED_PARAMETER(kvm);
+	int i;
+
+	memslot_rmap_free(slot);
+
+	for (i = 1; i < KVM_NR_PAGE_SIZES; ++i) {
+		ExFreePool(slot->arch.lpage_info[i - 1]);
+		slot->arch.lpage_info[i - 1] = NULL;
+	}
 }

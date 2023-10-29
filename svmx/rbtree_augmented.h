@@ -31,11 +31,13 @@ static inline void rb_set_parent(struct rb_node* rb, struct rb_node* p)
 	rb->__rb_parent_color = rb_color(rb) + (ULONG_PTR)p;
 }
 
+// 设置节点颜色
 static inline void rb_set_parent_color(struct rb_node* rb,
 	struct rb_node* p, int color) {
 	rb->__rb_parent_color = (ULONG_PTR)p + color;
 }
 
+// 更换孩子结点
 static inline void
 __rb_change_child(struct rb_node* old, struct rb_node* new,
 	struct rb_node* parent, struct rb_root* root) {

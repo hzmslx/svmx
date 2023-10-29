@@ -86,6 +86,8 @@ static inline void dummy_copy(struct rb_node* old, struct rb_node* new) {
 	UNREFERENCED_PARAMETER(old);
 	UNREFERENCED_PARAMETER(new);
 }
+
+// 扩展旋转函数
 static inline void dummy_rotate(struct rb_node* old, struct rb_node* new) {
 	UNREFERENCED_PARAMETER(old);
 	UNREFERENCED_PARAMETER(new);
@@ -105,9 +107,12 @@ static const struct rb_augment_callbacks dummy_callbacks = {
 static inline void
 __rb_rotate_set_parents(struct rb_node* old, struct rb_node* new,
 	struct rb_root* root, int color) {
+	// 获取old的父节点
 	struct rb_node* parent = rb_parent(old);
+
 	new->__rb_parent_color = old->__rb_parent_color;
 	rb_set_parent_color(old, new, color);
+	// 把父节点的孩子结点old替换成new
 	__rb_change_child(old, new, parent, root);
 }
 
@@ -419,10 +424,14 @@ void rb_replace_node(struct rb_node* victim, struct rb_node* new,
 	__rb_change_child(victim, new, parent, root);
 }
 
+// 求红节点父节点，因为红色表示颜色的位是0.
 static inline struct rb_node* rb_red_parent(struct rb_node* red) {
 	return (struct rb_node*)red->__rb_parent_color;
 }
 
+/*
+* 插入节点后旋转和颜色调整的内部函数
+*/
 static inline void
 __rb_insert(struct rb_node* node, struct rb_root* root,
 	void (*augment_rotate)(struct rb_node* old, struct rb_node* new)) {
@@ -432,16 +441,30 @@ __rb_insert(struct rb_node* node, struct rb_root* root,
 	while (TRUE)
 	{
 		/*
-		* Loop invariant: node is red.
+		* Loop invariant: node is red.(node是红色节点）
 		*/
 		if (!parent) {
+			/*
+			* The inserted node is root. Either this is the
+			* first node, or we recursed at Case 1 below and
+			* are no longer violating 4).
+			*/
 			rb_set_parent_color(node, NULL, RB_BLACK);
 			break;
 		}
 
+		// 父节点是黑色，插入一个红色结点，不会破坏平衡
+		/*
+		* If there is a black parent, we are done.
+		* Otherwise, take some corrective action as,
+		* per 4), we don't want a red root or two 
+		* consecutive red nodes.
+		*/
 		if (rb_is_black(parent))
 			break;
 
+		// parent这里一定是红色节点,
+		// 由性质4可知,gparent一定是黑色
 		gparent = rb_red_parent(parent);
 
 		tmp = gparent->rb_right;
@@ -462,6 +485,8 @@ __rb_insert(struct rb_node* node, struct rb_root* root,
 				*/
 				rb_set_parent_color(tmp, gparent, RB_BLACK);
 				rb_set_parent_color(parent, gparent, RB_BLACK);
+
+				// 递归向上新一轮处理
 				node = gparent;
 				parent = rb_parent(node);
 				rb_set_parent_color(node, parent, RB_RED);
@@ -470,6 +495,17 @@ __rb_insert(struct rb_node* node, struct rb_root* root,
 
 			tmp = parent->rb_right;
 			if (node == tmp) {
+				/*
+				* Case 2 - node's uncle is black and node is
+				* the parent's right child (left rotate at parent).
+				*		G			G
+				*	   / \         / \
+				*     p   U       n   U
+				*      \         / 
+				*       n       p
+				* This still leaves us in violation 4), the
+				* continuation into Case 3 will fix that.
+				*/
 				tmp = node->rb_left;
 				parent->rb_right = tmp;
 				node->rb_left = parent;
@@ -482,6 +518,16 @@ __rb_insert(struct rb_node* node, struct rb_root* root,
 				tmp = node->rb_right;
 			}
 
+			/*
+			* Case 3 - node's uncle is black and node is
+			* the parent's left child (right rotate at gparent)
+			* 
+			*		G			P
+			*      / \         / \
+			*     p   U  -->  n   g
+			*    /                 \
+			*   n                   U
+			*/
 			gparent->rb_left = tmp;
 			parent->rb_right = gparent;
 			if (tmp)
@@ -529,6 +575,8 @@ __rb_insert(struct rb_node* node, struct rb_root* root,
 	}
 }
 
+// 对于插入的节点进行旋转和颜色调整
 void rb_insert_color(struct rb_node* node, struct rb_root* root) {
+	// 约定新插入的节点是红色的，减少处理情形
 	__rb_insert(node, root, dummy_rotate);
 }
