@@ -599,6 +599,7 @@ static void kvm_commit_memory_region(struct kvm* kvm,
 			break;
 		case KVM_MR_MOVE:
 		case KVM_MR_FLAGS_ONLY:
+			NT_ASSERT(old != NULL);
 			/*
 			* Free the ditry bitmap as needed; the below check encompasses
 			* both the flags and whether a ring buffer is bing used
@@ -611,7 +612,8 @@ static void kvm_commit_memory_region(struct kvm* kvm,
 			* memory, not any metadata. Metadata, including arch specific
 			* data, may be reused by @new.
 			*/
-			ExFreePool(old);
+			if (old != NULL)
+				ExFreePool(old);
 			break;
 		default:
 			KeBugCheckEx(DRIVER_VIOLATION, 0, 0, 0, 0);
@@ -723,6 +725,11 @@ static void kvm_swap_active_memslots(struct kvm* kvm, int as_id) {
 	u64 gen = __kvm_memslots(kvm, as_id)->generation;
 
 	slots->generation = gen | KVM_MEMSLOT_GEN_UPDATE_IN_PROGRESS;
+
+	/*
+	* Acquired in kvm_set_memslot.
+	*/
+	KeReleaseMutex(&kvm->slots_arch_lock, FALSE);
 
 	gen = slots->generation & ~KVM_MEMSLOT_GEN_UPDATE_IN_PROGRESS;
 

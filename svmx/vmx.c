@@ -2742,13 +2742,13 @@ static void vmx_dump_sel(char* name, uint32_t sel) {
 		name, vmcs_read16(sel),
 		vmcs_read32(sel + GUEST_ES_AR_BYTES - GUEST_ES_SELECTOR),
 		vmcs_read32(sel + GUEST_ES_LIMIT - GUEST_ES_SELECTOR),
-		vmcs_readl(sel + GUEST_ES_BASE - GUEST_ES_SELECTOR));
+		vmcs_readl((ULONG_PTR)sel + GUEST_ES_BASE - GUEST_ES_SELECTOR));
 }
 
 static void vmx_dump_dtsel(char* name, uint32_t limit) {
 	LogErr("%s				limit=0x%08x, base=0x%p\n",
 		name, vmcs_read32(limit),
-		vmcs_readl(limit + GUEST_GDTR_BASE - GUEST_GDTR_LIMIT));
+		vmcs_readl((ULONG_PTR)limit + GUEST_GDTR_BASE - GUEST_GDTR_LIMIT));
 }
 
 void dump_vmcs(struct kvm_vcpu* vcpu) {

@@ -124,8 +124,9 @@ static inline void rb_set_black(struct rb_node* rb) {
 static inline void
 ____rb_erase_color(struct rb_node* parent, struct rb_root* root,
 	void (*augment_rotate)(struct rb_node* old, struct rb_node* new)) {
-
+	NT_ASSERT(parent != NULL);
 	struct rb_node* node = NULL, * sibling, * tmp1, * tmp2;
+
 
 	while (TRUE)
 	{
@@ -347,6 +348,7 @@ ____rb_erase_color(struct rb_node* parent, struct rb_root* root,
 					// 设置兄弟节点为红色
 					rb_set_parent_color(sibling, parent,
 						RB_RED);
+					NT_ASSERT(parent != NULL);
 					if (rb_is_red(parent))
 						rb_set_black(parent);
 					else {

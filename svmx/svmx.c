@@ -9,13 +9,23 @@ extern struct vmcs** current_vmcs;
 extern bool* hardware_enabled;
 extern struct kvm* g_kvm;
 
+DRIVER_INITIALIZE DriverEntry;
 DRIVER_UNLOAD DriverUnload;
+
+_Dispatch_type_(IRP_MJ_DEVICE_CONTROL)
 DRIVER_DISPATCH DriverDeviceControl;
-DRIVER_DISPATCH DriverCreateClose, DriverShutdown;
+
+_Dispatch_type_(IRP_MJ_CREATE)
+_Dispatch_type_(IRP_MJ_CLOSE)
+DRIVER_DISPATCH DriverCreateClose;
+
+_Dispatch_type_(IRP_MJ_SHUTDOWN)
+DRIVER_DISPATCH DriverShutdown;
+
 bool g_vmx_init = FALSE;
 bool g_svm_init = FALSE;
 
-NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath);
+
 
 VOID DriverUnload(PDRIVER_OBJECT DriverObject) {
 	if (g_vmx_init) {
