@@ -1359,6 +1359,7 @@ static int fast_page_fault(struct kvm_vcpu* vcpu,
 	u64* sptep = NULL;
 	uint retry_count = 0;
 
+	
 	if (!page_fault_can_be_fast(fault))
 		return ret;
 
@@ -1499,7 +1500,7 @@ static int kvm_tdp_mmu_page_fault(struct kvm_vcpu* vcpu,
 	if (page_fault_handle_page_track(vcpu, fault))
 		return RET_PF_EMULATE;
 
-	// 快速处理一个简单的page fault
+	// fast路径只处理与write和trace属性相关的异常
 	r = fast_page_fault(vcpu, fault);
 	if (r != RET_PF_INVALID)
 		return r;
@@ -1885,8 +1886,8 @@ void kvm_mmu_x86_module_init(void) {
 
 void kvm_mmu_hugepage_adjust(struct kvm_vcpu* vcpu, struct kvm_page_fault* fault) {
 	UNREFERENCED_PARAMETER(vcpu);
-	//struct kvm_memory_slot* slot = fault->slot;
-	//kvm_pfn_t mask;
+	struct kvm_memory_slot* slot = fault->slot;
+	kvm_pfn_t mask;
 
 	fault->huge_page_disallowed = fault->exec && fault->nx_huge_page_workaround_enabled;
 	
@@ -1896,7 +1897,17 @@ void kvm_mmu_hugepage_adjust(struct kvm_vcpu* vcpu, struct kvm_page_fault* fault
 	if (is_error_noslot_pfn(fault->pfn))
 		return;
 
-	
+	if (kvm_slot_dirty_track_enabled(slot))
+		return;
+
+	fault->req_level = (u8)kvm_mmu_max_mapping_level(vcpu->kvm, slot,
+		fault->gfn, fault->max_level);
+	if (fault->req_level == PG_LEVEL_4K || fault->huge_page_disallowed)
+		return;
+
+	fault->goal_level = fault->req_level;
+	mask = KVM_PAGES_PER_HPAGE(fault->goal_level) - 1;
+	fault->pfn &= ~mask;
 }
 
 void disallowed_hugepage_adjust(struct kvm_page_fault* fault, u64 spte, int cur_level) {
@@ -1932,4 +1943,48 @@ void kvm_mmu_change_mmu_pages(struct kvm* kvm, ULONG_PTR goal_nr_mmu_pages) {
 	kvm->arch.n_max_mmu_pages = goal_nr_mmu_pages;
 
 	ExReleaseResourceAndLeaveCriticalRegion(&kvm->mmu_lock);
+}
+
+/*
+* Return the pointer to the large page information for a given gfn,
+* handling slots that are not large page aligned.
+*/
+static struct kvm_lpage_info* lpage_info_slot(gfn_t gfn,
+	const struct kvm_memory_slot* slot, int level) {
+	ULONG_PTR idx;
+
+	idx = gfn_to_index(gfn, slot->base_gfn, level);
+	return &slot->arch.lpage_info[level - 2][idx];
+}
+
+static int host_pfn_mapping_level(struct kvm* kvm, gfn_t gfn,
+	const struct kvm_memory_slot* slot) {
+	UNREFERENCED_PARAMETER(kvm);
+	UNREFERENCED_PARAMETER(gfn);
+	UNREFERENCED_PARAMETER(slot);
+	int level = PG_LEVEL_4K;
+
+
+
+	return level;
+}
+
+int kvm_mmu_max_mapping_level(struct kvm* kvm,
+	const struct kvm_memory_slot* slot, gfn_t gfn,
+	int max_level) {
+	struct kvm_lpage_info* linfo;
+	int host_level;
+
+	max_level = min(max_level, max_huge_page_level);
+	for (; max_level > PG_LEVEL_4K; max_level--) {
+		linfo = lpage_info_slot(gfn, slot, max_level);
+		if (!linfo->disallow_lpage)
+			break;
+	}
+
+	if (max_level == PG_LEVEL_4K)
+		return PG_LEVEL_4K;
+
+	host_level = host_pfn_mapping_level(kvm, gfn, slot);
+	return min(host_level, max_level);
 }

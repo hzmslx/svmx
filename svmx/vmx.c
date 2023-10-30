@@ -1060,7 +1060,7 @@ static int handle_desc(struct kvm_vcpu* vcpu)
 * EPT violation异常的处理
 */
 static int handle_ept_violation(struct kvm_vcpu* vcpu) {
-	unsigned long exit_qualification;
+	ULONG_PTR exit_qualification;
 	gpa_t gpa;
 	u64 error_code;
 	gva_t gva = 0;
@@ -3623,7 +3623,7 @@ void set_cr4_guest_host_mask(struct vcpu_vmx* vmx) {
 }
 
 /* called to set cr0 as appropriate for a mov-to-cr0 exit. */
-static int handle_set_cr0(struct kvm_vcpu* vcpu, unsigned long val) {
+static int handle_set_cr0(struct kvm_vcpu* vcpu, ULONG_PTR val) {
 	if (is_guest_mode(vcpu)) {
 
 		return 0;
@@ -3638,7 +3638,7 @@ static int handle_set_cr0(struct kvm_vcpu* vcpu, unsigned long val) {
 }
 
 static int handle_cr(struct kvm_vcpu* vcpu) {
-	unsigned long exit_qualification, val;
+	ULONG_PTR exit_qualification, val;
 	int cr;
 	int reg;
 	int err;

@@ -252,7 +252,10 @@ int kvm_tdp_mmu_map(struct kvm_vcpu* vcpu, struct kvm_page_fault* fault) {
 
 		if (fault->huge_page_disallowed &&
 			fault->req_level >= iter.level) {
-			
+			KIRQL irql;
+			KeAcquireSpinLock(&kvm->arch.tdp_mmu_pages_lock, &irql);
+
+			KeReleaseSpinLock(&kvm->arch.tdp_mmu_pages_lock, irql);
 		}
 	}
 

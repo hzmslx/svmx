@@ -681,7 +681,7 @@ struct kvm_mmu_page {
 	 * Note, "link" through "spt" fit in a single 64 byte cache line on
 	 * 64-bit kernels, keep it that way unless there's a reason not to.
 	 */
-	LIST_ENTRY link;
+	LIST_ENTRY link;// 所有的页表结构
 	struct hlist_node hash_link;
 
 	bool tdp_mmu_page;
@@ -700,7 +700,7 @@ struct kvm_mmu_page {
 	 * hash table.
 	 */
 	union kvm_mmu_page_role role;
-	gfn_t gfn;
+	gfn_t gfn;// 虚拟机的物理页帧号
 
 	u64* spt;
 
@@ -1005,8 +1005,8 @@ struct kvm_arch_memory_slot {
 struct kvm_memory_slot {
 	struct hlist_node id_node[2];
 	struct rb_node gfn_node[2];
-	gfn_t base_gfn;// 虚拟内存区间的物理页框号
-	ULONG_PTR npages;// 将内存区间的大小转化为页数
+	gfn_t base_gfn;// 虚拟内存区间的物理页帧号
+	ULONG_PTR npages;// 总页数
 	ULONG_PTR* dirty_bitmap;
 	/*
 	* 反向映射相关，用于定位指向同一物理页框号的所有EPT表项
@@ -1232,7 +1232,7 @@ struct kvm_vcpu_arch {
 	struct kvm_pmu pmu;
 
 	/* used for guest single stepping over the given code position */
-	unsigned long singlestep_rip;
+	ULONG_PTR singlestep_rip;
 
 	bool hyperv_enabled;
 	struct kvm_vcpu_hv* hyperv;
@@ -1240,8 +1240,8 @@ struct kvm_vcpu_arch {
 
 
 
-	unsigned long last_retry_eip;
-	unsigned long last_retry_addr;
+	ULONG_PTR last_retry_eip;
+	ULONG_PTR last_retry_addr;
 
 	struct {
 		bool halted;
@@ -1267,7 +1267,7 @@ struct kvm_vcpu_arch {
 	u64 msr_kvm_poll_control;
 
 	/* set at EPT violation at this point */
-	unsigned long exit_qualification;
+	ULONG_PTR exit_qualification;
 
 	/* pv related host specific info */
 	// 不支持vmx下的模拟虚拟化
@@ -1868,7 +1868,7 @@ struct kvm_arch {
 	 * It is acceptable, but not necessary, to acquire this lock when
 	 * the thread holds the MMU lock in write mode.
 	 */
-
+	KSPIN_LOCK tdp_mmu_pages_lock;
 #endif /* CONFIG_X86_64 */
 
 	/*
@@ -2251,3 +2251,8 @@ long kvm_vm_ioctl(unsigned int ioctl, ULONG_PTR arg);
 void kvm_mmu_change_mmu_pages(struct kvm* kvm, ULONG_PTR kvm_nr_mmu_pages);
 
 void kvm_arch_free_memslot(struct kvm* kvm, struct kvm_memory_slot* slot);
+
+static inline bool kvm_slot_dirty_track_enabled(const struct kvm_memory_slot* slot)
+{
+	return slot->flags & KVM_MEM_LOG_DIRTY_PAGES;
+}

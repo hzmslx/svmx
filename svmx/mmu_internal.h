@@ -129,3 +129,6 @@ static inline gfn_t gfn_round_for_level(gfn_t gfn, int level) {
 
 void kvm_mmu_hugepage_adjust(struct kvm_vcpu* vcpu, struct kvm_page_fault* fault);
 void disallowed_hugepage_adjust(struct kvm_page_fault* fault, u64 spte, int cur_level);
+int kvm_mmu_max_mapping_level(struct kvm* kvm,
+	const struct kvm_memory_slot* slot, gfn_t gfn,
+	int max_level);

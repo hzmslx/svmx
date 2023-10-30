@@ -956,7 +956,7 @@ struct vcpu_vmx {
 	 */
 	bool		      guest_state_loaded;
 
-	unsigned long         exit_qualification;
+	ULONG_PTR         exit_qualification;
 	u32                   exit_intr_info;
 	u32                   idt_vectoring_info;
 	ULONG_PTR                 rflags;
@@ -1289,8 +1289,17 @@ struct vcpu_vmx* to_vmx(struct kvm_vcpu* vcpu);
 unsigned long vmx_l1_guest_owned_cr0_bits(void);
 void set_cr4_guest_host_mask(struct vcpu_vmx* vmx);
 
-static unsigned long vmx_get_exit_qual(struct kvm_vcpu* vcpu) {
+static inline bool kvm_register_test_and_mark_available(struct kvm_vcpu* vcpu,
+	enum kvm_reg reg) {
+	return _bittestandset((LONG*)&vcpu->arch.regs_avail, reg);
+}
+
+static ULONG_PTR vmx_get_exit_qual(struct kvm_vcpu* vcpu) {
 	struct vcpu_vmx* vmx = to_vmx(vcpu);
+
+	if (!kvm_register_test_and_mark_available(vcpu,
+		VCPU_EXREG_EXIT_INFO_1))
+		vmx->exit_qualification = vmcs_readl(EXIT_QUALIFICATION);
 
 	return vmx->exit_qualification;
 }
@@ -1422,10 +1431,7 @@ void vmx_spec_ctrl_restore_host(struct vcpu_vmx* vmx, unsigned int flags);
 
 void vmx_set_cr2(ULONG_PTR cr2);
 
-static inline bool kvm_register_test_and_mark_available(struct kvm_vcpu* vcpu,
-	enum kvm_reg reg) {
-	return _bittestandset((LONG*)&vcpu->arch.regs_avail, reg);
-}
+
 
 void free_loaded_vmcs(struct loaded_vmcs* loaded_vmcs);
 
