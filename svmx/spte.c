@@ -157,3 +157,100 @@ u64 make_nonleaf_spte(u64* child_pt, bool ad_disabled) {
 
 	return spte;
 }
+
+static inline int kvm_arch_vcpu_memslots_id(struct kvm_vcpu* vcpu)
+{
+	UNREFERENCED_PARAMETER(vcpu);
+	return 0;
+}
+
+static inline struct kvm_memslots* kvm_vcpu_memslots(struct kvm_vcpu* vcpu) {
+	int as_id = kvm_arch_vcpu_memslots_id(vcpu);
+
+	return __kvm_memslots(vcpu->kvm, as_id);
+}
+
+static u64 generation_mmio_spte_mask(u64 gen) {
+	u64 mask;
+
+	mask = (gen << MMIO_SPTE_GEN_LOW_SHIFT) & MMIO_SPTE_GEN_LOW_MASK;
+	mask |= (gen << MMIO_SPTE_GEN_HIGH_SHIFT) & MMIO_SPTE_GEN_HIGH_MASK;
+	return mask;
+}
+
+u64 make_mmio_spte(struct kvm_vcpu* vcpu, u64 gfn, unsigned int access) {
+	u64 gen = kvm_vcpu_memslots(vcpu)->generation & MMIO_SPTE_GEN_MASK;
+	u64 spte = generation_mmio_spte_mask(gen);
+	u64 gpa = gfn << PAGE_SHIFT;
+
+	access &= shadow_mmio_access_mask;
+	spte |= shadow_mmio_value | access;
+	spte |= gpa | shadow_nonpresent_or_rsvd_mask;
+	spte |= (gpa & shadow_nonpresent_or_rsvd_mask)
+		<< SHADOW_NONPRESENT_OR_RSVD_MASK_LEN;
+
+	return spte;
+}
+
+static bool kvm_is_mmio_pfn(kvm_pfn_t pfn) {
+	UNREFERENCED_PARAMETER(pfn);
+	return FALSE;
+}
+
+bool make_spte(struct kvm_vcpu* vcpu, struct kvm_mmu_page* sp,
+	const struct kvm_memory_slot* slot,
+	unsigned int pte_access, gfn_t gfn, kvm_pfn_t pfn,
+	u64 old_spte, bool prefetch, bool can_unsync,
+	bool host_writable, u64* new_spte) {
+	UNREFERENCED_PARAMETER(can_unsync);
+	UNREFERENCED_PARAMETER(old_spte);
+	UNREFERENCED_PARAMETER(gfn);
+	UNREFERENCED_PARAMETER(slot);
+
+	int level = sp->role.level;
+	u64 spte = SPTE_MMU_PRESENT_MASK;
+	bool wrprot = FALSE;
+
+	if (sp->role.ad_disabled)
+		spte |= SPTE_TDP_AD_DISABLED;
+	else if (kvm_mmu_page_ad_need_write_protect(sp))
+		spte |= SPTE_TDP_AD_WRPROT_ONLY;
+
+	/*
+	* For the EPT case, shadow_present_mask is 0 if hardware
+	* supports exec-only page table entries. In that case,
+	* ACC_USER_MASK and shadow_user_mask are used to represent
+	* read access. See FNAME(gpte_access) in paging_tmpl.h
+	*/
+	spte |= shadow_present_mask;
+	if (!prefetch)
+		spte |= spte_shadow_accessed_mask(spte);
+
+	if (level > PG_LEVEL_4K && (pte_access & ACC_EXEC_MASK) &&
+		is_nx_huge_page_enabled(vcpu->kvm)) {
+		pte_access &= ~ACC_EXEC_MASK;
+	}
+
+	if (pte_access & ACC_EXEC_MASK)
+		spte |= shadow_x_mask;
+	else
+		spte |= shadow_nx_mask;
+
+	if (pte_access & ACC_USER_MASK)
+		spte |= shadow_user_mask;
+
+	if (level > PG_LEVEL_4K)
+		spte |= PT_PAGE_SIZE_MASK;
+
+	
+	if (host_writable)
+		spte |= shadow_host_writable_mask;
+	else
+		pte_access &= ~ACC_WRITE_MASK;
+
+	if (shadow_me_value && !kvm_is_mmio_pfn(pfn))
+		spte |= shadow_me_value;
+
+	*new_spte = spte;
+	return wrprot;
+}

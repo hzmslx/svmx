@@ -1885,7 +1885,6 @@ void kvm_mmu_x86_module_init(void) {
 }
 
 void kvm_mmu_hugepage_adjust(struct kvm_vcpu* vcpu, struct kvm_page_fault* fault) {
-	UNREFERENCED_PARAMETER(vcpu);
 	struct kvm_memory_slot* slot = fault->slot;
 	kvm_pfn_t mask;
 
@@ -1957,14 +1956,17 @@ static struct kvm_lpage_info* lpage_info_slot(gfn_t gfn,
 	return &slot->arch.lpage_info[level - 2][idx];
 }
 
+/*
+* Lookup the mapping level for @gfn in the current mm.
+*/
 static int host_pfn_mapping_level(struct kvm* kvm, gfn_t gfn,
 	const struct kvm_memory_slot* slot) {
 	UNREFERENCED_PARAMETER(kvm);
 	UNREFERENCED_PARAMETER(gfn);
 	UNREFERENCED_PARAMETER(slot);
 	int level = PG_LEVEL_4K;
-
-
+	
+	
 
 	return level;
 }

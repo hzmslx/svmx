@@ -130,10 +130,22 @@ int kvm_tdp_mmu_get_walk(struct kvm_vcpu* vcpu, u64 addr,
 static int tdp_mmu_map_handle_target_level(struct kvm_vcpu* vcpu,
 	struct kvm_page_fault* fault,
 	struct tdp_iter* iter) {
-	UNREFERENCED_PARAMETER(vcpu);
-	UNREFERENCED_PARAMETER(fault);
-	UNREFERENCED_PARAMETER(iter);
+	struct kvm_mmu_page* sp = sptep_to_sp(iter->sptep);
+	u64 new_spte;
 	int ret = RET_PF_FIXED;
+	bool wrprot = FALSE;
+
+	if (sp->role.level != fault->goal_level)
+		return RET_PF_RETRY;
+
+	if (!fault->slot)
+		new_spte = make_mmio_spte(vcpu, iter->gfn, ACC_ALL);
+	else
+		wrprot = make_spte(vcpu, sp, fault->slot, ACC_ALL,
+			iter->gfn, fault->pfn, iter->old_spte, fault->prefetch,
+			TRUE, fault->map_writable, &new_spte);
+
+
 
 	return ret;
 }

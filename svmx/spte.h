@@ -7,6 +7,25 @@
 #define ACC_USER_MASK    PT_USER_MASK
 #define ACC_ALL          (ACC_EXEC_MASK | ACC_WRITE_MASK | ACC_USER_MASK)
 
+#define MMIO_SPTE_GEN_LOW_START		3
+#define MMIO_SPTE_GEN_LOW_END		10
+
+#define MMIO_SPTE_GEN_HIGH_START	52
+#define MMIO_SPTE_GEN_HIGH_END		62
+
+#define MMIO_SPTE_GEN_LOW_MASK		GENMASK_ULL(MMIO_SPTE_GEN_LOW_END, \
+						    MMIO_SPTE_GEN_LOW_START)
+#define MMIO_SPTE_GEN_HIGH_MASK		GENMASK_ULL(MMIO_SPTE_GEN_HIGH_END, \
+						    MMIO_SPTE_GEN_HIGH_START)
+
+#define MMIO_SPTE_GEN_LOW_BITS		(MMIO_SPTE_GEN_LOW_END - MMIO_SPTE_GEN_LOW_START + 1)
+#define MMIO_SPTE_GEN_HIGH_BITS		(MMIO_SPTE_GEN_HIGH_END - MMIO_SPTE_GEN_HIGH_START + 1)
+
+#define MMIO_SPTE_GEN_LOW_SHIFT		(MMIO_SPTE_GEN_LOW_START - 0)
+#define MMIO_SPTE_GEN_HIGH_SHIFT	(MMIO_SPTE_GEN_HIGH_START - MMIO_SPTE_GEN_LOW_BITS)
+
+#define MMIO_SPTE_GEN_MASK		GENMASK_ULL(MMIO_SPTE_GEN_LOW_BITS + MMIO_SPTE_GEN_HIGH_BITS - 1, 0)
+
 extern u64 shadow_host_writable_mask;
 extern u64 shadow_mmu_writable_mask;
 extern u64 shadow_nx_mask;
@@ -34,6 +53,11 @@ extern u64 shadow_acc_track_mask;
  * to guard against L1TF attacks.
  */
 extern u64 shadow_nonpresent_or_rsvd_mask;
+
+/*
+ * The number of high-order 1 bits to use in the mask above.
+ */
+#define SHADOW_NONPRESENT_OR_RSVD_MASK_LEN 5
 
 /* The mask for the R/X bits in EPT PTEs */
 #define SPTE_EPT_READABLE_MASK			0x1ull
@@ -269,4 +293,18 @@ u64 make_nonleaf_spte(u64* child_pt, bool ad_disabled);
 
 static inline bool sp_ad_disabled(struct kvm_mmu_page* sp) {
 	return !!sp->role.ad_disabled;
+}
+
+
+
+u64 make_mmio_spte(struct kvm_vcpu* vcpu, u64 gfn, unsigned int access);
+
+bool make_spte(struct kvm_vcpu* vcpu, struct kvm_mmu_page* sp,
+	const struct kvm_memory_slot* slot,
+	unsigned int pte_access, gfn_t gfn, kvm_pfn_t pfn,
+	u64 old_spte, bool prefetch, bool can_unsync,
+	bool host_writable, u64* new_spte);
+
+static inline u64 spte_shadow_accessed_mask(u64 spte) {
+	return spte_ad_enabled(spte) ? shadow_accessed_mask : 0;
 }
