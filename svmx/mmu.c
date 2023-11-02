@@ -180,7 +180,7 @@ int kvm_mmu_vendor_module_init(void) {
 
 
 struct kvm_shadow_walk_iterator {
-	u64 addr;// 寻找的 guest os 物理地址
+	u64 addr;// 寻找的gpa
 	hpa_t shadow_addr; // 指向下一个要找的EPT页表基地址
 	u64* sptep;// 当前页表中要使用的表项
 	int level; // 当前查找所处的页表级别
@@ -982,9 +982,9 @@ void kvm_init_mmu(struct kvm_vcpu* vcpu) {
 static void shadow_walk_init_using_root(struct kvm_shadow_walk_iterator* iterator,
 	struct kvm_vcpu* vcpu, hpa_t root,
 	u64 addr) {
-	/* 把要索引的地址赋值给addr */
+	/* 要查找的gpa */
 	iterator->addr = addr;
-	// 初始化时，指向EPT Pointer的基地址
+	// 指向EPT页表基地址
 	iterator->shadow_addr = root;
 	// 影子页表级数
 	iterator->level = vcpu->arch.mmu->root_role.level;
@@ -1082,20 +1082,155 @@ static void shadow_walk_next(struct kvm_shadow_walk_iterator* iterator)
 	     shadow_walk_okay(&(_walker));			\
 	     shadow_walk_next(&(_walker)))
 
+static void mmu_free_pte_list_desc(struct pte_list_desc* pte_list_desc) {
+	UNREFERENCED_PARAMETER(pte_list_desc);
+}
+
+static void pte_list_desc_remove_entry(struct kvm_rmap_head* rmap_head,
+	struct pte_list_desc* desc, int i) {
+	struct pte_list_desc* head_desc = (struct pte_list_desc*)(rmap_head->val & ~1ul);
+	int j = head_desc->spte_count - 1;
+
+	desc->sptes[i] = head_desc->sptes[j];
+	head_desc->sptes[j] = NULL;
+	head_desc->spte_count--;
+	if (head_desc->spte_count)
+		return;
+
+	if (!head_desc->more)
+		rmap_head->val = 0;
+	else
+		rmap_head->val = (ULONG_PTR)head_desc->more | 1;
+	mmu_free_pte_list_desc(head_desc);
+}
+
+static void pte_list_remove(u64* spte, struct kvm_rmap_head* rmap_head) {
+	struct pte_list_desc* desc;
+	u32 i;
+
+	if (!rmap_head->val) {
+
+	}
+	else if (!(rmap_head->val & 1)) {
+		if ((u64*)rmap_head->val != spte) {
+
+		}
+		rmap_head->val = 0;
+	}
+	else {
+		desc = (struct pte_list_desc*)(rmap_head->val & ~1ul);
+		while (desc) {
+			for (i = 0; i < desc->spte_count; ++i) {
+				if (desc->sptes[i] == spte) {
+					pte_list_desc_remove_entry(rmap_head, desc, i);
+					return;
+				}
+			}
+			desc = desc->more;
+		}
+	}
+}
+
+static void mmu_page_remove_parent_pte(struct kvm_mmu_page* sp,
+	u64* parent_pte) {
+	pte_list_remove(parent_pte, &sp->parent_ptes);
+}
+
+static void drop_parent_pte(struct kvm_mmu_page* sp,
+	u64* parent_pte) {
+	mmu_page_remove_parent_pte(sp, parent_pte);
+}
+
+static void rmap_remove(struct kvm* kvm, u64* spte) {
+	UNREFERENCED_PARAMETER(kvm);
+	UNREFERENCED_PARAMETER(spte);
+}
+
+static u64 mmu_spte_clear_track_bits(struct kvm* kvm, u64* sptep) {
+	UNREFERENCED_PARAMETER(kvm);
+	u64 old_spte = *sptep;
+
+
+	return old_spte;
+}
+
+static void drop_spte(struct kvm* kvm, u64* sptep) {
+	u64 old_spte = mmu_spte_clear_track_bits(kvm, sptep);
+
+	if (is_shadow_present_pte(old_spte))
+		rmap_remove(kvm, sptep);
+}
+
+static bool mmu_spte_update(u64* sptep, u64 new_spte) {
+	UNREFERENCED_PARAMETER(sptep);
+	UNREFERENCED_PARAMETER(new_spte);
+	bool flush = FALSE;
+
+	return flush;
+}
+
 /*
-* 用于设置影子页表项
+* 用于设置影子页表项,也就是将PFN或者下一级页表的基地址填到SPTE中
 */
 static int mmu_set_spte(struct kvm_vcpu* vcpu, struct kvm_memory_slot* slot,
 	u64* sptep, unsigned int pte_access, gfn_t gfn,
 	kvm_pfn_t pfn, struct kvm_page_fault* fault) {
-	UNREFERENCED_PARAMETER(vcpu);
-	UNREFERENCED_PARAMETER(slot);
-	UNREFERENCED_PARAMETER(sptep);
-	UNREFERENCED_PARAMETER(pte_access);
-	UNREFERENCED_PARAMETER(gfn);
-	UNREFERENCED_PARAMETER(pfn);
-	UNREFERENCED_PARAMETER(fault);
+	struct kvm_mmu_page* sp = sptep_to_sp(sptep);
+	int level = sp->role.level;
+	int was_rmapped = 0;
 	int ret = RET_PF_FIXED;
+	bool flush = FALSE;
+	bool wrprot;
+	u64 spte;
+
+	/* Prefetching always gets a writable pfn. */
+	bool host_writable = !fault || fault->map_writable;
+	bool prefetch = !fault || fault->prefetch;
+	bool write_fault = fault && fault->write;
+
+	if (is_noslot_pfn(pfn)) {
+		vcpu->stat.pf_mmio_spte_created++;
+		
+		return RET_PF_EMULATE;
+	}
+
+	if (is_shadow_present_pte(*sptep)) {
+		/*
+		* If we overwrite a PTE page pointer with a 2MB PMD, unlink
+		* the parent of the now unreachable PTE.
+		*/
+		if (level > PG_LEVEL_4K && !is_large_pte(*sptep)) {
+			struct kvm_mmu_page* child;
+			u64 pte = *sptep;
+
+			child = spte_to_child_sp(pte);
+			drop_parent_pte(child, sptep);
+			flush = TRUE;
+		}
+		else if (pfn != spte_to_pfn(*sptep)) {
+			drop_spte(vcpu->kvm, sptep);
+			flush = TRUE;
+		}
+		else
+			was_rmapped = 1;
+	}
+
+	wrprot = make_spte(vcpu, sp, slot, pte_access, gfn, pfn, *sptep, prefetch,
+		TRUE, host_writable, &spte);
+
+	if (*sptep == spte) {
+		ret = RET_PF_SPURIOUS;
+	}
+	else {
+		flush |= mmu_spte_update(sptep, spte);
+	}
+
+	if (wrprot) {
+		if (write_fault)
+			ret = RET_PF_EMULATE;
+	}
+
+	
 
 	return ret;
 }
@@ -1183,10 +1318,7 @@ static struct kvm_mmu_page* kvm_mmu_get_child_sp(struct kvm_vcpu* vcpu,
 	return kvm_mmu_get_shadow_page(vcpu, gfn, role);
 }
 
-static void drop_spte(struct kvm* kvm, u64* sptep) {
-	UNREFERENCED_PARAMETER(kvm);
-	UNREFERENCED_PARAMETER(sptep);
-}
+
 
 static void drop_large_spte(struct kvm* kvm, u64* sptep, bool flush) {
 	struct kvm_mmu_page* sp;
@@ -1249,8 +1381,10 @@ static int direct_map(struct kvm_vcpu* vcpu, struct kvm_page_fault* fault) {
 	int ret;
 	gfn_t base_gfn = fault->gfn;
 
+	// 获取该gfn对应的level
 	kvm_mmu_hugepage_adjust(vcpu, fault);
 
+	// 遍历EPT页表
 	for_each_shadow_entry(vcpu, fault->addr, it) {
 		/*
 		* We cannot overwrite existing page tables with an NX
@@ -1260,6 +1394,7 @@ static int direct_map(struct kvm_vcpu* vcpu, struct kvm_page_fault* fault) {
 			disallowed_hugepage_adjust(fault, *it.sptep, it.level);
 		
 		base_gfn = gfn_round_for_level(fault->gfn, it.level);
+		// 如果页表的level等于请求的level,则表明是该entry引起的violation
 		if (it.level == fault->goal_level)
 			break;
 		
@@ -1274,6 +1409,7 @@ static int direct_map(struct kvm_vcpu* vcpu, struct kvm_page_fault* fault) {
 	if (it.level != fault->goal_level)
 		return STATUS_FAIL_CHECK;
 
+	// 设置最后一级页表项,sptep指向pfn
 	ret = mmu_set_spte(vcpu, fault->slot, it.sptep, ACC_ALL,
 		base_gfn, fault->pfn, fault);
 	if (ret == RET_PF_SPURIOUS)
@@ -1359,7 +1495,8 @@ static int fast_page_fault(struct kvm_vcpu* vcpu,
 	u64* sptep = NULL;
 	uint retry_count = 0;
 
-	
+	// 只有当 GFN 对应的物理页存在且 violation 是由读写操作引起的, 
+	// 才可以使用快速处理
 	if (!page_fault_can_be_fast(fault))
 		return ret;
 
@@ -1505,6 +1642,7 @@ static int kvm_tdp_mmu_page_fault(struct kvm_vcpu* vcpu,
 	if (r != RET_PF_INVALID)
 		return r;
 
+	// 分配缓存池
 	r = mmu_topup_memory_caches(vcpu, FALSE);
 	if (r)
 		return r;
@@ -1523,7 +1661,7 @@ out_unlock:
 }
 #endif // AMD64
 
-// 建立页表项
+// 完成EPT页表项的建立
 int kvm_tdp_page_fault(struct kvm_vcpu* vcpu, struct kvm_page_fault* fault) {
 	/*
 	 * If the guest's MTRRs may be used to compute the "real" memtype,
@@ -1756,7 +1894,7 @@ int kvm_mmu_page_fault(struct kvm_vcpu* vcpu, gpa_t cr2_or_gpa, u64 error_code,
 	}
 
 	if (r == RET_PF_INVALID) {
-		// EPT页表项无效
+		// 处理内存访问异常，也就是EPT页表项无效
 		r = kvm_mmu_do_page_fault(vcpu, cr2_or_gpa,
 			lower_32_bits(error_code), FALSE,
 			&emulation_type);

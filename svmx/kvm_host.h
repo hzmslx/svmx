@@ -676,6 +676,10 @@ struct kvm_mmu_root_info {
 	hpa_t hpa;
 };
 
+struct kvm_rmap_head {
+	ULONG_PTR val;
+};
+
 struct kvm_mmu_page {
 	/*
 	 * Note, "link" through "spt" fit in a single 64 byte cache line on
@@ -730,7 +734,7 @@ struct kvm_mmu_page {
 	union {
 		RTL_BITMAP unsync_child_bitmap;
 		struct {
-
+			struct kvm_rmap_head parent_ptes; /* rmap pointers to parent sptes */
 			void* tdp_mmu_async_data;
 		};
 	};
@@ -954,9 +958,7 @@ struct kvm_memslots {
 	int node_idx;
 };
 
-struct kvm_rmap_head {
-	ULONG_PTR val;
-};
+
 
 struct kvm_lpage_info {
 	int disallow_lpage;
@@ -2255,4 +2257,9 @@ void kvm_arch_free_memslot(struct kvm* kvm, struct kvm_memory_slot* slot);
 static inline bool kvm_slot_dirty_track_enabled(const struct kvm_memory_slot* slot)
 {
 	return slot->flags & KVM_MEM_LOG_DIRTY_PAGES;
+}
+
+/* noslot pfn indicates that the gfn is not in slot. */
+static inline bool is_noslot_pfn(kvm_pfn_t pfn) {
+	return pfn == KVM_PFN_NOSLOT;
 }
