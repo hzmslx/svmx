@@ -705,6 +705,7 @@ static void kvm_replace_memslot(struct kvm* kvm,
 
 	if (old) {
 		hash_del(&old->id_node[idx]);
+
 		InterlockedCompareExchangePointer(&slots->last_used_slot,
 			new, old);
 
@@ -714,8 +715,18 @@ static void kvm_replace_memslot(struct kvm* kvm,
 		}
 	}
 
+	/*
+	* (Re)Add the new memslot.
+	*/
 	hash_add(slots->id_hash, &new->id_node[idx], new->id);
 	
+	/*
+	* If the memslot gfn is unchanged, rb_replace_node() can be used to
+	* switch the node in the gfn tree instead of removing the old and
+	* inserting the new as two separate operations. Replacement is a 
+	* single O(1) operation versus two O(log(n)) operations for
+	* remove+insert.
+	*/
 	if (old && old->base_gfn == new->base_gfn) {
 		kvm_replace_gfn_node(slots, old, new);
 	}
@@ -734,6 +745,8 @@ static void kvm_swap_active_memslots(struct kvm* kvm, int as_id) {
 
 	slots->generation = gen | KVM_MEMSLOT_GEN_UPDATE_IN_PROGRESS;
 
+	kvm->memslots[as_id] = slots;
+
 	/*
 	* Acquired in kvm_set_memslot.
 	*/
@@ -746,16 +759,6 @@ static void kvm_swap_active_memslots(struct kvm* kvm, int as_id) {
 	kvm_arch_memslots_updated(kvm, gen);
 
 	slots->generation = gen;
-}
-
-static void kvm_active_memslot(struct kvm* kvm,
-	struct kvm_memory_slot* old,
-	struct kvm_memory_slot* new) {
-	int as_id = kvm_memslots_get_as_id(old, new);
-
-	kvm_swap_active_memslots(kvm, as_id);
-
-	kvm_replace_memslot(kvm, old, new);
 }
 
 /*
@@ -775,6 +778,8 @@ static void kvm_activate_memslot(struct kvm* kvm,
 
 	kvm_swap_active_memslots(kvm, as_id);
 
+	/* Propagate the new memslot to the now inactive memslots. */
+	kvm_replace_memslot(kvm, old, new);
 }
 
 static void kvm_create_memslot(struct kvm* kvm,

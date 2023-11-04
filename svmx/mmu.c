@@ -1455,6 +1455,10 @@ static bool page_fault_can_be_fast(struct kvm_page_fault* fault) {
 	return fault->write;
 }
 
+static u64 mmu_spte_get(u64* sptep) {
+	return *sptep;
+}
+
 /*
 * Returns the last level spte pointer of the shadow page walk for the given
 * gpa, and sets *spte to the spte value. This spte may be non-present. If no
@@ -1466,10 +1470,17 @@ static bool page_fault_can_be_fast(struct kvm_page_fault* fault) {
 */
 static u64* fast_pf_get_last_sptep(struct kvm_vcpu* vcpu, gpa_t gpa, u64* spte)
 {
-	UNREFERENCED_PARAMETER(vcpu);
-	UNREFERENCED_PARAMETER(gpa);
-	UNREFERENCED_PARAMETER(spte);
-	return NULL;
+	struct kvm_shadow_walk_iterator iterator;
+	u64 old_spte;
+	u64* sptep = NULL;
+
+	for_each_shadow_entry(vcpu, gpa, iterator) {
+		old_spte = mmu_spte_get(iterator.sptep);
+		sptep = iterator.sptep;
+		*spte = old_spte;
+	}
+
+	return sptep;
 }
 
 
