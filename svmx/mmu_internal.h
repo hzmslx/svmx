@@ -87,7 +87,10 @@ static inline int kvm_mmu_do_page_fault(struct kvm_vcpu* vcpu, gpa_t cr2_or_gpa,
 	int r;
 
 	if (vcpu->arch.mmu->root_role.direct) {
+		// 虚拟机物理地址右移 12 位得到虚拟机物理页框号(相对于虚拟机而言)
 		fault.gfn = (gfn_t)(fault.addr >> PAGE_SHIFT);
+		// 到该虚拟机页框号对应的 kvm_memory_slot
+		fault.slot = kvm_vcpu_gfn_to_memslot(vcpu, fault.gfn);
 	}
 
 	/*

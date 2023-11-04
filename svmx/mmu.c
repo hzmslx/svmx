@@ -733,6 +733,7 @@ static int mmu_alloc_direct_roots(struct kvm_vcpu* vcpu) {
 
 		// 根据当前vcpu的分页模式建立ept顶层页表的管理结构
 		if (tdp_mmu_enabled) {
+			// 此处获取的EPTP指针
 			root = kvm_tdp_mmu_get_vcpu_root_hpa(vcpu);
 			// 影子页表页物理地址, 即 EPTP
 			mmu->root.hpa = root;

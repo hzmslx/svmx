@@ -3,6 +3,8 @@
 // 取父节点地址
 #define rb_parent(r)	((struct rb_node*)((r)->__rb_parent_color & ~3))
 
+#define RB_EMPTY_ROOT(root)  ((root)->rb_node == NULL)
+
 /* 'empty' nodes are nodes that are known not to be inserted in an rbtree */
 #define RB_EMPTY_NODE(node) \
 	((node)->__rb_parent_color == (ULONG_PTR)(node))

@@ -158,17 +158,6 @@ u64 make_nonleaf_spte(u64* child_pt, bool ad_disabled) {
 	return spte;
 }
 
-static inline int kvm_arch_vcpu_memslots_id(struct kvm_vcpu* vcpu)
-{
-	UNREFERENCED_PARAMETER(vcpu);
-	return 0;
-}
-
-static inline struct kvm_memslots* kvm_vcpu_memslots(struct kvm_vcpu* vcpu) {
-	int as_id = kvm_arch_vcpu_memslots_id(vcpu);
-
-	return __kvm_memslots(vcpu->kvm, as_id);
-}
 
 static u64 generation_mmio_spte_mask(u64 gen) {
 	u64 mask;

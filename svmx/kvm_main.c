@@ -150,7 +150,7 @@ struct kvm* kvm_create_vm(ULONG_PTR type) {
 			
 			InterlockedCompareExchangePointer(&slots->last_used_slot,
 				NULL, NULL);
-			
+			slots->gfn_tree = RB_ROOT;
 			slots->node_idx = j;
 
 			/* Generations must be different for each address space. */
@@ -434,18 +434,26 @@ long kvm_vm_ioctl(unsigned int ioctl, ULONG_PTR arg) {
 		// 设置内存区域
 		case KVM_SET_USER_MEMORY_REGION:
 		{
-			struct kvm_userspace_memory_region kvm_userspace_mem = { 0 };
-			PPHYSICAL_MEMORY_RANGE range = MmGetPhysicalMemoryRanges();
-			kvm_userspace_mem.guest_phys_addr = range->BaseAddress.QuadPart;
-			kvm_userspace_mem.memory_size = range->NumberOfBytes.QuadPart;
-			kvm_userspace_mem.slot = 0;// 此处设置为0
-			kvm_userspace_mem.flags = 0;
+			PPHYSICAL_MEMORY_RANGE ranges = MmGetPhysicalMemoryRanges();
+			if (!ranges)
+				return STATUS_UNSUCCESSFUL;
 			
-			if (range != NULL) {
-				ExFreePool(range);
+			PFN_COUNT runs = 0;
+
+			/* Find out how many ranges there are. */
+			for (runs = 0;
+				(ranges[runs].BaseAddress.QuadPart) || (ranges[runs].NumberOfBytes.QuadPart);
+				runs++) {
+				struct kvm_userspace_memory_region mem = { 0 };
+				mem.guest_phys_addr = ranges[runs].BaseAddress.QuadPart;
+				mem.memory_size = ranges[runs].NumberOfBytes.QuadPart;
+				mem.slot = runs;
+				mem.flags = 0;
+				r = kvm_vm_ioctl_set_memory_region(g_kvm, &mem);
 			}
-			
-			r = kvm_vm_ioctl_set_memory_region(g_kvm, &kvm_userspace_mem);
+			if (ranges != NULL) {
+				ExFreePool(ranges);
+			}
 			break;
 		}
 
@@ -1182,4 +1190,57 @@ kvm_pfn_t hva_to_pfn(ULONG_PTR addr, bool atomic, bool interruptible,
 	
 
 	return pfn;
+}
+
+static inline struct kvm_memory_slot*
+search_memslots(struct kvm_memslots* slots, gfn_t gfn, bool approx) {
+	struct kvm_memory_slot* slot;
+	struct rb_node* node;
+	int idx = slots->node_idx;
+
+	slot = NULL;
+	for (node = slots->gfn_tree.rb_node; node;) {
+		slot = CONTAINING_RECORD(node, struct kvm_memory_slot, gfn_node[idx]);
+		if (gfn >= slot->base_gfn) {
+			if (gfn < slot->base_gfn + slot->npages)
+				return slot;
+			node = node->rb_right;
+		}
+		else
+			node = node->rb_left;
+	}
+
+	return approx ? slot : NULL;
+}
+
+struct kvm_memory_slot* kvm_vcpu_gfn_to_memslot(struct kvm_vcpu* vcpu, gfn_t gfn) {
+	struct kvm_memslots* slots = kvm_vcpu_memslots(vcpu);
+	u64 gen = slots->generation;
+	struct kvm_memory_slot* slot;
+
+	/*
+	* This also protects against using a memslot from a different address space,
+	* since different address spaces have different generation numbers.
+	*/
+	if (gen != vcpu->last_used_slot_gen) {
+		vcpu->last_used_slot = NULL;
+		vcpu->last_used_slot_gen = gen;
+	}
+
+	slot = try_get_memslot(vcpu->last_used_slot, gfn);
+	if (slot)
+		return slot;
+
+	/*
+	* Fall back to searching all memslots. We purposely use
+	* search_memslots() instead of __gfn_to_memslot() to avoid
+	* trashing the VM-wide last_used_slot in kvm_memslots.
+	*/
+	slot = search_memslots(slots, gfn, FALSE);
+	if (slot) {
+		vcpu->last_used_slot = slot;
+		return slot;
+	}
+
+	return NULL;
 }

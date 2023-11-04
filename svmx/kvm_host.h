@@ -2263,3 +2263,31 @@ static inline bool kvm_slot_dirty_track_enabled(const struct kvm_memory_slot* sl
 static inline bool is_noslot_pfn(kvm_pfn_t pfn) {
 	return pfn == KVM_PFN_NOSLOT;
 }
+
+struct kvm_memory_slot* kvm_vcpu_gfn_to_memslot(struct kvm_vcpu* vcpu, gfn_t gfn);
+
+#define HF_SMM_MASK		(1 << 1)
+#define HF_SMM_INSIDE_NMI_MASK	(1 << 2)
+
+#define kvm_arch_vcpu_memslots_id(vcpu) ((vcpu)->arch.hflags & HF_SMM_MASK ? 1 : 0)
+
+static inline struct kvm_memslots* kvm_vcpu_memslots(struct kvm_vcpu* vcpu) {
+	int as_id = kvm_arch_vcpu_memslots_id(vcpu);
+
+	return __kvm_memslots(vcpu->kvm, as_id);
+}
+
+static inline struct kvm_memory_slot*
+try_get_memslot(struct kvm_memory_slot* slot, gfn_t gfn) {
+	if (!slot)
+		return NULL;
+
+	if (gfn >= slot->base_gfn && gfn < slot->base_gfn + slot->npages)
+		return slot;
+	else
+		return NULL;
+}
+
+static inline bool kvm_memslots_empty(struct kvm_memslots* slots) {
+	return RB_EMPTY_ROOT(&slots->gfn_tree);
+}
