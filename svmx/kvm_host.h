@@ -57,6 +57,9 @@ static inline bool is_error_noslot_pfn(kvm_pfn_t pfn) {
 #define KVM_PMODE_VM_CR4_ALWAYS_ON (X86_CR4_PAE | X86_CR4_VMXE)
 #define KVM_RMODE_VM_CR4_ALWAYS_ON (X86_CR4_VME | X86_CR4_PAE | X86_CR4_VMXE)
 
+
+#define KVM_MEMSLOT_INVALID (1UL << 16)
+
 /* KVM Hugepage definitions for x86 */
 #define KVM_MAX_HUGEPAGE_LEVEL	PG_LEVEL_1G
 // 分页级数
@@ -689,7 +692,12 @@ struct kvm_mmu_page {
 	struct hlist_node hash_link;
 
 	bool tdp_mmu_page;
+	/*
+	* 如果为false,则可能出现了修改该页中的pte，
+	* 但没有更新tlb，而guest读取了tlb中的数据，导致不一致
+	*/
 	bool unsync;
+	// 该页的有效版本号
 	u8 mmu_valid_gen;
 
 	/*
@@ -703,9 +711,11 @@ struct kvm_mmu_page {
 	 * The following two entries are used to key the shadow page in the
 	 * hash table.
 	 */
+	// 该页的角色
 	union kvm_mmu_page_role role;
 	gfn_t gfn;// 虚拟机的物理页帧号
 
+	// 指向影子页表页地址
 	u64* spt;
 
 	/*
@@ -2087,6 +2097,7 @@ void kvm_inject_page_fault(struct kvm_vcpu* vcpu, struct x86_exception* fault);
 kvm_pfn_t __gfn_to_pfn_memslot(const struct kvm_memory_slot* slot, gfn_t gfn,
 	bool atomic, bool interruptible, bool* async,
 	bool write_fault, bool* writable, hva_t* hva);
+kvm_pfn_t gfn_to_pfn_memslot(const struct kvm_memory_slot* slot, gfn_t gfn);
 
 
 
@@ -2291,3 +2302,10 @@ try_get_memslot(struct kvm_memory_slot* slot, gfn_t gfn) {
 static inline bool kvm_memslots_empty(struct kvm_memslots* slots) {
 	return RB_EMPTY_ROOT(&slots->gfn_tree);
 }
+
+static inline bool kvm_is_visible_memslot(struct kvm_memory_slot* memslot) {
+	return (memslot && memslot->id < KVM_USER_MEM_SLOTS &&
+		!(memslot->flags& KVM_MEMSLOT_INVALID));
+}
+
+bool kvm_apicv_activated(struct kvm* kvm);

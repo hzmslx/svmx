@@ -308,3 +308,13 @@ bool make_spte(struct kvm_vcpu* vcpu, struct kvm_mmu_page* sp,
 static inline u64 spte_shadow_accessed_mask(u64 spte) {
 	return spte_ad_enabled(spte) ? shadow_accessed_mask : 0;
 }
+
+static inline u64 spte_shadow_dirty_mask(u64 spte) {
+	return spte_ad_enabled(spte) ? shadow_dirty_mask : 0;
+}
+
+static inline bool is_dirty_spte(u64 spte) {
+	u64 dirty_mask = spte_shadow_dirty_mask(spte);
+
+	return dirty_mask ? spte & dirty_mask : spte & PT_WRITABLE_MASK;
+}

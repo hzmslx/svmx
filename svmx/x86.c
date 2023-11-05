@@ -1218,3 +1218,7 @@ void kvm_arch_free_memslot(struct kvm* kvm, struct kvm_memory_slot* slot) {
 		slot->arch.lpage_info[i - 1] = NULL;
 	}
 }
+
+bool kvm_apicv_activated(struct kvm* kvm) {
+	return kvm->arch.apicv_inhibit_reasons == 0;
+}

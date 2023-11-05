@@ -157,3 +157,7 @@ static inline ULONG_PTR __kvm_mmu_slot_lpages(struct kvm_memory_slot* slot,
 	return gfn_to_index(slot->base_gfn + npages - 1,
 		slot->base_gfn, level) + 1;
 }
+
+static inline void kvm_update_page_stats(struct kvm* kvm, int level, int count) {
+	InterlockedAdd64(&kvm->stat.pages[level - 1], count);
+}

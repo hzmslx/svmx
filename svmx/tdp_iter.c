@@ -165,3 +165,31 @@ void tdp_iter_next(struct tdp_iter* iter)
 
 	iter->valid = FALSE;
 }
+
+/*
+ * Returns true if the SPTE has bits that may be set without holding mmu_lock.
+ * The caller is responsible for checking if the SPTE is shadow-present, and
+ * for determining whether or not the caller cares about non-leaf SPTEs.
+ */
+bool spte_has_volatile_bits(u64 spte)
+{
+	/*
+	 * Always atomically update spte if it can be updated
+	 * out of mmu-lock, it can ensure dirty bit is not lost,
+	 * also, it can help us to get a stable is_writable_pte()
+	 * to ensure tlb flush is not missed.
+	 */
+	if (!is_writable_pte(spte) && is_mmu_writable_spte(spte))
+		return TRUE;
+
+	if (is_access_track_spte(spte))
+		return TRUE;
+
+	if (spte_ad_enabled(spte)) {
+		if (!(spte & shadow_accessed_mask) ||
+			(is_writable_pte(spte) && !(spte & shadow_dirty_mask)))
+			return TRUE;
+	}
+
+	return FALSE;
+}

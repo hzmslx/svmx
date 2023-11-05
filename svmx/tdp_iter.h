@@ -64,3 +64,31 @@ void tdp_iter_restart(struct tdp_iter* iter);
 
 #define for_each_tdp_pte(iter, root, start, end) \
 	for_each_tdp_pte_min_level(iter, root, PG_LEVEL_4K, start, end)
+
+tdp_ptep_t spte_to_child_pt(u64 pte, int level);
+
+static inline u64 kvm_tdp_mmu_write_spte_atomic(tdp_ptep_t sptep, u64 new_spte) {
+	return InterlockedExchange64((LONG64 volatile*)sptep, new_spte);
+}
+
+bool spte_has_volatile_bits(u64 spte);
+
+static inline bool kvm_tdp_mmu_spte_need_atomic_write(u64 old_spte, int level)
+{
+	return is_shadow_present_pte(old_spte) &&
+		is_last_spte(old_spte, level) &&
+		spte_has_volatile_bits(old_spte);
+}
+
+static inline void __kvm_tdp_mmu_write_spte(tdp_ptep_t sptep, u64 new_spte) {
+	*sptep = new_spte;
+}
+
+static inline u64 kvm_tdp_mmu_write_spte(tdp_ptep_t sptep, u64 old_spte,
+	u64 new_spte, int level) {
+	if (kvm_tdp_mmu_spte_need_atomic_write(old_spte, level))
+		return kvm_tdp_mmu_write_spte_atomic(sptep, new_spte);
+
+	__kvm_tdp_mmu_write_spte(sptep, new_spte);
+	return old_spte;
+}

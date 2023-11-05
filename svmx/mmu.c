@@ -9,6 +9,7 @@
 #include "kvm_host.h"
 #include "smm.h"
 #include "tdp_mmu.h"
+#include "vmx.h"
 
 
 
@@ -645,6 +646,7 @@ static void kvm_mmu_free_shadow_page(struct kvm_mmu_page* sp) {
 	ExFreePool(sp->spt);
 	if (!sp->role.direct)
 		ExFreePool(sp->shadowed_translation);
+	ExFreePool(sp);
 }
 
 static void kvm_mmu_commit_zap_page(struct kvm* kvm,
@@ -1267,6 +1269,29 @@ static unsigned kvm_page_table_hashfn(gfn_t gfn) {
 	return 0;
 }
 
+static struct kvm_mmu_page* kvm_mmu_alloc_shadow_page(struct kvm* kvm,
+	struct shadow_page_caches* caches,
+	gfn_t gfn,
+	struct hlist_head* sp_list,
+	union kvm_mmu_page_role role) {
+	struct kvm_mmu_page* sp;
+
+	sp = kvm_mmu_memory_cache_alloc(caches->page_header_cache);
+	sp->spt = kvm_mmu_memory_cache_alloc(caches->shadow_page_cache);
+	if (!role.direct)
+		sp->shadowed_translation = kvm_mmu_memory_cache_alloc(caches->shadowed_info_cache);
+	
+	InitializeListHead(&sp->possible_nx_huge_page_link);
+
+	sp->mmu_valid_gen = kvm->arch.mmu_valid_gen;
+
+	sp->gfn = gfn;
+	sp->role = role;
+	hlist_add_head(&sp->hash_link, sp_list);
+
+	return sp;
+}
+
 /* Note, @vcpu may be NULL if @role.direct is true; see kvm_mmu_find_shadow_page. */
 static struct kvm_mmu_page* __kvm_mmu_get_shadow_page(struct kvm* kvm,
 	struct kvm_vcpu* vcpu,
@@ -1567,6 +1592,83 @@ static int fast_page_fault(struct kvm_vcpu* vcpu,
 	return RET_PF_INVALID;
 }
 
+static int __kvm_faultin_pfn(struct kvm_vcpu* vcpu, struct kvm_page_fault* fault) {
+	struct kvm_memory_slot* slot = fault->slot;
+	bool async;
+
+	/*
+	* Retry the page fault if the gfn hit a memslot that is being deleted
+	* or moved. This ensures any existing SPTEs for the old memslot will
+	* be zapped before KVM inserts a new MMIO SPTE for the gfn.
+	*/
+	if (slot && (slot->flags & KVM_MEMSLOT_INVALID))
+		return RET_PF_RETRY;
+
+	if (!kvm_is_visible_memslot(slot)) {
+		/* Don't expose private memslots to L2. */
+		if (is_guest_mode(vcpu)) {
+			fault->slot = NULL;
+			fault->pfn = KVM_PFN_NOSLOT;
+			fault->map_writable = FALSE;
+			return RET_PF_CONTINUE;
+		}
+		if (slot && slot->id == APIC_ACCESS_PAGE_PRIVATE_MEMSLOT &&
+			!kvm_apicv_activated(vcpu->kvm))
+			return RET_PF_EMULATE;
+	}
+
+	async = FALSE;
+	// GPAµΩHPAµƒ◊™ªª
+	fault->pfn = __gfn_to_pfn_memslot(slot, fault->gfn, FALSE, FALSE, &async,
+		fault->write, &fault->map_writable,
+		&fault->hva);
+
+	if (!async)
+		return RET_PF_CONTINUE; /* *pfn has correct page already. */
+
+
+	fault->pfn = __gfn_to_pfn_memslot(slot, fault->gfn, FALSE, TRUE, NULL,
+		fault->write, &fault->map_writable,
+		&fault->hva);
+
+	return RET_PF_CONTINUE;
+}
+
+static int kvm_handle_error_pfn(struct kvm_vcpu* vcpu, struct kvm_page_fault* fault) {
+	UNREFERENCED_PARAMETER(vcpu);
+	UNREFERENCED_PARAMETER(fault);
+
+	return RET_PF_RETRY;
+}
+
+static int kvm_handle_noslot_fault(struct kvm_vcpu* vcpu,
+	struct kvm_page_fault* fault,
+	unsigned int access) {
+	UNREFERENCED_PARAMETER(vcpu);
+	UNREFERENCED_PARAMETER(access);
+
+	if (fault->gfn > kvm_mmu_max_gfn())
+		return RET_PF_EMULATE;
+
+	return RET_PF_CONTINUE;
+}
+
+static int kvm_faultin_pfn(struct kvm_vcpu* vcpu, struct kvm_page_fault* fault, unsigned int access) {
+	int ret;
+
+	ret = __kvm_faultin_pfn(vcpu, fault);
+	if (ret != RET_PF_CONTINUE)
+		return ret;
+
+	if (is_error_pfn(fault->pfn))
+		return kvm_handle_error_pfn(vcpu, fault);
+
+	if (!fault->slot)
+		return kvm_handle_noslot_fault(vcpu, fault, access);
+
+	return RET_PF_CONTINUE;
+}
+
 static int direct_page_fault(struct kvm_vcpu* vcpu, 
 	struct kvm_page_fault* fault) {
 	int r;
@@ -1578,6 +1680,10 @@ static int direct_page_fault(struct kvm_vcpu* vcpu,
 	// ∑÷≈‰ª∫¥Ê≥ÿ
 	r = mmu_topup_memory_caches(vcpu, FALSE);
 	if (r)
+		return r;
+
+	r = kvm_faultin_pfn(vcpu, fault, ACC_ALL);
+	if (r != RET_PF_CONTINUE)
 		return r;
 
 	r = RET_PF_RETRY;
@@ -1641,6 +1747,21 @@ static bool is_page_fault_stale(struct kvm_vcpu* vcpu,
 		mmu_invalidate_retry_hva(vcpu->kvm, fault->mmu_seq, fault->hva);
 }
 
+/*
+* This value is the sum of all of the kvm instances's
+* kvm->arch.n_used_mmu_pages values. We need a global,
+* aggregate version in order to make the slab shrinker
+* faster
+*/
+static inline void kvm_mod_used_mmu_pages(struct kvm* kvm, long nr) {
+	kvm->arch.n_used_mmu_pages += nr;
+}
+
+static void kvm_account_mmu_page(struct kvm* kvm, struct kvm_mmu_page* sp) {
+	UNREFERENCED_PARAMETER(sp);
+	kvm_mod_used_mmu_pages(kvm, +1);
+}
+
 #ifdef AMD64
 static int kvm_tdp_mmu_page_fault(struct kvm_vcpu* vcpu,
 	struct kvm_page_fault* fault) {
@@ -1657,6 +1778,10 @@ static int kvm_tdp_mmu_page_fault(struct kvm_vcpu* vcpu,
 	// ∑÷≈‰ª∫¥Ê≥ÿ
 	r = mmu_topup_memory_caches(vcpu, FALSE);
 	if (r)
+		return r;
+
+	r = kvm_faultin_pfn(vcpu, fault, ACC_ALL);
+	if (r != RET_PF_CONTINUE)
 		return r;
 
 	r = RET_PF_RETRY;
@@ -2140,3 +2265,8 @@ int kvm_mmu_max_mapping_level(struct kvm* kvm,
 	host_level = host_pfn_mapping_level(kvm, gfn, slot);
 	return min(host_level, max_level);
 }
+
+
+
+
+

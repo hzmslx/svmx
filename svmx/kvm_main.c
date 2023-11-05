@@ -400,19 +400,89 @@ long kvm_vcpu_ioctl(unsigned int ioctl, PIRP Irp) {
 	return status;
 }
 
+static bool memslot_is_readonly(const struct kvm_memory_slot* slot) {
+	return slot->flags & KVM_MEM_READONLY;
+}
+
 kvm_pfn_t __gfn_to_pfn_memslot(const struct kvm_memory_slot* slot, gfn_t gfn,
 	bool atomic, bool interruptible, bool* async,
 	bool write_fault, bool* writable, hva_t* hva) {
-	UNREFERENCED_PARAMETER(slot);
-	UNREFERENCED_PARAMETER(gfn);
 	UNREFERENCED_PARAMETER(atomic);
 	UNREFERENCED_PARAMETER(interruptible);
 	UNREFERENCED_PARAMETER(async);
 	UNREFERENCED_PARAMETER(write_fault);
 	UNREFERENCED_PARAMETER(writable);
 	UNREFERENCED_PARAMETER(hva);
+	
 
-	return 0;
+	/* Do not map writable pfn in the readonly memslot. */
+	if (writable && memslot_is_readonly(slot)) {
+		*writable = FALSE;
+		writable = NULL;
+	}
+	// 虚拟页帧号就是主机物理页帧号
+	return gfn;
+}
+
+static inline struct kvm_memory_slot*
+search_memslots(struct kvm_memslots* slots, gfn_t gfn, bool approx) {
+	struct kvm_memory_slot* slot;
+	struct rb_node* node;
+	int idx = slots->node_idx;
+
+	slot = NULL;
+	for (node = slots->gfn_tree.rb_node; node;) {
+		slot = CONTAINING_RECORD(node, struct kvm_memory_slot, gfn_node[idx]);
+		if (gfn >= slot->base_gfn) {
+			if (gfn < slot->base_gfn + slot->npages)
+				return slot;
+			node = node->rb_right;
+		}
+		else
+			node = node->rb_left;
+	}
+
+	return approx ? slot : NULL;
+}
+
+static inline struct kvm_memory_slot*
+____gfn_to_memslot(struct kvm_memslots* slots, gfn_t gfn, bool approx)
+{
+	struct kvm_memory_slot* slot;
+
+	slot = (struct kvm_memory_slot*)&slots->last_used_slot;
+	slot = try_get_memslot(slot, gfn);
+	if (slot)
+		return slot;
+
+	slot = search_memslots(slots, gfn, approx);
+	if (slot) {
+		InterlockedExchangePointer(&slots->last_used_slot, slot);
+		return slot;
+	}
+
+	return NULL;
+}
+
+/*
+ * __gfn_to_memslot() and its descendants are here to allow arch code to inline
+ * the lookups in hot paths.  gfn_to_memslot() itself isn't here as an inline
+ * because that would bloat other code too much.
+ */
+static inline struct kvm_memory_slot*
+__gfn_to_memslot(struct kvm_memslots* slots, gfn_t gfn)
+{
+	return ____gfn_to_memslot(slots, gfn, FALSE);
+}
+
+struct kvm_memory_slot* gfn_to_memslot(struct kvm* kvm, gfn_t gfn) {
+	return __gfn_to_memslot(kvm_memslots(kvm), gfn);
+}
+
+kvm_pfn_t gfn_to_pfn_prot(struct kvm* kvm, gfn_t gfn, bool write_fault,
+	bool* writable) {
+	return __gfn_to_pfn_memslot(gfn_to_memslot(kvm, gfn), gfn, FALSE, FALSE,
+		NULL, write_fault, writable, NULL);
 }
 
 static int kvm_vm_ioctl_set_memory_region(struct kvm* kvm,
@@ -1161,7 +1231,7 @@ int __kvm_mmu_topup_memory_cache(struct kvm_mmu_memory_cache* mc, int capacity, 
 
 void* kvm_mmu_memory_cache_alloc(struct kvm_mmu_memory_cache* mc) {
 	void* p;
-
+	
 	if (!mc->nobjs)
 		p = mmu_memory_cache_alloc_obj(mc);
 	else
@@ -1197,26 +1267,7 @@ kvm_pfn_t hva_to_pfn(ULONG_PTR addr, bool atomic, bool interruptible,
 	return pfn;
 }
 
-static inline struct kvm_memory_slot*
-search_memslots(struct kvm_memslots* slots, gfn_t gfn, bool approx) {
-	struct kvm_memory_slot* slot;
-	struct rb_node* node;
-	int idx = slots->node_idx;
 
-	slot = NULL;
-	for (node = slots->gfn_tree.rb_node; node;) {
-		slot = CONTAINING_RECORD(node, struct kvm_memory_slot, gfn_node[idx]);
-		if (gfn >= slot->base_gfn) {
-			if (gfn < slot->base_gfn + slot->npages)
-				return slot;
-			node = node->rb_right;
-		}
-		else
-			node = node->rb_left;
-	}
-
-	return approx ? slot : NULL;
-}
 
 struct kvm_memory_slot* kvm_vcpu_gfn_to_memslot(struct kvm_vcpu* vcpu, gfn_t gfn) {
 	struct kvm_memslots* slots = kvm_vcpu_memslots(vcpu);
@@ -1248,4 +1299,9 @@ struct kvm_memory_slot* kvm_vcpu_gfn_to_memslot(struct kvm_vcpu* vcpu, gfn_t gfn
 	}
 
 	return NULL;
+}
+
+kvm_pfn_t gfn_to_pfn_memslot(const struct kvm_memory_slot* slot, gfn_t gfn) {
+	return __gfn_to_pfn_memslot(slot, gfn, FALSE, FALSE, NULL, TRUE,
+		NULL, NULL);
 }

@@ -81,8 +81,8 @@ hpa_t kvm_tdp_mmu_get_vcpu_root_hpa(struct kvm_vcpu* vcpu) {
 	
 
 out:
-	// root->spt指向影子页表页的地址
-	physical = MmGetPhysicalAddress(root->spt);
+	
+	physical = MmGetPhysicalAddress(root);
 	return physical.QuadPart;
 }
 
@@ -163,6 +163,110 @@ static void tdp_mmu_init_child_sp(struct kvm_mmu_page* child_sp,
 	tdp_mmu_init_sp(child_sp, iter->sptep, iter->gfn, role);
 }
 
+static void handle_removed_pt(struct kvm* kvm, tdp_ptep_t pt, bool shared);
+
+static void handle_changed_spte(struct kvm* kvm, int as_id, gfn_t gfn,
+	u64 old_spte, u64 new_spte, int level,
+	bool shared) {
+	UNREFERENCED_PARAMETER(gfn);
+	UNREFERENCED_PARAMETER(as_id);
+
+	bool was_present = is_shadow_present_pte(old_spte);
+	bool is_present = is_shadow_present_pte(new_spte);
+	bool was_leaf = was_present && is_last_spte(old_spte, level);
+	bool is_leaf = is_present && is_last_spte(new_spte, level);
+	bool pfn_changed = spte_to_pfn(old_spte) != spte_to_pfn(new_spte);
+
+	if (was_leaf && is_leaf && pfn_changed) {
+		/*
+		* Crash the host to prevent error propagation and guest data
+		* corruption.
+		*/
+		KeBugCheckEx(DRIVER_VIOLATION, 0, 0, 0, 0);
+	}
+
+	if (old_spte == new_spte)
+		return;
+
+	if (!was_present && !is_present) {
+		return;
+	}
+
+	if (is_leaf != was_leaf)
+		kvm_update_page_stats(kvm, level, is_leaf ? 1 : -1);
+
+	if (was_leaf && is_dirty_spte(old_spte) &&
+		(!is_present || !is_dirty_spte(new_spte) || pfn_changed)) {
+		
+	}
+
+	if(was_present && !was_leaf &&
+		(is_leaf || !is_present || pfn_changed))
+		handle_removed_pt(kvm, spte_to_child_pt(old_spte, level), shared);
+
+
+}
+
+static void handle_removed_pt(struct kvm* kvm, tdp_ptep_t pt, bool shared) {
+	struct kvm_mmu_page* sp = sptep_to_sp(pt);
+	int level = sp->role.level;
+	gfn_t base_gfn = sp->gfn;
+	int i;
+	
+	for (i = 0; i < SPTE_ENT_PER_PAGE; i++) {
+		tdp_ptep_t sptep = pt + i;
+		gfn_t gfn = base_gfn + i * KVM_PAGES_PER_HPAGE(level);
+		u64 old_spte;
+
+		if (shared) {
+			for (;;) {
+				old_spte = kvm_tdp_mmu_write_spte_atomic(sptep, REMOVED_SPTE);
+				if (!is_removed_spte(old_spte))
+					break;
+			}
+		}
+		else {
+			old_spte = kvm_tdp_mmu_read_spte(sptep);
+		}
+		handle_changed_spte(kvm, kvm_mmu_page_as_id(sp), gfn,
+			old_spte, REMOVED_SPTE, level, shared);
+	}
+}
+
+
+
+static inline int tdp_mmu_set_spte_atomic(struct kvm* kvm,
+	struct tdp_iter* iter, u64 new_spte) {
+	u64* sptep = iter->sptep;
+
+	InterlockedCompareExchange64((LONG64 volatile*)sptep, iter->old_spte, new_spte);
+
+	handle_changed_spte(kvm, iter->as_id, iter->gfn, iter->old_spte,
+		new_spte, iter->level, TRUE);
+
+	return 0;
+}
+
+static u64 tdp_mmu_set_spte(struct kvm* kvm, int as_id, tdp_ptep_t sptep,
+	u64 old_spte, u64 new_spte, gfn_t gfn, int level) {
+	old_spte = kvm_tdp_mmu_write_spte(sptep, old_spte, new_spte, level);
+
+	handle_changed_spte(kvm, as_id, gfn, old_spte, new_spte, level, FALSE);
+	return old_spte;
+}
+
+static inline void tdp_mmu_iter_set_spte(struct kvm* kvm, struct tdp_iter* iter,
+	u64 new_spte) {
+	iter->old_spte = tdp_mmu_set_spte(kvm, iter->as_id, iter->sptep,
+		iter->old_spte, new_spte,
+		iter->gfn, iter->level);
+}
+
+static void tdp_account_mmu_page(struct kvm* kvm, struct kvm_mmu_page* sp) {
+	UNREFERENCED_PARAMETER(sp);
+	InterlockedIncrement64(&kvm->arch.tdp_mmu_pages);
+}
+
 /*
  * tdp_mmu_link_sp - Replace the given spte with an spte pointing to the
  * provided page table.
@@ -177,11 +281,17 @@ static void tdp_mmu_init_child_sp(struct kvm_mmu_page* child_sp,
  */
 static int tdp_mmu_link_sp(struct kvm* kvm, struct tdp_iter* iter,
 	struct kvm_mmu_page* sp, bool shared) {
-	UNREFERENCED_PARAMETER(kvm);
-	UNREFERENCED_PARAMETER(iter);
-	UNREFERENCED_PARAMETER(sp);
-	UNREFERENCED_PARAMETER(shared);
+	u64 spte = make_nonleaf_spte(sp->spt, !kvm_ad_enabled());
+	int ret = 0;
 
+	if (shared) {
+		ret = tdp_mmu_set_spte_atomic(kvm, iter, spte);
+	}
+	else {
+		tdp_mmu_iter_set_spte(kvm, iter, spte);
+	}
+
+	tdp_account_mmu_page(kvm, sp);
 
 	return 0;
 }
@@ -216,8 +326,10 @@ int kvm_tdp_mmu_map(struct kvm_vcpu* vcpu, struct kvm_page_fault* fault) {
 	struct kvm_mmu_page* sp;
 	int ret = RET_PF_RETRY;
 
+	// 得到请求地址所使用的level
 	kvm_mmu_hugepage_adjust(vcpu, fault);
 
+	// 遍历所有页表中addr对应的页表项spte
 	tdp_mmu_for_each_pte(iter, mmu, fault->gfn, fault->gfn + 1) {
 		int r;
 
@@ -231,6 +343,10 @@ int kvm_tdp_mmu_map(struct kvm_vcpu* vcpu, struct kvm_page_fault* fault) {
 		if (is_removed_spte(iter.old_spte))
 			goto retry;
 		
+		/*
+		* entry 的 level 和请求的 level 相等, 说明该 entry 引起的 violation
+		* 即该 entry 对应的下级页或者页表不在内存中, 或者直接为 NULL.
+		*/ 
 		if (iter.level == fault->goal_level)
 			goto map_target_level;
 
@@ -251,6 +367,7 @@ int kvm_tdp_mmu_map(struct kvm_vcpu* vcpu, struct kvm_page_fault* fault) {
 		if (is_shadow_present_pte(iter.old_spte))
 			r = tdp_mmu_split_huge_page(kvm, &iter, sp, TRUE);
 		else
+			// 将新分配出来的下一级影子页表页的地址填写该 entry 对应的 SPTE(it.sptep)中
 			r = tdp_mmu_link_sp(kvm, &iter, sp, TRUE);
 
 		/*
