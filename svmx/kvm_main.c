@@ -1305,3 +1305,8 @@ kvm_pfn_t gfn_to_pfn_memslot(const struct kvm_memory_slot* slot, gfn_t gfn) {
 	return __gfn_to_pfn_memslot(slot, gfn, FALSE, FALSE, NULL, TRUE,
 		NULL, NULL);
 }
+
+void kvm_set_pfn_accessed(kvm_pfn_t pfn) {
+	if (is_error_noslot_pfn(pfn))
+		return;
+}

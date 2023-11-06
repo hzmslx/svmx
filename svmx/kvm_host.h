@@ -2309,3 +2309,5 @@ static inline bool kvm_is_visible_memslot(struct kvm_memory_slot* memslot) {
 }
 
 bool kvm_apicv_activated(struct kvm* kvm);
+
+void kvm_set_pfn_accessed(kvm_pfn_t pfn);

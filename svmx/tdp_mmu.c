@@ -21,6 +21,7 @@ static struct kvm_mmu_page* tdp_mmu_alloc_sp(struct kvm_vcpu* vcpu) {
 	struct kvm_mmu_page* sp;
 
 	sp = kvm_mmu_memory_cache_alloc(&vcpu->arch.mmu_page_header_cache);
+	// 页帧
 	sp->spt = kvm_mmu_memory_cache_alloc(&vcpu->arch.mmu_shadow_page_cache);
 
 	return sp;
@@ -187,6 +188,8 @@ static void handle_changed_spte(struct kvm* kvm, int as_id, gfn_t gfn,
 
 	if (old_spte == new_spte)
 		return;
+	
+
 
 	if (!was_present && !is_present) {
 		return;
@@ -204,7 +207,9 @@ static void handle_changed_spte(struct kvm* kvm, int as_id, gfn_t gfn,
 		(is_leaf || !is_present || pfn_changed))
 		handle_removed_pt(kvm, spte_to_child_pt(old_spte, level), shared);
 
-
+	if (was_leaf && is_accessed_spte(old_spte) &&
+		(!is_present || !is_accessed_spte(new_spte) || pfn_changed))
+		kvm_set_pfn_accessed(spte_to_pfn(old_spte));
 }
 
 static void handle_removed_pt(struct kvm* kvm, tdp_ptep_t pt, bool shared) {
@@ -233,14 +238,22 @@ static void handle_removed_pt(struct kvm* kvm, tdp_ptep_t pt, bool shared) {
 	}
 }
 
-
-
+/*
+* tdp_mmu_set_spte_atomic - Set a TDP MMU SPTE and
+* handle the associated bookkeeping.
+* 
+* @kvm: kvm instance
+* @iter: a tdp_iter instance currently on the SPTE that should be set
+* @new_spte: The value the SPTE should be set to
+* Return:
+* * 0	- If the SPTE was set.
+*/
 static inline int tdp_mmu_set_spte_atomic(struct kvm* kvm,
 	struct tdp_iter* iter, u64 new_spte) {
 	u64* sptep = iter->sptep;
 
-	InterlockedCompareExchange64((LONG64 volatile*)sptep, iter->old_spte, new_spte);
-
+	InterlockedCompareExchange64((LONG64 volatile*)sptep, new_spte, iter->old_spte);
+	
 	handle_changed_spte(kvm, iter->as_id, iter->gfn, iter->old_spte,
 		new_spte, iter->level, TRUE);
 
@@ -359,6 +372,7 @@ int kvm_tdp_mmu_map(struct kvm_vcpu* vcpu, struct kvm_page_fault* fault) {
 		* The SPTE is either non-present or points to a huge page that
 		* needs to be split.
 		*/
+		// 分配一个新的页表
 		sp = tdp_mmu_alloc_sp(vcpu);
 		tdp_mmu_init_child_sp(sp, &iter);
 
@@ -396,6 +410,9 @@ int kvm_tdp_mmu_map(struct kvm_vcpu* vcpu, struct kvm_page_fault* fault) {
 	goto retry;
 
 map_target_level:
+	/*
+	* 填入EPT页表项
+	*/
 	ret = tdp_mmu_map_handle_target_level(vcpu, fault, &iter);
 
 retry:

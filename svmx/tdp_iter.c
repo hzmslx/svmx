@@ -7,6 +7,7 @@
 * reread the SPTE.
 */
 static void tdp_iter_refresh_sptep(struct tdp_iter* iter) {
+	// 获取Guest OS 物理地址在EPT页表对应级别的页表项地址
 	iter->sptep = iter->pt_path[iter->level - 1] +
 		SPTE_INDEX(iter->gfn << PAGE_SHIFT, iter->level);
 	iter->old_spte = kvm_tdp_mmu_read_spte(iter->sptep);
