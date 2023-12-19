@@ -2,6 +2,8 @@
 #include "pgtable_types.h"
 #include "mmu_internal.h"
 
+extern HASH_TABLE g_Table;
+
 #define ACC_EXEC_MASK    1
 #define ACC_WRITE_MASK   PT_WRITABLE_MASK
 #define ACC_USER_MASK    PT_USER_MASK
@@ -244,8 +246,20 @@ static inline bool is_removed_spte(u64 spte) {
 }
 
 static inline struct kvm_mmu_page* sptep_to_sp(u64* sptep) {
-	PHYSICAL_ADDRESS physical = MmGetPhysicalAddress(sptep);
-	return to_shadow_page(physical.QuadPart);
+	PSINGLE_LIST_ENTRY pBucket = NULL;
+	while (TRUE) {
+		UINT64 value = (UINT64)sptep;
+		UINT64 hash = HashUlongPtr(value);
+		pBucket = HashTableFindNext(&g_Table, hash, pBucket);
+		if (!pBucket) {
+			break;
+		}
+		struct spt_info* info = CONTAINING_RECORD(pBucket, struct spt_info, bucket);
+		struct kvm_mmu_page* sp = (struct kvm_mmu_page*)info->sp;
+		return sp;
+	}
+
+	return NULL;
 }
 
 static inline bool is_executable_pte(u64 spte)

@@ -11,7 +11,7 @@
 #include "tdp_mmu.h"
 #include "vmx.h"
 
-
+HASH_TABLE g_Table;
 
 int nx_huge_pages = -1;
 
@@ -1276,11 +1276,24 @@ static struct kvm_mmu_page* kvm_mmu_alloc_shadow_page(struct kvm* kvm,
 	union kvm_mmu_page_role role) {
 	struct kvm_mmu_page* sp;
 
+	struct spt_info* info = ExAllocatePoolWithTag(NonPagedPool, sizeof(struct spt_info), DRIVER_TAG);
+	if (!info) {
+		return NULL;
+	}
+	RtlZeroMemory(info, sizeof(info));
+
 	sp = kvm_mmu_memory_cache_alloc(caches->page_header_cache);
+	
 	sp->spt = kvm_mmu_memory_cache_alloc(caches->shadow_page_cache);
 	if (!role.direct)
 		sp->shadowed_translation = kvm_mmu_memory_cache_alloc(caches->shadowed_info_cache);
-	
+
+	info->sp = (u64)sp;
+	UINT64 hash = HashUlongPtr((u64)sp->spt);
+	info->bucket.HashValue = hash;
+
+	HashTableInsert(&g_Table, &info->bucket);
+
 	InitializeListHead(&sp->possible_nx_huge_page_link);
 
 	sp->mmu_valid_gen = kvm->arch.mmu_valid_gen;
@@ -1290,6 +1303,29 @@ static struct kvm_mmu_page* kvm_mmu_alloc_shadow_page(struct kvm* kvm,
 	hlist_add_head(&sp->hash_link, sp_list);
 
 	return sp;
+}
+
+
+/*
+ * The vCPU is required when finding indirect shadow pages; the shadow
+ * page may already exist and syncing it needs the vCPU pointer in
+ * order to read guest page tables.  Direct shadow pages are never
+ * unsync, thus @vcpu can be NULL if @role.direct is true.
+ */
+static struct kvm_mmu_page* kvm_mmu_find_shadow_page(struct kvm* kvm,
+	struct kvm_vcpu* vcpu,
+	gfn_t gfn,
+	struct hlist_head* sp_list,
+	union kvm_mmu_page_role role) {
+	UNREFERENCED_PARAMETER(kvm);
+	UNREFERENCED_PARAMETER(vcpu);
+	UNREFERENCED_PARAMETER(gfn);
+	UNREFERENCED_PARAMETER(sp_list);
+	UNREFERENCED_PARAMETER(role);
+
+	
+
+	return NULL;
 }
 
 /* Note, @vcpu may be NULL if @role.direct is true; see kvm_mmu_find_shadow_page. */
@@ -1304,9 +1340,9 @@ static struct kvm_mmu_page* __kvm_mmu_get_shadow_page(struct kvm* kvm,
 	UNREFERENCED_PARAMETER(caches);
 	UNREFERENCED_PARAMETER(gfn);
 	UNREFERENCED_PARAMETER(role);
-	//struct hlist_head* sp_list;
+	struct hlist_head* sp_list;
 	struct kvm_mmu_page* sp = NULL;
-	/*bool created = FALSE;
+	bool created = FALSE;
 
 	sp_list = &kvm->arch.mmu_page_hash[kvm_page_table_hashfn(gfn)];
 
@@ -1314,7 +1350,7 @@ static struct kvm_mmu_page* __kvm_mmu_get_shadow_page(struct kvm* kvm,
 	if (!sp) {
 		created = TRUE;
 		sp = kvm_mmu_alloc_shadow_page(kvm, caches, gfn, sp_list, role);
-	}*/
+	}
 
 	
 	return sp;
@@ -1886,6 +1922,16 @@ static void free_mmu_pages(struct kvm_mmu* mmu) {
 int kvm_mmu_create(struct kvm_vcpu* vcpu) {
 	int ret;
 
+	HashTableInitialize(&g_Table, 0, 0, NULL);
+
+	int allocCount = 512;
+	PHASH_BUCKET pBuckets = (PHASH_BUCKET)ExAllocatePoolWithTag(PagedPool,
+		allocCount * sizeof(PSINGLE_LIST_ENTRY), DRIVER_TAG);
+	if (!pBuckets)
+		return STATUS_INSUFFICIENT_RESOURCES;
+
+	HashTableChangeTable(&g_Table, allocCount, (PSINGLE_LIST_ENTRY)pBuckets);
+
 	vcpu->arch.mmu_pte_list_desc_cache.kmem_cache = pte_list_desc_cache;
 	
 	vcpu->arch.mmu_page_header_cache.kmem_cache = mmu_page_header_cache;
@@ -2081,6 +2127,10 @@ void kvm_mmu_pre_destroy_vm(struct kvm* kvm) {
 void kvm_mmu_destroy(struct kvm_vcpu* vcpu) {
 	kvm_mmu_unload(vcpu);
 
+	PSINGLE_LIST_ENTRY p = HashTableCleanup(&g_Table);
+	if (p) {
+		ExFreePool(p);
+	}
 }
 
 void kvm_mmu_unload(struct kvm_vcpu* vcpu) {

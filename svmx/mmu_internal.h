@@ -1,6 +1,7 @@
 #pragma once
 #include "kvm_host.h"
 #include "mmu.h"
+#include "mphashtable.h"
 
 
 
@@ -139,3 +140,8 @@ int kvm_mmu_max_mapping_level(struct kvm* kvm,
 static inline bool kvm_mmu_page_ad_need_write_protect(struct kvm_mmu_page* sp) {
 	return kvm_x86_ops.cpu_dirty_log_size && sp->role.guest_mode;
 }
+
+struct spt_info {
+	u64 sp;
+	HASH_BUCKET bucket;
+};

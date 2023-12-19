@@ -182,6 +182,7 @@
     <ClCompile Include="lapic.c" />
     <ClCompile Include="Logging.c" />
     <ClCompile Include="mmu.c" />
+    <ClCompile Include="mphashtable.c" />
     <ClCompile Include="mtrr.c" />
     <ClCompile Include="nested.c" />
     <ClCompile Include="page_track.c" />
@@ -226,6 +227,7 @@
     <ClInclude Include="Logging.h" />
     <ClInclude Include="mmu.h" />
     <ClInclude Include="mmu_internal.h" />
+    <ClInclude Include="mphashtable.h" />
     <ClInclude Include="msr-index.h" />
     <ClInclude Include="msr.h" />
     <ClInclude Include="mtrr.h" />

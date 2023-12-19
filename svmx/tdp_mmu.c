@@ -326,6 +326,7 @@ static int tdp_mmu_split_huge_page(struct kvm* kvm, struct tdp_iter* iter,
 
 static void tdp_mmu_free_sp(struct kvm_mmu_page* sp) {
 	ExFreePool(sp->spt);
+	ExFreePool(sp);
 }
 
 /*

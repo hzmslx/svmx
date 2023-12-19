@@ -683,6 +683,7 @@ struct kvm_rmap_head {
 	ULONG_PTR val;
 };
 
+
 struct kvm_mmu_page {
 	/*
 	 * Note, "link" through "spt" fit in a single 64 byte cache line on
@@ -715,7 +716,6 @@ struct kvm_mmu_page {
 	union kvm_mmu_page_role role;
 	gfn_t gfn;// 虚拟机的物理页帧号
 
-	// 指向影子页表页地址
 	u64* spt;
 
 	/*
